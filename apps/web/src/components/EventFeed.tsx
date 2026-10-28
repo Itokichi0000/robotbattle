@@ -2,7 +2,7 @@
 import { useMemo } from 'react';
 import type { GameEvent } from '@sats-wars/shared';
 import { useI18n } from '@/lib/i18n';
-import { eventMessage } from '@/lib/messages';
+import { eventMessage } from '@sats-wars/shared';
 import { teamColor } from './TeamBits';
 
 export function EventFeed({

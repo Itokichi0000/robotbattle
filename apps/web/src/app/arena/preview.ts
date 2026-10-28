@@ -45,7 +45,11 @@ export function previewClash(
 export const PREVIEW_HELP =
   'PREVIEW: 1 激突 / 2 雷神必殺 / 3 風神必殺 / 4 同時必殺 / 5 KO→勝利 / 6 登場 / 7 占領 / 0 リセット / [ ] 速度';
 
-export function handlePreviewKey(key: string, director: ArenaDirector, counter: { n: number }): boolean {
+export function handlePreviewKey(
+  key: string,
+  director: ArenaDirector,
+  counter: { n: number },
+): boolean {
   const hp = director.displayHp;
   const i = counter.n++ % 6;
   switch (key) {
@@ -59,10 +63,16 @@ export function handlePreviewKey(key: string, director: ArenaDirector, counter: 
       director.play({ kind: 'clash', clash: previewClash(i, { hp, special: ['FUJIN'] }) });
       return true;
     case '4':
-      director.play({ kind: 'clash', clash: previewClash(i, { hp, special: ['RAIJIN', 'FUJIN'] }) });
+      director.play({
+        kind: 'clash',
+        clash: previewClash(i, { hp, special: ['RAIJIN', 'FUJIN'] }),
+      });
       return true;
     case '5':
-      director.play({ kind: 'clash', clash: previewClash(5, { hp, special: ['RAIJIN'], ko: ['FUJIN'] }) });
+      director.play({
+        kind: 'clash',
+        clash: previewClash(5, { hp, special: ['RAIJIN'], ko: ['FUJIN'] }),
+      });
       director.play({ kind: 'result', winner: 'RAIJIN' });
       return true;
     case '6':

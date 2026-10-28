@@ -82,6 +82,52 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
+  apps/solo:
+    dependencies:
+      '@react-three/drei':
+        specifier: ~10.7.6
+        version: 10.7.9(@react-three/fiber@9.4.2(@types/react@19.2.18)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(three@0.181.2))(@types/react@19.2.18)(@types/three@0.181.0)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(three@0.181.2)
+      '@react-three/fiber':
+        specifier: ~9.4.0
+        version: 9.4.2(@types/react@19.2.18)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(three@0.181.2)
+      '@sats-wars/game-engine':
+        specifier: workspace:*
+        version: link:../../packages/game-engine
+      '@sats-wars/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@sats-wars/three-game':
+        specifier: workspace:*
+        version: link:../../packages/three-game
+      react:
+        specifier: ~19.2.0
+        version: 19.2.9
+      react-dom:
+        specifier: ~19.2.0
+        version: 19.2.9(react@19.2.9)
+      three:
+        specifier: ~0.181.0
+        version: 0.181.2
+    devDependencies:
+      '@types/react':
+        specifier: ~19.2.0
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ~19.2.0
+        version: 19.2.7(@types/react@19.2.18)
+      '@types/three':
+        specifier: ~0.181.0
+        version: 0.181.0
+      esbuild:
+        specifier: ^0.25.11
+        version: 0.25.12
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
   apps/web:
     dependencies:
       '@react-three/drei':

@@ -10,3 +10,5 @@ export {
   type RobotRig,
 } from './robots/build';
 export { applyClip } from './robots/animate';
+export { cueFromEvent } from './cues';
+export { SfxEngine, type SfxName } from './audio';

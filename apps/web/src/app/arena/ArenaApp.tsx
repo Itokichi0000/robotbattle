@@ -1,9 +1,15 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { GameEvent, PublicMatchSnapshot, TeamId } from '@sats-wars/shared';
-import { ArenaDirector, type Banner, type FrameStats } from '@sats-wars/three-game';
-import { SfxEngine, type SfxName } from '@/lib/audio';
+import type { PublicMatchSnapshot, TeamId } from '@sats-wars/shared';
+import {
+  ArenaDirector,
+  type Banner,
+  type FrameStats,
+  SfxEngine,
+  type SfxName,
+  cueFromEvent,
+} from '@sats-wars/three-game';
 import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 import { ArenaHud } from './ArenaHud';
@@ -22,36 +28,6 @@ const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.A
   ssr: false,
   loading: () => null,
 });
-
-/** Map server events to director cues. The director never decides outcomes. */
-function cueFromEvent(director: ArenaDirector, e: GameEvent): void {
-  switch (e.type) {
-    case 'ACTION_APPLIED': {
-      const { code, regionId, teamId } = e.data;
-      if (code === 'CHARGED') director.play({ kind: 'charge', teamId });
-      else if (regionId && (code === 'CAPTURED' || code === 'CONTEST_BROKEN'))
-        director.play({ kind: 'capture', regionId, teamId });
-      else if (regionId && (code === 'CONTEST_STARTED' || code === 'SHIELD_BROKEN'))
-        director.play({ kind: 'contest', regionId, teamId });
-      else if (regionId && code === 'SHIELD_PLACED')
-        director.play({ kind: 'shield', regionId, teamId });
-      return;
-    }
-    case 'CLASH_RESOLVED':
-      director.play({ kind: 'clash', clash: e.data.clash });
-      return;
-    case 'MATCH_STATUS_CHANGED':
-      if (e.data.to === 'LIVE' && e.data.from === 'LOBBY') director.play({ kind: 'intro' });
-      if (e.data.to === 'FINALIZING') director.play({ kind: 'final' });
-      return;
-    case 'MATCH_RESULT':
-      if (e.data.result.reason !== 'CANCELLED')
-        director.play({ kind: 'result', winner: e.data.result.winnerTeamId });
-      return;
-    default:
-      return;
-  }
-}
 
 export function ArenaApp() {
   const { locale } = useI18n();

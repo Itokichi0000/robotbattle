@@ -1,5 +1,9 @@
-import type { GameEvent, Locale, TeamId } from '@sats-wars/shared';
-import { REGION_INFO, RESULT_REASON_LABELS, TEAM_META } from '@sats-wars/shared';
+import type { GameEvent } from './events';
+import type { Locale } from './i18n';
+import { RESULT_REASON_LABELS } from './i18n';
+import { REGION_INFO } from './regions';
+import type { TeamId } from './teams';
+import { TEAM_META } from './teams';
 
 export interface FeedMessage {
   seq: number;

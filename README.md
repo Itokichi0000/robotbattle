@@ -33,6 +33,11 @@ pnpm dev                            # server :4000 + web :3000
 
 無人デモ：`DEMO_AUTOPILOT=true LOBBY_MS=15000 pnpm dev`（ロビー自動開始・BOT・自動で次試合）。
 
+### サーバーなしで遊ぶ（ソロ体験版）
+
+`pnpm solo` → `apps/solo/dist/sats-wars-solo.standalone.html` をブラウザで直接開くだけで遊べます。
+ゲームエンジン・BOT・3Dアリーナをすべて1ファイルに収めたオフライン版です（通信・決済なし、BOTが味方と敵を担当、2倍速・AP多めの体験設定あり）。
+
 ## コマンド
 
 | コマンド | 内容 |
@@ -42,6 +47,7 @@ pnpm dev                            # server :4000 + web :3000
 | `pnpm test` | ユニット・統合テスト（vitest、約100件） |
 | `pnpm lint` / `pnpm typecheck` | ESLint / TypeScript |
 | `pnpm e2e` | Playwright E2E（サーバーを自動起動。既存の dev は停止してから） |
+| `pnpm solo` | オフライン1人用体験版（単一HTML）をビルド |
 | `pnpm simulate` | バランスシミュレーション → `docs/BALANCE_REPORT.md` |
 | `pnpm --filter @sats-wars/three-game export-glb` | 仮ロボットをGLB書き出し（GLB読込経路の確認用） |
 

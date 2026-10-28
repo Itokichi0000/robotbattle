@@ -4,6 +4,7 @@ import type {
   ActionResponse,
   ActionResult,
   ActionType,
+  GameConfig,
   PublicMatchSnapshot,
   RegionId,
   RegionState,
@@ -13,8 +14,10 @@ import {
   REGION_INFO,
   REGION_KIND_META,
   TEAM_META,
+  eventMessage,
   formatClock,
   otherTeam,
+  regionKindDescription,
 } from '@sats-wars/shared';
 import { JapanMap2D } from '@/components/JapanMap2D';
 import { RobotGauge, TeamBadge } from '@/components/TeamBits';
@@ -22,7 +25,6 @@ import { ApiError, api, newClientActionId } from '@/lib/api';
 import type { MatchConnection } from '@/lib/connection';
 import { useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
-import { eventMessage } from '@/lib/messages';
 import { actionHint } from './actions';
 import type { Me } from './PlayApp';
 import type { PlaySession } from './session';
@@ -255,6 +257,7 @@ export function Controller({
           />
           {selected ? (
             <RegionRow
+              config={cfg}
               r={region(selected)}
               myTeam={myTeam}
               enemy={enemy}
@@ -276,6 +279,7 @@ export function Controller({
           {snap.regions.map((r) => (
             <li key={r.regionId}>
               <RegionRow
+                config={cfg}
                 r={r}
                 myTeam={myTeam}
                 enemy={enemy}
@@ -341,7 +345,9 @@ function RegionRow({
   onPick,
   expanded,
   onToggle,
+  config,
 }: {
+  config: GameConfig;
   r: RegionState;
   myTeam: 'RAIJIN' | 'FUJIN';
   enemy: 'RAIJIN' | 'FUJIN';
@@ -351,7 +357,7 @@ function RegionRow({
   expanded: boolean;
   onToggle?: () => void;
 }) {
-  const { L } = useI18n();
+  const { L, locale } = useI18n();
   const info = REGION_INFO[r.regionId];
   const kind = REGION_KIND_META[r.kind];
   const owner = r.ownerTeamId;
@@ -382,7 +388,7 @@ function RegionRow({
         <span className="flex-1">
           <span className="block text-lg font-black">{L(info.labelJa, info.labelEn)}</span>
           <span className="block text-xs text-off/70">
-            {L(kind.labelJa, kind.labelEn)}・{L(kind.descJa, kind.descEn)}
+            {L(kind.labelJa, kind.labelEn)}・{regionKindDescription(r.kind, config, locale)}
           </span>
         </span>
         <span className="flex flex-col items-end gap-1">

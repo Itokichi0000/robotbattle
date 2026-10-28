@@ -141,3 +141,25 @@ export function parseGameConfig(input: unknown): GameConfig {
 export function makeGameConfig(overrides: Partial<GameConfig> = {}): GameConfig {
   return gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...overrides });
 }
+
+/**
+ * Region-kind effect text built from the match config, so UI copy never drifts
+ * from the numbers the engine actually uses.
+ */
+export function regionKindDescription(
+  kind: 'ATTACK' | 'DEFENSE' | 'ENERGY',
+  config: GameConfig,
+  locale: 'ja' | 'en',
+): string {
+  if (kind === 'ATTACK')
+    return locale === 'ja'
+      ? `1つにつき激突時の与ダメージ+${config.attackRegionBonus}`
+      : `+${config.attackRegionBonus} clash damage each`;
+  if (kind === 'DEFENSE')
+    return locale === 'ja'
+      ? `1つにつき激突時の被ダメージ−${config.defenseRegionReduction}`
+      : `−${config.defenseRegionReduction} damage taken each`;
+  return locale === 'ja'
+    ? `1つにつき激突後エネルギー+${config.energyRegionGain}`
+    : `+${config.energyRegionGain} energy after each clash`;
+}

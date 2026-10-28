@@ -223,8 +223,10 @@ function RegionMarker({
     if (markerRef.current) markerRef.current.rotation.z += dt * 0.8;
     if (labelRef.current) {
       if (region.contestedByTeamId && region.contestedUntil !== null) {
-        const left = Math.max(0, Math.ceil((region.contestedUntil - gameMsRef.current) / 1000));
-        labelRef.current.textContent = locale === 'ja' ? `争奪中 ${left}秒` : `CONTESTED ${left}s`;
+        const left = Math.ceil((region.contestedUntil - gameMsRef.current) / 1000);
+        // Timers freeze once actions close; don't show a stale "0s".
+        labelRef.current.textContent =
+          left <= 0 ? '' : locale === 'ja' ? `争奪中 ${left}秒` : `CONTESTED ${left}s`;
       } else {
         labelRef.current.textContent = '';
       }

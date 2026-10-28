@@ -22,5 +22,5 @@ describe('simulator', () => {
     const a = aggregate(results);
     const decisive = a.raijinWins + a.fujinWins;
     expect(Math.abs(a.raijinWins - a.fujinWins) / decisive).toBeLessThan(0.2);
-  });
+  }, 30_000); // 200 full matches
 });

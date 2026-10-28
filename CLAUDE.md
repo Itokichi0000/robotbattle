@@ -30,6 +30,7 @@
 ```
 apps/server        Fastify + Socket.IO ゲームサーバー（:4000）。SQLite(node:sqlite)、決済、管理API
 apps/web           Next.js 16 App Router（:3000）。/ /play /arena /admin /results/[matchId]
+apps/solo          オフライン1人用体験版（LocalMatch + BOT + 3D を単一HTMLにバンドル。pnpm solo）
 packages/shared    型・Zodスキーマ・GameConfig・地域/地図・i18n・MatchStore（クライアント同期）
 packages/game-engine 決定的ルールエンジン（純粋reducer）、戦略ヒューリスティック
 packages/three-game R3F 3Dシーン（ArenaDirector, RobotActor, MapOverlay, Effects, CameraRig）

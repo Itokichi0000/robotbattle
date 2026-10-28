@@ -43,28 +43,22 @@ export const REGION_INFO: Record<RegionId, RegionInfo> = {
 
 export const REGION_KIND_META: Record<
   RegionKind,
-  { labelJa: string; labelEn: string; icon: string; descJa: string; descEn: string }
+  { labelJa: string; labelEn: string; icon: string }
 > = {
   ATTACK: {
     labelJa: '攻撃拠点',
     labelEn: 'Attack base',
     icon: '⚔',
-    descJa: '1つにつき激突時の与ダメージ+3',
-    descEn: '+3 clash damage each',
   },
   DEFENSE: {
     labelJa: '防御拠点',
     labelEn: 'Defense base',
     icon: '🛡',
-    descJa: '1つにつき激突時の被ダメージ-2',
-    descEn: '-2 damage taken each',
   },
   ENERGY: {
     labelJa: 'エネルギー拠点',
     labelEn: 'Energy base',
     icon: '◆',
-    descJa: '1つにつき激突後エネルギー+5',
-    descEn: '+5 energy after each clash',
   },
 };
 
