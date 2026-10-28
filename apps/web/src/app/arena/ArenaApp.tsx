@@ -18,7 +18,8 @@ import { Arena2D } from './Arena2D';
 import {
   type ArenaSettings,
   loadArenaSettings,
-  loadRobotModels,
+  type ModelUrls,
+  loadModels,
   saveArenaSettings,
   webglAvailable,
 } from './settings';
@@ -44,7 +45,7 @@ export function ArenaApp() {
   const [stats, setStats] = useState<FrameStats | null>(null);
   const [audioOn, setAudioOn] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [robotModels, setRobotModels] = useState<Partial<Record<TeamId, string>> | null>(null);
+  const [models, setModels] = useState<ModelUrls | null>(null);
   const [modelError, setModelError] = useState(false);
   const [preview, setPreview] = useState(false);
   const previewState = useRef(newPreviewState());
@@ -54,12 +55,21 @@ export function ArenaApp() {
   useEffect(() => {
     setSettings(loadArenaSettings());
     setWebgl(webglAvailable());
-    void loadRobotModels().then(setRobotModels);
     const q = new URLSearchParams(window.location.search);
     setPreview(q.get('preview') === '1');
     const speed = Number(q.get('speed'));
     if (speed > 0 && speed <= 1) director.timeScale = speed;
   }, [director]);
+  // Model source can change from the settings panel.
+  const modelMode = settings?.models;
+  useEffect(() => {
+    if (!modelMode) return;
+    let alive = true;
+    void loadModels(modelMode).then((m) => alive && setModels(m));
+    return () => {
+      alive = false;
+    };
+  }, [modelMode]);
   useEffect(() => {
     if (!settings) return;
     saveArenaSettings(settings);
@@ -172,7 +182,7 @@ export function ArenaApp() {
       className="relative h-dvh w-full overflow-hidden bg-navy"
       data-testid="arena-root"
       data-renderer={use3d ? 'webgl' : '2d'}
-      data-models={settings.models === 'auto' && robotModels && !modelError ? 'glb' : 'procedural'}
+      data-models={models?.RAIJIN && !modelError ? 'glb' : 'procedural'}
     >
       {use3d ? (
         <ArenaScene
@@ -190,8 +200,14 @@ export function ArenaApp() {
           onStats={setStats}
           onContextLost={() => setContextLost(true)}
           robotModels={
-            settings.models === 'auto' && !modelError ? (robotModels ?? undefined) : undefined
+            !modelError && models
+              ? {
+                  ...(models.RAIJIN ? { RAIJIN: models.RAIJIN } : {}),
+                  ...(models.FUJIN ? { FUJIN: models.FUJIN } : {}),
+                }
+              : undefined
           }
+          bossModel={!modelError ? models?.BOSS : undefined}
           onModelError={() => setModelError(true)}
         />
       ) : (

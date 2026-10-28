@@ -1,0 +1,70 @@
+{
+  "blender": "5.2.3 LTS",
+  "assets": {
+    "raijin": {
+      "triangles": 6936,
+      "bones": 19,
+      "clips": [
+        "Idle",
+        "Intro",
+        "AttackLight",
+        "AttackHeavy",
+        "Guard",
+        "HitReact",
+        "Special",
+        "Victory",
+        "Defeat"
+      ],
+      "materials": ["raijin_armor", "raijin_copper", "raijin_glow", "raijin_gold", "raijin_iron"],
+      "previews": [
+        "docs/art/raijin_front.png",
+        "docs/art/raijin_side.png",
+        "docs/art/raijin_back.png",
+        "docs/art/raijin_three_quarter.png"
+      ],
+      "glb": "apps/web/public/assets/models/blender/raijin.glb",
+      "blend": "assets/blender/raijin.blend",
+      "glbBytes": 430544
+    },
+    "fujin": {
+      "triangles": 5100,
+      "bones": 19,
+      "clips": [
+        "Idle",
+        "Intro",
+        "AttackLight",
+        "AttackHeavy",
+        "Guard",
+        "HitReact",
+        "Special",
+        "Victory",
+        "Defeat"
+      ],
+      "materials": ["fujin_armor", "fujin_blue", "fujin_dark", "fujin_glow", "fujin_silver"],
+      "previews": [
+        "docs/art/fujin_front.png",
+        "docs/art/fujin_side.png",
+        "docs/art/fujin_back.png",
+        "docs/art/fujin_three_quarter.png"
+      ],
+      "glb": "apps/web/public/assets/models/blender/fujin.glb",
+      "blend": "assets/blender/fujin.blend",
+      "glbBytes": 355592
+    },
+    "null_core": {
+      "triangles": 3216,
+      "bones": 6,
+      "clips": ["Idle", "Telegraph", "Attack", "HitReact", "Defeat"],
+      "materials": ["null_dark", "null_glow", "null_shell", "null_violet"],
+      "previews": [
+        "docs/art/null_core_front.png",
+        "docs/art/null_core_side.png",
+        "docs/art/null_core_back.png",
+        "docs/art/null_core_three_quarter.png"
+      ],
+      "glb": "apps/web/public/assets/models/blender/null_core.glb",
+      "blend": "assets/blender/null_core.blend",
+      "glbBytes": 212448
+    }
+  }
+}

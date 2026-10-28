@@ -16,8 +16,11 @@
 
 ## 機能の未実装・部分実装
 
-- 🟠 **Blender 生成（Phase 5）**：雷神・風神・NULL CORE の `.blend`/`.glb` は未生成。`tools/blender/generate_robots.py` は旧仕様のたたき台で未実行。
-  仕様の追加クリップ（Walk, Dash, Hover, ShieldDeploy, Charge, Boarding, HitHeavy）も未。
+- 🟠 **Blender モデルの品質**：`tools/blender/generate_assets.py` で雷神・風神・NULL CORE の `.blend`/`.glb` を生成済み（bpy 5.2.3、
+  三角形 3k〜7k、骨格・クリップ・弱点ノードあり、three.js で読み込み・再生テスト済み）。ただし形はプリミティブの組み合わせで、
+  会場画面ではコード生成モデルの方が見栄えが良いため既定にしていない（`/arena?models=blender` で切替、D-047）。
+  人間のアーティストによる造形・アニメの仕上げが必要。仕様の追加クリップ（Walk, Dash, Hover, ShieldDeploy, Charge, Boarding, HitHeavy）と
+  ダメージ段階のモデル差分、アリーナ・エフェクトの Blender 版も未。
 - 🟠 **3Dコックピットとパイロット（仕様 D4）**：機体内の座席群・搭乗時のランプ・成功時の光のパルス・名札の交代表示が未。
   今は大画面のポップアップと HUD で名前を出している。
 - 🟠 **リプレイ**：イベントはDBにすべて残るが、再生ビューアがない。結果ページは終盤30イベントのハイライト一覧のみ。動画生成なし。
@@ -45,7 +48,7 @@
 
 ## 環境制約（このセッション）
 
-- Blender 本体は未導入。`pip install bpy` で Blender の Python モジュールを入れられる可能性あり（未実施）。
+- Blender 本体は未導入。`pip install bpy==5.2.3`（Python 3.13）の headless モジュールで生成とプレビュー描画（Cycles CPU）を実施した。
 - GPU なし（WebGL はソフトウェア描画）。
 - Docker デーモンなし。
 - 外部ウォレット・LNbits・会場ネットワークに接続できない。

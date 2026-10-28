@@ -2,6 +2,7 @@
 /**
  * GLB asset checker for SATS WARS robots (no dependencies).
  *   node tools/blender/inspect_glb.mjs apps/web/public/assets/robots/raijin.glb [--json]
+ *   node tools/blender/inspect_glb.mjs apps/web/public/assets/enemies/null_core.glb --boss
  * Checks: glTF 2.0 header, required joint/node names, animation clip names,
  * triangle count vs budget, texture sizes are not checked (needs decoding).
  * Exit code 1 when a required item is missing or the budget is exceeded.
@@ -41,6 +42,10 @@ export const REQUIRED_CLIPS = [
 ];
 export const TRI_BUDGET = 100_000;
 
+/** NULL CORE: weak points are separate parts so hits can light them up. */
+export const BOSS_JOINTS = ['Root', 'Core', 'Ring', 'WP_CORE', 'WP_ARM', 'WP_LEG'];
+export const BOSS_CLIPS = ['Idle', 'Telegraph', 'Attack', 'HitReact', 'Defeat'];
+
 export function parseGlb(buf) {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   if (dv.getUint32(0, true) !== 0x46546c67) throw new Error('not a GLB (bad magic)');
@@ -52,7 +57,9 @@ export function parseGlb(buf) {
   return json;
 }
 
-export function inspect(json) {
+export function inspect(json, kind = 'robot') {
+  const requiredJoints = kind === 'boss' ? BOSS_JOINTS : REQUIRED_JOINTS;
+  const requiredClips = kind === 'boss' ? BOSS_CLIPS : REQUIRED_CLIPS;
   const nodeNames = new Set((json.nodes ?? []).map((n) => n.name).filter(Boolean));
   const clips = (json.animations ?? []).map((a) => a.name ?? '');
   let triangles = 0;
@@ -67,8 +74,8 @@ export function inspect(json) {
       triangles += Math.floor(count / 3);
     }
   }
-  const missingJoints = REQUIRED_JOINTS.filter((j) => !nodeNames.has(j));
-  const missingClips = REQUIRED_CLIPS.filter((c) => !clips.includes(c));
+  const missingJoints = requiredJoints.filter((j) => !nodeNames.has(j));
+  const missingClips = requiredClips.filter((c) => !clips.includes(c));
   return {
     generator: json.asset?.generator ?? null,
     nodes: nodeNames.size,
@@ -89,7 +96,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error('usage: inspect_glb.mjs <file.glb> [--json]');
     process.exit(2);
   }
-  const report = inspect(parseGlb(readFileSync(file)));
+  const report = inspect(
+    parseGlb(readFileSync(file)),
+    process.argv.includes('--boss') ? 'boss' : 'robot',
+  );
   if (process.argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
   else {
     console.log(

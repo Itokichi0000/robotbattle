@@ -64,6 +64,7 @@ export function SettingsPanel({
             onChange={(e) => set('models', e.target.value as ArenaSettings['models'])}
           >
             <option value="auto">GLB（あれば）/ GLB if available</option>
+            <option value="blender">Blender 試作モデル / Blender blockouts</option>
             <option value="procedural">コード生成 / procedural</option>
           </select>
         </label>

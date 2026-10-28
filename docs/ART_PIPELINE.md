@@ -62,7 +62,13 @@ UI：黒紺 `#070D1A`、オフホワイト `#EFF5FF`。
    GPU・外部ツールなしで動く。
 2. **手続きリグの GLB 書き出し**：`pnpm --filter @sats-wars/three-game export-glb` → `apps/web/public/assets/robots/generated/`（gitignore）。
    GLB の読み込み経路の試験用。
-3. **Blender（bpy）**：`tools/blender/` のスクリプトで `.blend`（編集可能な原本）と `.glb` を生成。状況は `docs/PROGRESS.md` と `docs/OPEN_ISSUES.md`。
+3. **Blender（bpy, headless）**：`python tools/blender/generate_assets.py`（`pip install bpy==5.2.3` の Python 3.13、または
+   `blender --background --python-exit-code 1 --python tools/blender/generate_assets.py`）。出力：
+   - 編集可能な原本 `assets/blender/{raijin,fujin,null_core}.blend`（上書きせず版管理）
+   - ゲーム用 `apps/web/public/assets/models/blender/*.glb` と `manifest.json`（骨格・9クリップ/ボス5クリップ・PBR・弱点ノード）
+   - 4方向プレビュー `docs/art/*_{front,side,back,three_quarter}.png`（Cycles CPU）と統計 `docs/art/asset_report.json`
+   - 会場画面では `/arena?models=blender`（または S の設定）で使う。既定はコード生成モデル（D-047）
+   - 検証：`node tools/blender/inspect_glb.mjs <robot.glb>`、ボスは `--boss`。`packages/three-game/src/glb.test.ts` が three.js で読み込み・再生を確認
 4. **人間のアーティストによる仕上げ**：会場品質の造形・アニメーションは自動生成では足りない。上の命名と座標系を守れば差し替えられる。
 
 有料の3D生成AIは使わない（承認後に選択可）。外部素材を入れる場合は `assets/LICENSES.md` に出所・ライセンス・来歴を記録する。

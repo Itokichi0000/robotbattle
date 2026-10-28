@@ -1,0 +1,6 @@
+{
+  "RAIJIN": "raijin.glb",
+  "FUJIN": "fujin.glb",
+  "BOSS": "null_core.glb",
+  "source": "tools/blender/generate_assets.py"
+}

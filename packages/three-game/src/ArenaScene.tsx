@@ -37,6 +37,8 @@ export interface ArenaSceneProps {
   onContextLost?: () => void;
   /** Optional GLB URLs per team (same joint/clip names); procedural robots otherwise. */
   robotModels?: Partial<Record<TeamId, string>>;
+  /** Optional NULL CORE GLB; the procedural boss otherwise. */
+  bossModel?: string;
   onModelError?: (e: unknown) => void;
 }
 
@@ -92,6 +94,7 @@ export function ArenaScene(props: ArenaSceneProps) {
         telegraphs={props.telegraphs}
         director={director}
         reducedMotion={reducedMotion}
+        bossModel={props.bossModel}
       />
       <ReserveReactor level={props.reserve} />
       <ModelRobotActor

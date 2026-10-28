@@ -1,8 +1,10 @@
+import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { Enemy, Telegraph } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
+import { Fallback } from './GlbRobotActor';
 import { ALIEN_COLOR, BOSS_POSITION, BOSS_SCALE, CORRUPT_RED, enemyWorldPosition } from './layout';
 
 export interface EnemiesProps {
@@ -10,6 +12,8 @@ export interface EnemiesProps {
   telegraphs: Telegraph[];
   director: ArenaDirector;
   reducedMotion: boolean;
+  /** Optional NULL CORE GLB (tools/blender/generate_assets.py); procedural otherwise. */
+  bossModel?: string;
 }
 
 /**
@@ -18,17 +22,18 @@ export interface EnemiesProps {
  * legs — that crack open as pilots hit them. Escorts glide to the city they
  * are about to attack. Pure presentation of server state.
  */
-export function Enemies({ enemies, telegraphs, director, reducedMotion }: EnemiesProps) {
+export function Enemies({ enemies, telegraphs, director, reducedMotion, bossModel }: EnemiesProps) {
   const boss = enemies.find((e) => e.kind === 'BOSS');
   const escorts = enemies.filter((e) => e.kind !== 'BOSS');
   return (
     <group name="enemies">
       {boss && (
-        <NullCore
+        <BossActor
           boss={boss}
           charging={telegraphs.some((t) => t.enemyId === boss.id)}
           director={director}
           reducedMotion={reducedMotion}
+          url={bossModel}
         />
       )}
       {escorts.map((e, i) => (
@@ -45,6 +50,89 @@ export function Enemies({ enemies, telegraphs, director, reducedMotion }: Enemie
   );
 }
 
+interface BossProps {
+  boss: Enemy;
+  charging: boolean;
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}
+
+/** GLB boss when a URL is given; the procedural NULL CORE while loading or if it fails. */
+function BossActor(props: BossProps & { url?: string }) {
+  const procedural = <NullCore {...props} />;
+  if (!props.url) return procedural;
+  return (
+    <Fallback fallback={procedural}>
+      <Suspense fallback={procedural}>
+        <GlbNullCore {...props} url={props.url} />
+      </Suspense>
+    </Fallback>
+  );
+}
+
+const WEAK_POINTS = { CORE: 'weak_core', ARM: 'weak_arm', LEG: 'weak_leg' } as const;
+
+function GlbNullCore({
+  boss,
+  charging,
+  director,
+  reducedMotion,
+  url,
+}: BossProps & { url: string }) {
+  const gltf = useGLTF(url);
+  const root = useRef<THREE.Group>(null);
+  const mixer = useMemo(() => new THREE.AnimationMixer(gltf.scene), [gltf.scene]);
+  const clips = useMemo(
+    () => new Map(gltf.animations.map((c) => [c.name, mixer.clipAction(c)])),
+    [gltf.animations, mixer],
+  );
+  // Each weak point gets its own material so hits can light it up separately.
+  const weak = useMemo(() => {
+    const out: Partial<Record<keyof typeof WEAK_POINTS, THREE.MeshStandardMaterial>> = {};
+    for (const [k, name] of Object.entries(WEAK_POINTS) as Array<
+      [keyof typeof WEAK_POINTS, string]
+    >) {
+      const o = gltf.scene.getObjectByName(name) as THREE.Mesh | undefined;
+      if (o?.material && 'emissive' in (o.material as THREE.MeshStandardMaterial)) {
+        o.material = (o.material as THREE.MeshStandardMaterial).clone();
+        out[k] = o.material as THREE.MeshStandardMaterial;
+      }
+    }
+    return out;
+  }, [gltf.scene]);
+  useEffect(() => () => void mixer.stopAllAction(), [mixer]);
+  const playing = useRef<string | null>(null);
+  useFrame(() => {
+    const t = director.time;
+    if (root.current) {
+      root.current.position.copy(BOSS_POSITION);
+      root.current.position.y += reducedMotion ? 0 : Math.sin(t * 0.6) * 0.4;
+    }
+    const want = charging ? 'Telegraph' : 'Idle';
+    const action = clips.get(want);
+    if (action && playing.current !== want) {
+      for (const a of clips.values()) a.stop();
+      action.reset().play();
+      playing.current = want;
+    }
+    // Director time keeps every screen in step; reduced motion holds the pose.
+    if (action) {
+      action.time = reducedMotion ? 0 : t % action.getClip().duration;
+      mixer.update(0);
+    }
+    for (const [k, m] of Object.entries(weak) as Array<
+      [keyof typeof WEAK_POINTS, THREE.MeshStandardMaterial]
+    >) {
+      m.emissiveIntensity = 2 + Math.min(2, Math.floor(boss.partHits[k] / 3)) * 2;
+    }
+  });
+  return (
+    <group ref={root} scale={BOSS_SCALE * 0.8} name="null-core-glb">
+      <primitive object={gltf.scene} />
+    </group>
+  );
+}
+
 const ARMOR = new THREE.MeshStandardMaterial({ color: '#12121A', metalness: 0.8, roughness: 0.35 });
 const PLATE = new THREE.MeshStandardMaterial({
   color: '#3B1E5C',
@@ -54,17 +142,7 @@ const PLATE = new THREE.MeshStandardMaterial({
   emissiveIntensity: 0.15,
 });
 
-function NullCore({
-  boss,
-  charging,
-  director,
-  reducedMotion,
-}: {
-  boss: Enemy;
-  charging: boolean;
-  director: ArenaDirector;
-  reducedMotion: boolean;
-}) {
+function NullCore({ boss, charging, director, reducedMotion }: BossProps) {
   const root = useRef<THREE.Group>(null);
   const core = useRef<THREE.MeshStandardMaterial>(null);
   const armL = useRef<THREE.Group>(null);

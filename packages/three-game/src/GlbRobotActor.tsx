@@ -99,7 +99,8 @@ function GlbRobot({ url, teamId, director, energyRatio }: RobotActorProps & { ur
   );
 }
 
-class Fallback extends Component<
+/** Shows `fallback` if a child throws (e.g. a GLB fails to load or parse). */
+export class Fallback extends Component<
   { fallback: ReactNode; children: ReactNode; onError?: (e: unknown) => void },
   { failed: boolean }
 > {

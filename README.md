@@ -12,7 +12,7 @@
 - `/passport` パイロットライセンス（階級・称号・作戦の履歴）、`/auth/lightning` LNURL-auth、`/results/:raidId`、`/leaderboard`。
 
 > 現状：**DEMO_MODE（モック決済・モックログイン）でレイドが自動で回り続ける**。LNURL-auth と LNbits は実装・テスト済みだが、
-> 実ウォレット・実決済での試験と本番利用はオーナー承認後。3Dはコード生成の仮モデル（GLB差し替え対応、Blender 生成は未）。
+> 実ウォレット・実決済での試験と本番利用はオーナー承認後。3Dはコード生成モデル（Blender の生成パイプラインと試作GLBもあり、`?models=blender`）。
 > どこまで動くかは [docs/PROGRESS.md](docs/PROGRESS.md)、未完は [docs/OPEN_ISSUES.md](docs/OPEN_ISSUES.md)。
 > 以前の「雷神 vs 風神」対戦ゲームは廃止（[docs/DECISION_LOG.md](docs/DECISION_LOG.md) D-032）。
 
@@ -46,14 +46,14 @@ Lightning ログインの体験：`AUTH_MODE=both` → `/auth/lightning` →「�
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `pnpm dev`                                                                                                                                           | 開発起動（ホットリロード、`.env` を読む）                            |
 | `pnpm build` / `pnpm start`                                                                                                                          | 本番ビルド / 本番起動                                                |
-| `pnpm test`                                                                                                                                          | ユニット・統合テスト（vitest、78件）                                 |
+| `pnpm test`                                                                                                                                          | ユニット・統合テスト（vitest、81件）                                 |
 | `pnpm lint` / `pnpm typecheck`                                                                                                                       | ESLint / TypeScript                                                  |
 | `pnpm e2e`                                                                                                                                           | Playwright E2E（サーバーとwebを自分で起動。既存の dev は止めてから） |
 | `pnpm solo`                                                                                                                                          | オフライン体験版（単一HTML）                                         |
 | `pnpm simulate`                                                                                                                                      | バランスシミュレーション → `docs/BALANCE_REPORT.md`                  |
 | `pnpm --filter @sats-wars/simulations exec tsx src/loadtest.ts --url http://localhost:4000 --password <ADMIN_PASSWORD> --pilots 50 --spectators 100` | 負荷試験（mock のサーバーのみ）                                      |
 
-`/arena` のURLオプション：`?mode=2d|3d`、`?quality=low|medium|high`、`?reduced=1`（点滅・動き抑制）、`?stats=1`（FPS）、`?models=procedural`、
+`/arena` のURLオプション：`?mode=2d|3d`、`?quality=low|medium|high`、`?reduced=1`（点滅・動き抑制）、`?stats=1`（FPS）、`?models=procedural|blender`（Blender 試作モデル）、
 `?preview=1`（演出リハーサル。1〜9キー、サーバーに送らない）。キー：F 全画面、S 設定、M ミュート。
 
 ## 構成

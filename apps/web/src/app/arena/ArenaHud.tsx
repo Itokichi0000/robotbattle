@@ -79,12 +79,13 @@ export function ArenaHud({
                 : L('再接続中…', 'Reconnecting…')}
             </span>
           )}
+          {/* Left column: the top centre stays clear for NULL CORE above the map. */}
+          {!lobby && (
+            <div className="w-[27vw] text-[1.1vw]">
+              <RaidHeader raid={snap} view={view} locale={locale} />
+            </div>
+          )}
         </div>
-        {!lobby && (
-          <div className="w-[34vw] text-[1.2vw]">
-            <RaidHeader raid={snap} view={view} locale={locale} />
-          </div>
-        )}
         <JoinCard
           url={playUrl}
           lobby={lobby}

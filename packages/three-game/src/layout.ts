@@ -13,8 +13,12 @@ export const ROBOT_HOME: Record<TeamId, { x: number; z: number; ry: number }> = 
   FUJIN: { x: 4.6, z: 0.6, ry: -Math.PI / 2 - 0.35 },
 };
 
-/** NULL CORE hovers behind and above the map. */
-export const BOSS_POSITION = new THREE.Vector3(0, 10.5, -17);
+/**
+ * NULL CORE hovers above and behind the map: from the overview camera it sits
+ * between the hologram's top edge (~7°) and the top of the frame (~18°), so the
+ * map never hides it.
+ */
+export const BOSS_POSITION = new THREE.Vector3(0, 14.2, -17);
 export const BOSS_SCALE = 3.2;
 
 /** Shared reserve reactor (ROUTER → RESERVE) on the stage floor between the robots. */
@@ -58,8 +62,10 @@ export function enemyWorldPosition(
   if (e.kind === 'BOSS') return BOSS_POSITION.clone();
   const tg = telegraphs.find((t) => t.enemyId === e.id);
   if (tg && tg.targets[0]) return regionWorldPosition(tg.targets[0], 2.6);
-  const slot = (index % 6) - 2.5;
-  return new THREE.Vector3(slot * 2.6, 13.5 + (index % 2) * 0.8, -13);
+  // Idle escorts flank NULL CORE (left/right alternately) instead of covering it.
+  const side = index % 2 === 0 ? -1 : 1;
+  const k = Math.floor(index / 2) % 3;
+  return new THREE.Vector3(side * (7.5 + k * 2.4), 12.5 + k * 0.7, -13);
 }
 
 export interface TargetContext {
@@ -92,7 +98,7 @@ export const CAMERA_PRESETS: Record<
 > = {
   intro: { position: [0, 13, 27], target: [0, 5, -4] },
   overview: { position: [0, 6.5, 19], target: [0, 5.2, -4.5] },
-  boss: { position: [0, 8, 4], target: [0, 10, -17] },
+  boss: { position: [0, 11, 4], target: [0, 14.5, -17] },
   // High enough that the gods (z≈0.6) stay below the frame while the map fills it.
   mapFocus: { position: [0, 11.5, 6.5], target: [0, 6.2, -8.5] },
   special: { position: [0, 3.2, 10], target: [0, 6, -10] },
