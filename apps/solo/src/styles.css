@@ -83,8 +83,8 @@ select:focus-visible {
 }
 .sub {
   font-family: var(--font-display);
-  font-size: clamp(20px, 3.2vw, 32px);
-  letter-spacing: 0.35em;
+  font-size: clamp(16px, 2.2vw, 24px);
+  letter-spacing: 0.12em;
   margin-top: 10px;
 }
 .lede {

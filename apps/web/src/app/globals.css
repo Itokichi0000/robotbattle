@@ -75,37 +75,6 @@ body.sw-large-text {
   outline-offset: 2px;
 }
 
-/* 3D map labels rendered via drei <Html> */
-.sw-map-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  font-size: 15px;
-  font-weight: 800;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(7, 13, 26, 0.78);
-  border: 1px solid rgba(239, 245, 255, 0.25);
-  color: var(--color-off);
-  text-shadow: 0 1px 2px #000;
-}
-.sw-map-label.is-captured {
-  border-color: #b65cff;
-  background: rgba(60, 20, 90, 0.85);
-}
-/* About to fall at the next alien turn: red border + text marker (not colour alone). */
-.sw-map-label.is-danger {
-  border: 2px solid #ff5a4a;
-  font-size: 17px;
-}
-.sw-map-label-warn {
-  color: #ff8a7a;
-}
-.sw-map-label-aliens {
-  color: #e2c2ff;
-}
-
 @keyframes sw-banner-in {
   0% {
     transform: scale(1.4);

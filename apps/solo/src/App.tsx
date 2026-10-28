@@ -59,20 +59,22 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
           <li>
             <span className="n">1</span>
             <span>
-              <b>席を選ぶ</b>：🎯砲撃・🛡防衛・🔌電力・🔧整備。いま必要な席は画面が教えてくれます。
+              <b>席を選ぶ</b>
+              🎯砲撃・🛡防衛・🔌電力・🔧整備。いま必要な席は画面が教えてくれます。
             </span>
           </li>
           <li>
             <span className="n">2</span>
             <span>
-              <b>出撃！</b>を押すと数秒のミニゲーム。うまくいくと雷神・風神が動きます。
+              <b>出撃！</b>
+              ボタンを押すと数秒のミニゲーム。うまくいくと雷神・風神が動きます。
             </span>
           </li>
           <li>
             <span className="n">3</span>
             <span>
-              <b>8分間</b>、⚠の予告を見て街を守り、NULL CORE
-              を倒そう。最後は3つの席がそろうと合体技「神雷風陣」！
+              <b>8分間 守りぬく</b>
+              ⚠の予告を見て街を守り、NULL CORE を倒そう。最後は3つの席がそろうと合体技「神雷風陣」！
             </span>
           </li>
         </ol>

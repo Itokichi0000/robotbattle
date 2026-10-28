@@ -755,3 +755,46 @@
 .swc-small {
   font-size: 0.75rem;
 }
+
+/* 3D map labels (drei <Html> in packages/three-game MapOverlay), shared by web and solo */
+.sw-map-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(7, 13, 26, 0.78);
+  border: 1px solid rgba(239, 245, 255, 0.25);
+  color: var(--swc-text);
+  text-shadow: 0 1px 2px #000;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Hiragino Sans',
+    'Noto Sans JP',
+    sans-serif;
+}
+/* Attack incoming: amber border. Lethal: red border, larger. Fallen: dimmed with ✖ (not colour alone). */
+.sw-map-label.is-threat {
+  border: 2px solid var(--swc-amber);
+}
+.sw-map-label.is-danger {
+  border: 2px solid var(--swc-red);
+  font-size: 17px;
+}
+.sw-map-label.is-down {
+  opacity: 0.6;
+  background: rgba(40, 10, 20, 0.85);
+}
+.sw-map-label-warn {
+  color: #ffb36b;
+}
+.sw-map-label.is-danger .sw-map-label-warn {
+  color: #ff8a9a;
+}
+.sw-map-label-shield {
+  color: var(--swc-teal);
+}
