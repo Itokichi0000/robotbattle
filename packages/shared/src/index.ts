@@ -8,3 +8,4 @@ export * from './state';
 export * from './teams';
 export * from './nickname';
 export * from './time';
+export * from './store';
