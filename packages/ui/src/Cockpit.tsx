@@ -183,7 +183,9 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
       }
       if (res.code !== 'OK' || !res.task) {
         if (res.cooldownUntil) onSeat({ cooldownUntil: res.cooldownUntil });
-        setError(tErr(res.code, L));
+        // Nothing to do in this seat right now: point at the seat the robots need.
+        const needed = res.code === 'NO_TARGET' && view.needed !== role ? ROLE_LABELS[view.needed] : null;
+        setError(tErr(res.code, L) + (needed ? L(`。いま必要なのは ${needed.icon}${needed.ja}`, `. Needed now: ${needed.icon} ${needed.en}`) : ''));
         setPhase({ k: 'idle' });
         return;
       }

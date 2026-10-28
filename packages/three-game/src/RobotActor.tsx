@@ -17,7 +17,7 @@ export interface RobotActorProps {
 /**
  * One robot. Pose is driven every frame by the director's current cue for this
  * team; the actor never changes game state. Uses the procedural rig today; a
- * GLB with the same joint/clip names can replace it (see docs/ART_BIBLE.md).
+ * GLB with the same joint/clip names can replace it (see docs/ART_PIPELINE.md).
  */
 export function RobotActor({ teamId, director, energyRatio }: RobotActorProps) {
   const rig = useMemo(() => (teamId === 'RAIJIN' ? buildRaijin() : buildFujin()), [teamId]);

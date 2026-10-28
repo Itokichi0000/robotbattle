@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * Procedural stand-in robots, built from three.js primitives so the arena works
  * without any external assets. Both rigs share the same joint names as the
- * Blender skeleton spec (docs/ART_BIBLE.md), so GLB models can replace them.
+ * Blender skeleton spec (docs/ART_PIPELINE.md), so GLB models can replace them.
  */
 export const JOINT_NAMES = [
   'Root',

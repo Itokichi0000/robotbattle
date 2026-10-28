@@ -57,7 +57,9 @@ async function main() {
   await cmd({ command: 'SET_PASS_MODE', mode: 'FREE' });
   await cmd({ command: 'SET_JOIN_STOPPED', stopped: false });
   const st = snap.snapshot.status;
-  if (st === 'ENDED' || st === 'CANCELLED' || st === 'LIVE' || st === 'PAUSED') await cmd({ command: 'NEXT_RAID' });
+  // A fresh, empty raid for every run (a running one must be ended first).
+  if (st === 'LIVE' || st === 'PAUSED') await cmd({ command: 'END', reason: 'LOADTEST' });
+  if (st !== 'CREATED' && st !== 'LOBBY_OPEN') await cmd({ command: 'NEXT_RAID' });
   await cmd({ command: 'OPEN_LOBBY' });
 
   // Spectators
@@ -97,6 +99,7 @@ async function main() {
   const subLat: number[] = [];
   const fanout: number[] = [];
   const counts = { tasks: 0, successes: 0, refused: 0, errors: 0, rateLimited: 0 };
+  const refusedBy: Record<string, number> = {};
   const until = performance.now() + DURATION_MS;
   const loops = pilots.map(async (p) => {
     await sleep(Math.random() * 3000);
@@ -112,6 +115,7 @@ async function main() {
         }
         if (r.status >= 400 || r.json.code !== 'OK' || !r.json.task) {
           counts.refused++;
+          refusedBy[r.json.code ?? r.status] = (refusedBy[r.json.code ?? r.status] ?? 0) + 1;
           await sleep(r.json.cooldownUntil ? Math.max(500, r.json.cooldownUntil - r.json.gameMs) : 2000);
           continue;
         }
@@ -155,6 +159,7 @@ async function main() {
         spectatorsConnected: `${connected}/${SPECTATORS}`,
         boardAllMs: Math.round(boardMs),
         counts,
+        refusedBy,
         requestMissionMs: round({ p50: pctl(reqLat, 50), p95: pctl(reqLat, 95), max: Math.max(...reqLat) }),
         submitMs: round({ p50: pctl(subLat, 50), p95: pctl(subLat, 95), max: Math.max(...subLat) }),
         submitToAllSpectatorsMs: { ...round({ p50: pctl(fanout, 50), p95: pctl(fanout, 95), max: Math.max(...fanout) }), samples: fanout.length },

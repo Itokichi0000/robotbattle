@@ -3,7 +3,7 @@ SATS WARS — procedural RAIJIN / FUJIN generator for Blender (bpy).
 
 STATUS: NOT EXECUTED. Blender is not installed in the development container,
 so this script has only been syntax-checked. Treat the output as a blockout
-for a human 3D artist (see docs/ART_BIBLE.md). Tested API target: Blender 4.x.
+for a human 3D artist (see docs/ART_PIPELINE.md). Tested API target: Blender 4.x.
 
 Usage:
   blender --background --python tools/blender/generate_robots.py -- --out apps/web/public/assets/robots
