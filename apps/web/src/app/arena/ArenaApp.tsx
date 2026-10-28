@@ -10,6 +10,7 @@ import {
   type SfxName,
   cueFromEvent,
 } from '@sats-wars/three-game';
+import { boardView } from '@/lib/battle';
 import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 import { ArenaHud } from './ArenaHud';
@@ -39,7 +40,6 @@ export function ArenaApp() {
   const [settings, setSettings] = useState<ArenaSettings | null>(null);
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [contextLost, setContextLost] = useState(false);
-  const [displayHp, setDisplayHp] = useState<Record<TeamId, number>>({ RAIJIN: 100, FUJIN: 100 });
   const [banner, setBanner] = useState<Banner | null>(null);
   const [stats, setStats] = useState<FrameStats | null>(null);
   const [audioOn, setAudioOn] = useState(false);
@@ -74,7 +74,6 @@ export function ArenaApp() {
   }, [settings, director, sfx]);
 
   useEffect(() => {
-    const offHp = director.onHp((hp) => setDisplayHp({ ...hp }));
     const offBanner = director.onBanner((b) => setBanner(b));
     const offSound = director.onSound((name) => {
       const map: Record<string, SfxName> = {
@@ -82,6 +81,7 @@ export function ArenaApp() {
         thunder: 'thunder',
         wind: 'wind',
         capture: 'capture',
+        shield: 'shield',
         charge: 'charge',
         special: 'special',
         victory: 'victory',
@@ -92,7 +92,6 @@ export function ArenaApp() {
       if (s) sfx.play(s);
     });
     return () => {
-      offHp();
       offBanner();
       offSound();
     };
@@ -102,39 +101,21 @@ export function ArenaApp() {
   useEffect(() => {
     if (!conn) return;
     const offs = [
-      conn.store.onEvent((e) => cueFromEvent(director, e, conn.store.snapshot?.config.roundsPerSeason)),
-      conn.onCheer((c) => director.play({ kind: 'cheer', teamId: c.teamId })),
+      conn.store.onEvent((e) => cueFromEvent(director, e)),
+      conn.onCheer(() => director.play({ kind: 'cheer' })),
     ];
     return () => offs.forEach((o) => o());
   }, [conn, director]);
 
-  // Snapshot (initial load / resync / next season): align the director with authoritative state.
+  // A different campaign (initial load / next campaign): start the director
+  // from a calm stance; a finished campaign keeps its game-over banner up.
   const lastMatch = useRef<string | null>(null);
   const syncToSnapshot = useCallback(
     (s: PublicMatchSnapshot) => {
-      const r = s.round;
-      const hpMax = r?.hpMax ?? s.config.hpInitial;
-      const hp = r ? r.hp : { RAIJIN: hpMax, FUJIN: hpMax };
-      if (lastMatch.current !== s.matchId) {
-        lastMatch.current = s.matchId;
-        if (s.status === 'LIVE' && s.phase === 'ROUND') director.enterRound(hp, hpMax);
-        else director.syncHp(hp, hpMax);
-        if (s.phase === 'SEASON_END' && s.result) {
-          director.play({ kind: 'seasonEnd', winner: s.result.winnerTeamId, regionCounts: s.result.regionCounts });
-        }
-        if (s.status === 'CREATED') {
-          director.robots.RAIJIN = { clip: 'Idle', start: director.time, advance: 0 };
-          director.robots.FUJIN = { clip: 'Idle', start: director.time, advance: 0 };
-          director.camera = { preset: 'overview', since: director.time };
-          setBanner(null);
-        }
-      } else if (
-        !previewRef.current &&
-        !director.busy &&
-        (director.hpMax !== hpMax || director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)
-      ) {
-        director.syncHp(hp, hpMax);
-      }
+      if (lastMatch.current === s.matchId || previewRef.current) return;
+      lastMatch.current = s.matchId;
+      director.reset();
+      if (s.status === 'FINISHED' && s.result) director.play({ kind: 'japanFallen', reachedWave: s.result.reachedWave });
     },
     [director],
   );
@@ -186,12 +167,10 @@ export function ArenaApp() {
     );
   }
 
-  // Robots glow brighter in a pinch (low HP = punches ×1.5).
-  const pinchHp = (snap.round?.hpMax ?? 0) * snap.config.pinchHpRatio;
-  const glow: Record<TeamId, number> = {
-    RAIJIN: snap.round && displayHp.RAIJIN > 0 && displayHp.RAIJIN <= pinchHp ? 1 : 0.15,
-    FUJIN: snap.round && displayHp.FUJIN > 0 && displayHp.FUJIN <= pinchHp ? 1 : 0.15,
-  };
+  const view = boardView(snap);
+  // Both gods glow while the combo is ready (a cue for the crowd to fire it).
+  const g = view.comboReady ? 1 : 0.15 + 0.5 * (snap.combo / snap.config.comboGaugeMax);
+  const glow: Record<TeamId, number> = { RAIJIN: g, FUJIN: g };
 
   return (
     <div
@@ -204,7 +183,9 @@ export function ArenaApp() {
         <ArenaScene
           director={director}
           regions={snap.regions}
-          focusRegionId={snap.status === 'LIVE' && snap.phase === 'ROUND' ? (snap.round?.regionId ?? null) : null}
+          enemies={snap.enemies}
+          danger={view.danger}
+          cityHpMax={snap.config.cityHpMax}
           glow={glow}
           quality={settings.quality}
           reducedMotion={settings.reducedMotion}
@@ -217,13 +198,13 @@ export function ArenaApp() {
           onModelError={() => setModelError(true)}
         />
       ) : (
-        <Arena2D snap={snap} director={director} />
+        <Arena2D snap={snap} view={view} director={director} />
       )}
       <ArenaHud
         snap={snap}
         conn={conn!}
+        view={view}
         connState={connState}
-        displayHp={displayHp}
         banner={banner}
         stats={settings.showStats ? stats : null}
         renderer={use3d ? 'webgl' : '2d'}

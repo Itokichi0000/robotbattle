@@ -132,7 +132,7 @@ export class MatchConnection {
       this.stateListeners.delete(l);
     };
   }
-  /** Balance changes for this player (top-up credited, punch charged, code redeemed). */
+  /** Balance changes for this player (top-up credited, move charged, code redeemed). */
   onCredit(l: (c: CreditPush) => void): () => void {
     this.creditListeners.add(l);
     return () => {

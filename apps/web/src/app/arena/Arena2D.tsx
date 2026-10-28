@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { PublicMatchSnapshot, TeamId } from '@sats-wars/shared';
+import type { BoardView } from '@/lib/battle';
 import { TEAM_META } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 import { JapanMap2D } from '@/components/JapanMap2D';
@@ -9,9 +10,9 @@ import { useI18n } from '@/lib/i18n';
 
 /**
  * Fallback renderer for venues without WebGL (or after a context loss).
- * Same information as the 3D view; the director still runs for HP timing/banners.
+ * Same information as the 3D view; the director still runs for poses/banners.
  */
-export function Arena2D({ snap, director }: { snap: PublicMatchSnapshot; director: ArenaDirector }) {
+export function Arena2D({ snap, view, director }: { snap: PublicMatchSnapshot; view: BoardView; director: ArenaDirector }) {
   const { locale } = useI18n();
   const [, force] = useState(0);
   useEffect(() => {
@@ -39,6 +40,7 @@ export function Arena2D({ snap, director }: { snap: PublicMatchSnapshot; directo
     const attack =
       cue.clip === 'AttackHeavy' || cue.clip === 'AttackLight' || cue.clip === 'Special';
     const down = cue.clip === 'Defeat';
+    // Both gods face the map in the middle (they fight together).
     const dx = attack ? (t === 'RAIJIN' ? 60 : -60) : hit ? (t === 'RAIJIN' ? -25 : 25) : 0;
     return (
       <div
@@ -78,8 +80,10 @@ export function Arena2D({ snap, director }: { snap: PublicMatchSnapshot; directo
       <div className="relative h-[62vh] w-[44vw]">
         <JapanMap2D
           regions={snap.regions}
+          enemies={snap.enemies}
+          cityHpMax={snap.config.cityHpMax}
+          danger={view.danger}
           locale={locale}
-          focusRegionId={snap.phase === 'ROUND' ? (snap.round?.regionId ?? null) : null}
           className="h-full w-full"
           labelScale={1.3}
         />

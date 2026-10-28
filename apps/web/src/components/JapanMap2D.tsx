@@ -1,7 +1,6 @@
 'use client';
-import type { RegionId, RegionPaint, TeamId } from '@sats-wars/shared';
-import { REGION_CENTROIDS, REGION_INFO, REGION_OUTLINES, TEAM_META, mapBounds } from '@sats-wars/shared';
-import { teamColor } from './TeamBits';
+import type { Enemy, RegionId, RegionState } from '@sats-wars/shared';
+import { REGION_CENTROIDS, REGION_INFO, REGION_OUTLINES, mapBounds } from '@sats-wars/shared';
 
 const B = mapBounds();
 const PAD = 0.6;
@@ -22,22 +21,42 @@ const PATHS = Object.fromEntries(
 ) as Record<RegionId, string>;
 
 export interface JapanMap2DProps {
-  regions: RegionPaint[];
+  regions: RegionState[];
+  enemies: Enemy[];
+  cityHpMax: number;
   locale: 'ja' | 'en';
-  /** Viewer's team, to mark ally/enemy for players. */
-  myTeam?: TeamId | null;
-  /** Region being fought over right now. */
-  focusRegionId?: RegionId | null;
+  /** Regions hit at the next alien turn (⚠ marks, red outline when it would fall). */
+  danger?: Partial<Record<RegionId, { damageNext: number; willFall: boolean }>>;
+  selected?: RegionId | null;
+  onSelect?: (id: RegionId) => void;
   className?: string;
   labelScale?: number;
+}
+
+/** City health → colour. Captured regions are violet and hatched (colour-blind safe: also 👾 text). */
+export function regionFill(r: RegionState, cityHpMax: number): string {
+  if (r.fallen) return '#5B2A86';
+  const k = r.cityHp / cityHpMax;
+  return k > 0.6 ? '#2F7FD8' : k > 0.3 ? '#E0A030' : '#D8483A';
 }
 
 /**
  * 2D map used on phones, the landing page and the arena's no-WebGL fallback.
  * States are shown with colour AND pattern/icon/text (colour-blind safe).
  */
-export function JapanMap2D({ regions, locale, myTeam, focusRegionId, className = '', labelScale = 1 }: JapanMap2DProps) {
+export function JapanMap2D({
+  regions,
+  enemies,
+  cityHpMax,
+  locale,
+  danger = {},
+  selected = null,
+  onSelect,
+  className = '',
+  labelScale = 1,
+}: JapanMap2DProps) {
   const fs = 0.55 * labelScale;
+  const count = (id: RegionId) => enemies.filter((e) => e.regionId === id).length;
   return (
     <svg
       viewBox={`${VB.x} ${VB.y} ${VB.w} ${VB.h}`}
@@ -46,71 +65,82 @@ export function JapanMap2D({ regions, locale, myTeam, focusRegionId, className =
       aria-label={locale === 'ja' ? '日本地図' : 'Map of Japan'}
     >
       <defs>
-        <pattern id="hatch-focus" width="0.5" height="0.5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <pattern id="hatch-captured" width="0.5" height="0.5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect width="0.5" height="0.5" fill="transparent" />
-          <line x1="0" y1="0" x2="0" y2="0.5" stroke="#FFE27A" strokeWidth="0.16" />
+          <line x1="0" y1="0" x2="0" y2="0.5" stroke="#C98BFF" strokeWidth="0.14" />
         </pattern>
       </defs>
       {regions.map((r) => {
         const id = r.regionId;
-        const focus = focusRegionId === id;
+        const sel = selected === id;
+        const d = danger[id];
+        const name = REGION_INFO[id].labelJa;
         return (
-          <g key={id} aria-label={REGION_INFO[id].labelJa} data-testid={`map-region-${id}`} data-owner={r.ownerTeamId ?? 'NEUTRAL'}>
+          <g
+            key={id}
+            data-testid={`map-region-${id}`}
+            data-state={r.fallen ? 'captured' : d?.willFall ? 'danger' : 'ok'}
+            onClick={onSelect ? () => onSelect(id) : undefined}
+            role={onSelect ? 'button' : undefined}
+            tabIndex={onSelect ? 0 : undefined}
+            aria-label={onSelect ? `${name}${r.fallen ? ' (とられた)' : ''}` : name}
+            aria-pressed={onSelect ? sel : undefined}
+            onKeyDown={
+              onSelect
+                ? (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelect(id);
+                    }
+                  }
+                : undefined
+            }
+            style={onSelect ? { cursor: 'pointer' } : undefined}
+          >
             <path
               d={PATHS[id]}
-              fill={teamColor(r.ownerTeamId)}
-              fillOpacity={r.ownerTeamId ? 0.85 : 0.5}
-              stroke={focus ? '#FFE27A' : '#0B1222'}
-              strokeWidth={focus ? 0.2 : 0.06}
+              fill={regionFill(r, cityHpMax)}
+              fillOpacity={0.88}
+              stroke={sel ? '#FFFFFF' : d?.willFall ? '#FF5A4A' : '#0B1222'}
+              strokeWidth={sel ? 0.24 : d?.willFall ? 0.18 : 0.06}
+              className={d?.willFall && !sel ? 'sw-pulse' : undefined}
             />
-            {focus && (
-              <path d={PATHS[id]} fill="url(#hatch-focus)" stroke="none" className="sw-pulse" />
-            )}
+            {r.fallen && <path d={PATHS[id]} fill="url(#hatch-captured)" stroke="none" pointerEvents="none" />}
           </g>
         );
       })}
       {regions.map((r) => {
         const c = REGION_CENTROIDS[r.regionId];
-        const focus = focusRegionId === r.regionId;
-        const rel = !r.ownerTeamId
-          ? ''
-          : myTeam
-            ? r.ownerTeamId === myTeam
-              ? locale === 'ja'
-                ? '味方'
-                : 'ALLY'
-              : locale === 'ja'
-                ? '相手'
-                : 'RIVAL'
-            : TEAM_META[r.ownerTeamId].symbol;
+        const n = count(r.regionId);
+        const d = danger[r.regionId];
+        const sel = selected === r.regionId;
+        const line2 = r.fallen ? `👾${n}` : `🏙${r.cityHp}${r.shield > 0 ? ' 🛡' : ''}${n > 0 ? ` 🛸${n}` : ''}`;
         return (
           <g key={`l-${r.regionId}`} transform={`translate(${c.x},${-c.y})`} pointerEvents="none">
             <text
               textAnchor="middle"
               fontSize={fs}
               fontWeight={800}
-              fill={focus ? '#FFE27A' : '#FFFFFF'}
+              fill={sel ? '#FFE27A' : '#FFFFFF'}
               stroke="#070D1A"
               strokeWidth={fs * 0.18}
               paintOrder="stroke"
             >
-              {focus ? '⚔ ' : ''}
+              {d?.willFall ? '⚠ ' : ''}
               {locale === 'ja' ? REGION_INFO[r.regionId].shortJa : REGION_INFO[r.regionId].labelEn.split(' ')[0]}
             </text>
-            {rel && (
-              <text
-                y={fs * 1.1}
-                textAnchor="middle"
-                fontSize={fs * 0.8}
-                fontWeight={800}
-                fill="#FFFFFF"
-                stroke="#070D1A"
-                strokeWidth={fs * 0.15}
-                paintOrder="stroke"
-              >
-                {rel}
-              </text>
-            )}
+            <text
+              y={fs * 1.1}
+              textAnchor="middle"
+              fontSize={fs * 0.8}
+              fontWeight={800}
+              fill="#FFFFFF"
+              stroke="#070D1A"
+              strokeWidth={fs * 0.15}
+              paintOrder="stroke"
+            >
+              {line2}
+            </text>
           </g>
         );
       })}

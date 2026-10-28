@@ -1,6 +1,6 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
-import type { MeResponse } from '@sats-wars/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { JoinResponse, MeResponse } from '@sats-wars/shared';
 import { ConnectionPill } from '@/components/ConnectionPill';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { Logo } from '@/components/Logo';
@@ -8,13 +8,12 @@ import { ApiError, api, storage } from '@/lib/api';
 import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 import { Controller } from './Controller';
-import { type PlaySession, clearSession, loadSession, saveSession } from './session';
-import { TeamPick } from './TeamPick';
+import { type PlaySession, clearSession, deviceId, loadSession, saveSession } from './session';
 
 /**
- * Phone flow, deliberately two screens only:
- *   1. pick a robot (free, instant)  2. tap to punch (top up when needed).
- * Everything else (rules, sats explanation, top-up) lives on those screens.
+ * Phone flow, deliberately one screen: everyone is on the same side, so the
+ * player is created silently on first load and lands straight on the
+ * controller (big おすすめ button, map for those who want to choose).
  */
 export function PlayApp() {
   const { L } = useI18n();
@@ -22,6 +21,7 @@ export function PlayApp() {
   const [loaded, setLoaded] = useState(false);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [largeText, setLargeText] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const conn = useMatchConnection('player', session?.token ?? null);
   const snap = useSnapshot(conn);
   const connState = useConnectionState(conn);
@@ -42,8 +42,8 @@ export function PlayApp() {
       setMe(await api<MeResponse>('/api/me', { token: session.token }));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        // Token replaced or unknown: picking a team again restores the same
-        // player (and credit) for this device.
+        // Token replaced or unknown: joining again with the device id restores
+        // the same player (and credit).
         clearSession();
         setSession(null);
         setMe(null);
@@ -54,7 +54,7 @@ export function PlayApp() {
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
-  // Balance pushes (top-up credited, punch charged, code redeemed).
+  // Balance pushes (top-up credited, move charged, code redeemed).
   useEffect(() => {
     if (!conn) return;
     return conn.onCredit((c) => setMe((m) => (m ? { ...m, creditSats: c.creditSats } : m)));
@@ -64,16 +64,48 @@ export function PlayApp() {
     if (connState === 'connected') void refreshMe();
   }, [connState, refreshMe, snap?.matchId]);
 
-  const onSession = (s: PlaySession) => {
+  const onSession = useCallback((s: PlaySession) => {
     saveSession(s);
     setSession(s);
-  };
+  }, []);
+
+  // No team to pick: join (free) as soon as the page is open.
+  const joining = useRef(false);
+  const join = useCallback(async () => {
+    if (joining.current) return;
+    joining.current = true;
+    setJoinError(null);
+    try {
+      const r = await api<JoinResponse>('/api/players', { body: { deviceId: deviceId() } });
+      onSession({ token: r.token, playerId: r.playerId, nickname: r.nickname });
+    } catch (e) {
+      setJoinError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      joining.current = false;
+    }
+  }, [onSession]);
+  useEffect(() => {
+    if (loaded && !session && snap) void join();
+  }, [loaded, session, snap, join]);
 
   let body: React.ReactNode;
   if (!loaded || !snap) {
     body = <Centered>{connState === 'offline' ? <Offline /> : L('読み込み中…', 'Loading…')}</Centered>;
   } else if (!session) {
-    body = <TeamPick snap={snap} onJoined={onSession} />;
+    body = (
+      <Centered>
+        {joinError ? (
+          <div>
+            <p className="font-bold text-danger">{joinError}</p>
+            <button type="button" className="sw-btn mt-3 bg-amber px-4 text-navy" onClick={() => void join()}>
+              {L('もう一度', 'Retry')}
+            </button>
+          </div>
+        ) : (
+          L('隊員登録中…', 'Joining the defence force…')
+        )}
+      </Centered>
+    );
   } else {
     body = (
       <Controller

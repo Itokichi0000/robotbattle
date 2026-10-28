@@ -1,22 +1,22 @@
-import type { TeamId } from '@sats-wars/shared';
 import { storage } from '@/lib/api';
 
 /**
  * Locally remembered player. Unlike the old per-match seat, a player lives
- * across seasons (credit carries over), so this is kept until the server says
+ * across campaigns (credit carries over), so this is kept until the server says
  * the token is unknown.
  */
 export interface PlaySession {
   token: string;
   playerId: string;
-  teamId: TeamId;
   nickname: string;
 }
 
-const KEY = 'sw.player.v2';
+const KEY = 'sw.player.v3';
 
 export function loadSession(): PlaySession | null {
-  storage.remove('sw.session'); // pre-ZAP-BATTLE seat, no longer meaningful
+  // Older formats (team seats) are no longer meaningful; the device id brings the player back.
+  storage.remove('sw.session');
+  storage.remove('sw.player.v2');
   const raw = storage.get(KEY);
   if (!raw) return null;
   try {

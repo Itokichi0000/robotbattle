@@ -90,19 +90,20 @@ body.sw-large-text {
   color: var(--color-off);
   text-shadow: 0 1px 2px #000;
 }
-.sw-map-label[data-owner='RAIJIN'] {
-  border-color: var(--color-amber);
+.sw-map-label.is-captured {
+  border-color: #b65cff;
+  background: rgba(60, 20, 90, 0.85);
 }
-.sw-map-label[data-owner='FUJIN'] {
-  border-color: var(--color-teal);
+/* About to fall at the next alien turn: red border + text marker (not colour alone). */
+.sw-map-label.is-danger {
+  border: 2px solid #ff5a4a;
+  font-size: 17px;
 }
-.sw-map-label.is-focus {
-  border: 2px solid #ffe27a;
-  color: #ffe27a;
-  font-size: 18px;
+.sw-map-label-warn {
+  color: #ff8a7a;
 }
-.sw-map-label-focus {
-  color: #ffe27a;
+.sw-map-label-aliens {
+  color: #e2c2ff;
 }
 
 @keyframes sw-banner-in {

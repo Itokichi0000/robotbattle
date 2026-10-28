@@ -1,26 +1,33 @@
 'use client';
-import type { PublicMatchSnapshot, TeamId } from '@sats-wars/shared';
+import type { PublicMatchSnapshot } from '@sats-wars/shared';
 import { REGION_INFO, SATS_EXPLAINER, TEAM_META } from '@sats-wars/shared';
-import type { Banner, FrameStats } from '@sats-wars/three-game';
+import type { Banner, BannerTone, FrameStats } from '@sats-wars/three-game';
+import { ComboGauge, FallMeter, TurnGauge } from '@/components/DefenceBits';
 import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
-import { RobotGauge, teamColor } from '@/components/TeamBits';
-import { battleView } from '@/lib/battle';
+import type { BoardView } from '@/lib/battle';
 import type { ConnectionState, MatchConnection } from '@/lib/connection';
-import { useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
-import { CheerBubbles, ZapPopups } from './Popups';
+import { ActionPopups, CheerBubbles } from './Popups';
+
+const TONE_COLOR: Record<BannerTone, string> = {
+  ally: '#FFE27A',
+  alien: '#C98BFF',
+  neutral: '#EFF5FF',
+  RAIJIN: TEAM_META.RAIJIN.color,
+  FUJIN: TEAM_META.FUJIN.color,
+};
 
 /**
  * Venue HUD over the 3D (or 2D) scene. Designed for people walking past:
- * the how-to and the QR are ALWAYS on screen, and the only numbers that
- * matter (HP, "あと○発でKO", seconds) are huge.
+ * the how-to and the QR are ALWAYS on screen, and the only things that matter
+ * (wave, moves until the alien turn, which region falls next) are huge.
  */
 export function ArenaHud({
   snap,
+  view,
   conn,
   connState,
-  displayHp,
   banner,
   stats,
   renderer,
@@ -31,9 +38,9 @@ export function ArenaHud({
   /** Rehearsal mode: hide status overlays so cinematics stay visible. */
   preview?: boolean;
   snap: PublicMatchSnapshot;
+  view: BoardView;
   conn: MatchConnection;
   connState: ConnectionState;
-  displayHp: Record<TeamId, number>;
   banner: Banner | null;
   stats: FrameStats | null;
   renderer: 'webgl' | '2d';
@@ -41,90 +48,74 @@ export function ArenaHud({
   reducedMotion: boolean;
 }) {
   const { locale } = useI18n();
-  useTicker(250);
-  const v = battleView(snap, conn.now().clockMs);
   const c = snap.config;
-  const fighting = snap.status === 'LIVE' && snap.phase === 'ROUND';
+  const live = snap.status === 'LIVE';
   const playUrl = snap.playUrl || (typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play');
-  const J = (ja: string, en: string) => (
+  const ja = locale === 'ja';
+  const J = (jaText: string, en: string) => (
     <>
-      {ja}
+      {jaText}
       <span className="ml-2 text-[0.55em] font-bold opacity-70">{en}</span>
     </>
   );
-  // HP numbers come from the director (server values, applied per punch);
-  // before the first cue fall back to the snapshot.
-  const hp = (t: TeamId) => (snap.round ? displayHp[t] : v.hp[t]);
+  const boss = snap.enemies.some((e) => e.kind === 'MOTHERSHIP');
+  const landing = [...new Set(snap.incoming.map((l) => l.regionId))];
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20 flex flex-col p-[1.2vw] text-off" style={{ fontSize: 'clamp(12px, 1.05vw, 26px)' }}>
-      {/* Top: team panels + round box */}
+      {/* Top: wave & turn | title | danger */}
       <div className="flex items-start gap-[1.2vw]">
-        {(['RAIJIN', 'FUJIN'] as const).map((t, i) => (
-          <div key={t} className={`w-[36%] rounded-2xl bg-black/45 p-[0.8vw] ring-1 ring-white/10 backdrop-blur-sm ${i === 1 ? 'order-3' : ''}`}>
-            <RobotGauge
-              teamId={t}
-              hp={hp(t)}
-              hpMax={v.hpMax}
-              toKo={v.toKo[t]}
-              toSpecial={v.toSpecial[t]}
-              pinch={v.pinch[t]}
-              supporters={snap.supporters[t]}
-              regionsWon={v.regionsWon[t]}
-              fighting={fighting}
-              locale={locale}
-              size="xl"
-              align={t === 'FUJIN' ? 'right' : 'left'}
-            />
+        <div className="w-[34%] rounded-2xl bg-black/50 p-[0.8vw] ring-1 ring-white/10 backdrop-blur-sm" data-testid="arena-wave">
+          <div className="sw-display text-[3.2em] font-black leading-none">
+            {ja ? `ウェーブ ${snap.wave}` : `WAVE ${snap.wave}`}
+            {boss && <span className="ml-3 text-[0.55em] text-fuchsia-300">🪐 {ja ? '母艦' : 'MOTHERSHIP'}</span>}
           </div>
-        ))}
-        <div className="order-2 flex flex-1 flex-col items-center">
-          <div className="text-[1.1em] font-black tracking-wider text-off/85">
-            {locale === 'ja' ? `第${v.roundNumber}戦` : `ROUND ${v.roundNumber}`}
-            <span className="text-[0.8em] text-off/60"> / {v.roundsTotal}</span>
+          {live && (
+            <div className="mt-[0.4vw] grid gap-[0.2vw] text-[1.35em]">
+              <TurnGauge left={view.turnLeft} total={c.actionsPerTurn} locale={locale} />
+              <ComboGauge combo={snap.combo} max={c.comboGaugeMax} locale={locale} />
+            </div>
+          )}
+        </div>
+        <div className="flex flex-1 flex-col items-center text-center">
+          <div className="sw-display text-[2.4em] font-black leading-tight text-[#FFE27A]">{J('地球防衛軍', 'EARTH DEFENSE')}</div>
+          <div className="text-[1.2em] font-bold text-off/85">
+            {ja ? `隊員 ${snap.playersOnline}人 参戦中` : `${snap.playersOnline} defenders online`}
+            {snap.bestWave > 0 && <span className="ml-3 text-off/65">{ja ? `最高記録 ウェーブ${snap.bestWave}` : `Best: wave ${snap.bestWave}`}</span>}
           </div>
-          <div className="sw-display text-[2.3em] font-black leading-tight text-[#FFE27A]" data-testid="arena-region">
-            ⚔ {locale === 'ja' ? v.regionJa : v.regionEn}
+        </div>
+        <div className="w-[34%] rounded-2xl bg-black/50 p-[0.8vw] text-right ring-1 ring-white/10 backdrop-blur-sm" data-testid="arena-danger">
+          <div className="text-[1.5em]">
+            <FallMeter fallen={view.fallenCount} limit={c.fallLimit} locale={locale} />
           </div>
-          <div className="sw-display text-[4.2em] font-black leading-none tabular-nums" data-testid="arena-timer">
-            {fighting && v.secondsLeft !== null ? v.secondsLeft : '—'}
-          </div>
-          <div className="text-[0.8em] text-off/70">{fighting ? (locale === 'ja' ? '秒' : 'sec') : ''}</div>
+          {live && view.doomed.length > 0 ? (
+            <div className="mt-[0.3vw] rounded-lg bg-danger/35 px-2 py-1 text-[1.45em] font-black" data-testid="arena-doomed">
+              ⚠ {ja ? `${view.doomed.map((id) => REGION_INFO[id].shortJa).join('・')} が次の敵ターンでとられる！` : `${view.doomed.map((id) => REGION_INFO[id].labelEn).join(', ')} falls next turn!`}
+            </div>
+          ) : live ? (
+            <div className="mt-[0.3vw] text-[1.2em] font-bold text-off/75">{ja ? '今のところ安全。敵を減らそう！' : 'Safe for now. Thin them out!'}</div>
+          ) : null}
+          {live && landing.length > 0 && (
+            <div className="mt-[0.2vw] text-[1.1em] font-bold text-fuchsia-200">
+              🛸 {ja ? `次の着陸予告：${landing.map((id) => REGION_INFO[id].shortJa).join('・')}` : `Landing next: ${landing.map((id) => REGION_INFO[id].labelEn).join(', ')}`}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Region strip: the 8 fights of this season, in order */}
-      <div className="mt-[0.6vw] flex justify-center gap-[0.4vw]" data-testid="region-strip">
-        {snap.roundOrder.map((id, i) => {
-          const paint = snap.regions.find((r) => r.regionId === id);
-          const owner = paint?.ownerTeamId ?? null;
-          const current = i === snap.roundIndex && (snap.phase === 'ROUND' || snap.phase === 'ROUND_END');
-          const done = i < snap.roundIndex || (i === snap.roundIndex && snap.phase !== 'ROUND' && snap.phase !== 'OPENING');
-          return (
-            <div
-              key={id}
-              className={`rounded-lg px-[0.7vw] py-[0.2vw] text-[0.95em] font-black ${current ? 'ring-2 ring-[#FFE27A]' : ''}`}
-              style={{ background: owner ? `${teamColor(owner)}cc` : done ? '#41506Ecc' : 'rgba(0,0,0,0.45)', color: owner ? '#070D1A' : '#EFF5FF' }}
-            >
-              {owner ? TEAM_META[owner].symbol : current ? '⚔' : `${i + 1}`} {locale === 'ja' ? REGION_INFO[id].shortJa : REGION_INFO[id].labelEn}
-            </div>
-          );
-        })}
-      </div>
-
-      <ZapPopups conn={conn} />
+      <ActionPopups conn={conn} locale={locale} />
       <CheerBubbles conn={conn} reducedMotion={reducedMotion} />
 
-      {/* Banner in the lower third, so it never hides the robots */}
+      {/* Banner in the lower third, so it never hides the map */}
       <div className="flex flex-1 items-end justify-center pb-[2vh]">
-        {banner ? (
+        {banner && (
           <div
             key={banner.textJa + banner.until}
             className="sw-banner-in rounded-2xl bg-black/65 px-[3vw] py-[1vw] text-center ring-2"
-            style={{ ['--tw-ring-color' as string]: banner.teamId ? TEAM_META[banner.teamId].color : '#EFF5FF' }}
+            style={{ ['--tw-ring-color' as string]: TONE_COLOR[banner.tone] }}
             data-testid="arena-banner"
           >
-            <div className="sw-display text-[4.2em] font-black leading-tight" style={{ color: banner.teamId ? TEAM_META[banner.teamId].color : '#EFF5FF' }}>
+            <div className="sw-display text-[4.2em] font-black leading-tight" style={{ color: TONE_COLOR[banner.tone] }}>
               {banner.textJa}
             </div>
             {banner.subJa && <div className="text-[1.8em] font-black">{banner.subJa}</div>}
@@ -133,42 +124,20 @@ export function ArenaHud({
               {banner.subEn ? ` — ${banner.subEn}` : ''}
             </div>
           </div>
-        ) : snap.status === 'LIVE' && (snap.phase === 'ROUND_END' || snap.phase === 'OPENING') && v.nextRegionId ? (
-          <div className="rounded-2xl bg-black/60 px-[2vw] py-[0.6vw] text-center" data-testid="arena-next">
-            <div className="text-[2em] font-black">
-              {J(`次の戦い：${REGION_INFO[v.nextRegionId].labelJa}`, `Next: ${REGION_INFO[v.nextRegionId].labelEn}`)}
-            </div>
-            <div className="sw-display text-[3em] font-black tabular-nums">{v.secondsLeft ?? ''}</div>
-            <div className="text-[1.2em] font-bold text-amber">{J('今のうちにQRからチームを選ぼう！', 'Scan the QR and pick a team now!')}</div>
-          </div>
-        ) : null}
+        )}
       </div>
 
-      {/* Bottom: feed | logo | how-to + QR (always visible) */}
+      {/* Bottom: campaign stats | logo | how-to + QR (always visible) */}
       <div className="flex items-end justify-between gap-[1.5vw]">
-        <div className="w-[30%]">
-          {/* Round results only: every punch already pops up by name, specials get a banner. */}
-          <ul className="flex flex-col gap-1" data-testid="round-results">
-            {snap.rounds
-              .slice(-3)
-              .reverse()
-              .map((r, i) => (
-                <li
-                  key={r.index}
-                  className={`rounded-lg px-3 py-1 text-[1.15em] font-bold ${i === 0 ? 'bg-black/60' : 'bg-black/35 text-off/75'}`}
-                  style={{ borderLeft: `4px solid ${teamColor(r.winnerTeamId)}` }}
-                >
-                  {locale === 'ja' ? `第${r.index + 1}戦 ${REGION_INFO[r.regionId].labelJa}` : `R${r.index + 1} ${REGION_INFO[r.regionId].labelEn}`}
-                  {' → '}
-                  {r.winnerTeamId
-                    ? `${TEAM_META[r.winnerTeamId].symbol} ${locale === 'ja' ? TEAM_META[r.winnerTeamId].nameJa : TEAM_META[r.winnerTeamId].nameEn} ${r.endReason === 'KO' ? 'KO' : locale === 'ja' ? '判定' : 'on HP'}`
-                    : locale === 'ja'
-                      ? '引き分け'
-                      : 'draw'}
-                  {r.finisher && <span className="ml-2 text-[0.85em] text-off/70">{locale === 'ja' ? `とどめ：${r.finisher.nickname}` : `finisher: ${r.finisher.nickname}`}</span>}
-                </li>
-              ))}
-          </ul>
+        <div className="w-[30%] rounded-xl bg-black/45 px-3 py-2 text-[1.15em] font-bold" data-testid="arena-stats">
+          <div>
+            {ja
+              ? `撃破 ${snap.stats.kills}体 ・ 奪還 ${snap.stats.regionsLiberated} ・ 合体技 ${snap.stats.combos}`
+              : `${snap.stats.kills} kills ・ ${snap.stats.regionsLiberated} liberated ・ ${snap.stats.combos} combos`}
+          </div>
+          <div className="text-[0.85em] text-off/70">
+            {ja ? `みんなで ${snap.stats.actions}回 出撃 ・ 敵ターン ${snap.stats.alienTurns}回` : `${snap.stats.actions} moves together ・ ${snap.stats.alienTurns} alien turns`}
+          </div>
         </div>
         <div className="flex flex-col items-center opacity-90">
           <Logo size="sm" />
@@ -176,14 +145,14 @@ export function ArenaHud({
         <div className="pointer-events-auto flex items-center gap-[1vw] rounded-2xl bg-black/65 p-[0.8vw] ring-1 ring-white/15" data-testid="arena-qr">
           <ol className="text-right text-[1.25em] font-black leading-snug">
             <li>{J('① QRを読む', 'Scan')}</li>
-            <li>{J('② 雷神か風神を選ぶ（無料）', 'Pick a robot (free)')}</li>
             <li>
-              {J(`③ タップでパンチ！`, 'Tap to punch!')}
-              <span className="ml-1 text-amber">{c.zapCostSats} sats</span>
+              {J('② 「おすすめで出撃」をタップ', 'Tap "Auto defend"')}
+              <span className="ml-1 text-amber">{c.actionCostSats} sats</span>
             </li>
+            <li>{J('③ 名前が画面に出る！ みんなで日本を守ろう', 'Your name appears! Defend Japan together')}</li>
             <li className="text-[0.62em] font-bold text-off/70">{SATS_EXPLAINER[locale]}</li>
             <li className="text-[0.62em] font-bold text-off/70">
-              {locale === 'ja' ? '会場で配られたsatsで遊べます・見るだけ＆応援は無料' : 'Use the sats handed out here · watching & cheering are free'}
+              {ja ? '会場で配られたsatsで遊べます・時間制限なし・見るだけ＆応援は無料' : 'Use the sats handed out here · no time limit · watching & cheering are free'}
             </li>
             {snap.paymentMode === 'mock' && <li className="text-[0.7em] text-yellow-300">DEMO MODE（実決済なし）</li>}
           </ol>
@@ -199,7 +168,7 @@ export function ArenaHud({
       {!preview && snap.status === 'CREATED' && (
         <Overlay>
           <Logo size="lg" />
-          <div className="mt-6 text-[2em] font-bold">{J('次のシーズンを準備中', 'Next season is being prepared')}</div>
+          <div className="mt-6 text-[2em] font-bold">{J('次の防衛戦を準備中', 'Next defence is being prepared')}</div>
         </Overlay>
       )}
       {!preview && snap.status === 'PAUSED' && (
@@ -210,18 +179,23 @@ export function ArenaHud({
       )}
       {!preview && snap.status === 'CANCELLED' && (
         <Overlay>
-          <div className="text-[4em] font-black">{J('シーズン中止', 'SEASON CANCELLED')}</div>
-          <div className="mt-2 text-[1.5em]">{J('残高はそのまま次のシーズンで使えます。', 'Your credit carries over to the next season.')}</div>
+          <div className="text-[4em] font-black">{J('防衛戦 中止', 'DEFENCE CANCELLED')}</div>
+          <div className="mt-2 text-[1.5em]">{J('残高はそのまま次の防衛戦で使えます。', 'Your credit carries over to the next defence.')}</div>
         </Overlay>
       )}
-      {(snap.phase === 'SEASON_END' || snap.status === 'FINISHED') && snap.result && (
-        <div className="absolute inset-x-0 bottom-[30%] flex justify-center">
-          <div className="rounded-2xl bg-black/70 px-[2vw] py-[0.8vw] text-center ring-1 ring-white/20" data-testid="arena-result">
-            <div className="text-[1.6em] font-black">
-              {J(`雷神 ${snap.result.regionCounts.RAIJIN} – ${snap.result.regionCounts.FUJIN} 風神`, `RAIJIN ${snap.result.regionCounts.RAIJIN} – ${snap.result.regionCounts.FUJIN} FUJIN`)}
+      {snap.status === 'FINISHED' && snap.result && (
+        <div className="absolute inset-x-0 top-[22%] flex justify-center">
+          <div className="rounded-2xl bg-black/75 px-[2vw] py-[0.8vw] text-center ring-1 ring-fuchsia-400/50" data-testid="arena-result">
+            <div className="sw-display text-[2.4em] font-black text-fuchsia-200">
+              {J(`ウェーブ${snap.result.reachedWave}まで守りぬいた！`, `Held out until wave ${snap.result.reachedWave}!`)}
+            </div>
+            <div className="mt-1 text-[1.3em] font-bold">
+              {ja
+                ? `撃破 ${snap.result.stats.kills}体 ・ 奪還 ${snap.result.stats.regionsLiberated}回 ・ みんなで ${snap.result.stats.actions}回 出撃`
+                : `${snap.result.stats.kills} kills ・ ${snap.result.stats.regionsLiberated} liberations ・ ${snap.result.stats.actions} moves`}
             </div>
             <div className="mt-1 text-[1.2em] font-bold text-off/80">
-              {J('まもなく次のシーズン！ 残高はそのまま使えます', 'Next season soon — your credit carries over')}
+              {J('まもなく次の防衛戦！ 残高はそのまま使えます', 'Next defence soon — your credit carries over')}
             </div>
           </div>
         </div>

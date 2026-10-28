@@ -1,27 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { aggregate, simulateSeason } from './simulate';
+import { aggregate, simulateCampaign } from './simulate';
 
-describe('crowd simulator', () => {
-  it('is deterministic per seed and always finishes a season of 8 rounds', () => {
-    const o = { playersPerTeam: { RAIJIN: 5, FUJIN: 5 }, seed: 7 };
-    const a = simulateSeason(o);
-    expect(simulateSeason(o)).toEqual(a);
-    expect(a.rounds).toHaveLength(8);
-    expect(a.punches.RAIJIN + a.punches.FUJIN).toBeGreaterThan(0);
-    // Taps between rounds are refused by the engine, never charged.
-    expect(a.satsSpent.RAIJIN).toBe(a.punches.RAIJIN * 21);
+describe('campaign simulator', () => {
+  it('is deterministic per seed and always ends with Japan falling', () => {
+    const o = { seed: 7, autoShare: 0.6 };
+    const a = simulateCampaign(o);
+    expect(simulateCampaign(o)).toEqual(a);
+    expect(a.fell).toBe(true);
+    expect(a.reachedWave).toBeGreaterThanOrEqual(2);
+    // Only successful moves are charged.
+    expect(a.sats).toBe(a.actions * 21);
   });
 
-  it('equal crowds win about equally often', () => {
-    const a = aggregate(Array.from({ length: 40 }, (_, i) => simulateSeason({ playersPerTeam: { RAIJIN: 8, FUJIN: 8 }, seed: i * 13 + 1 })));
-    const decisive = a.roundWins.RAIJIN + a.roundWins.FUJIN;
-    expect(Math.abs(a.roundWins.RAIJIN - a.roundWins.FUJIN) / decisive).toBeLessThan(0.2);
-  }, 60_000);
-
-  it('adaptive HP keeps busy rounds short and quiet rounds finishable', () => {
-    const big = aggregate(Array.from({ length: 6 }, (_, i) => simulateSeason({ playersPerTeam: { RAIJIN: 40, FUJIN: 40 }, seed: i + 1 })));
-    const small = aggregate(Array.from({ length: 6 }, (_, i) => simulateSeason({ playersPerTeam: { RAIJIN: 2, FUJIN: 2 }, seed: i + 1 })));
-    expect(big.hpByRound[7]!).toBeGreaterThan(small.hpByRound[7]!);
-    expect(big.avgRoundSec).toBeLessThanOrEqual(60);
+  it('choosing well lasts at least as long as random play, and campaigns are not endless', () => {
+    const n = 30;
+    const smart = aggregate(Array.from({ length: n }, (_, i) => simulateCampaign({ seed: i * 13 + 1, autoShare: 1 })));
+    const random = aggregate(Array.from({ length: n }, (_, i) => simulateCampaign({ seed: i * 13 + 1, autoShare: 0 })));
+    expect(smart.waveMean).toBeGreaterThanOrEqual(random.waveMean);
+    expect(random.waveMean).toBeGreaterThanOrEqual(3);
+    expect(smart.fellShare).toBe(1);
+    expect(smart.actionsMean).toBeLessThan(600);
   }, 60_000);
 });

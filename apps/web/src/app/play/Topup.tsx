@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { InvoiceResponse, PublicMatchSnapshot, RedeemPassResponse, TopupStatusResponse } from '@sats-wars/shared';
-import { SATS_EXPLAINER, formatClock, zapsFor } from '@sats-wars/shared';
+import { SATS_EXPLAINER, formatClock, actionsFor } from '@sats-wars/shared';
 import { QrCode } from '@/components/QrCode';
 import { ApiError, api } from '@/lib/api';
 import type { MatchConnection } from '@/lib/connection';
@@ -131,7 +131,7 @@ export function Topup({
           <div className="py-10 text-center" data-testid="topup-done">
             <div className="text-6xl">🎉</div>
             <div className="sw-display mt-2 text-3xl font-black text-ok">+{done} sats</div>
-            <div className="mt-1 font-bold">{L('チャージ完了！ さあパンチ！', 'Topped up! Go punch!')}</div>
+            <div className="mt-1 font-bold">{L('チャージ完了！ さあ出撃！', 'Topped up! Go defend!')}</div>
           </div>
         ) : !invoice ? (
           <>
@@ -154,7 +154,7 @@ export function Topup({
                   >
                     <span className="sw-display text-2xl">{amt} sats</span>
                     <span className="text-lg font-black">
-                      → {L(`${zapsFor(amt, c)}発`, `${zapsFor(amt, c)} punches`)}
+                      → {L(`${actionsFor(amt, c)}回 出撃`, `${actionsFor(amt, c)} moves`)}
                     </span>
                   </button>
                 ))}
@@ -196,8 +196,8 @@ export function Topup({
             <p className="mt-4 text-xs text-off/60">
               💡 {SATS_EXPLAINER[locale]}
               {L(
-                '。賞金・換金・払い戻しはありません。パンチに使ったsatsはイベント運営費になります。',
-                '. No prizes or cash-out. Sats spent on punches support the event.',
+                '。賞金・換金・払い戻しはありません。使ったsatsはイベント運営費になります。',
+                '. No prizes or cash-out. Sats you spend support the event.',
               )}
             </p>
           </>
@@ -205,7 +205,7 @@ export function Topup({
           <div className="mt-2 flex flex-col items-center gap-3" data-testid="invoice">
             <div className="text-center">
               <div className="sw-display text-3xl font-black">{invoice.amountSats} sats</div>
-              <div className="font-bold text-off/85">= {L(`${invoice.zaps}発ぶん`, `${invoice.zaps} punches`)}</div>
+              <div className="font-bold text-off/85">= {L(`${invoice.actions}回ぶん`, `${invoice.actions} moves`)}</div>
             </div>
             {expired ? (
               <div className="w-full rounded bg-white/10 p-3 text-center">

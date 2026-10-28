@@ -1,70 +1,78 @@
-import type { RegionId, TeamId } from '@sats-wars/shared';
+import type { RegionId } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 
 /**
  * Rehearsal preview (/arena?preview=1): plays synthetic cues locally so
  * operators, the MC and artists can check camera/VFX without a running
- * season. Never sends anything to the server and never changes game state.
+ * campaign. Never sends anything to the server and never changes game state.
  */
 export const PREVIEW_HELP =
-  'PREVIEW: 1 ラウンド開始 / 2 雷神パンチ連打 / 3 風神パンチ連打 / 4 雷神必殺 / 5 KO / 6 時間切れ引分 / 7 全国制覇 / 8 開幕 / 0 リセット / [ ] 速度';
+  'PREVIEW: 1 ウェーブ開始 / 2 雷神連打 / 3 風神連打 / 4 合体技 / 5 敵ターン / 6 奪還 / 7 クリア / 8 日本陥落 / 9 開幕 / 0 リセット / [ ] 速度';
 
 interface PreviewState {
   n: number;
-  hpMax: number;
-  hp: Record<TeamId, number>;
+  wave: number;
   region: RegionId;
 }
 
 export function newPreviewState(): PreviewState {
-  return { n: 0, hpMax: 200, hp: { RAIJIN: 200, FUJIN: 200 }, region: 'kanto' };
+  return { n: 0, wave: 1, region: 'kanto' };
 }
 
-function punch(director: ArenaDirector, st: PreviewState, teamId: TeamId, special = false): void {
-  const foe: TeamId = teamId === 'RAIJIN' ? 'FUJIN' : 'RAIJIN';
-  const pinch = st.hp[teamId] <= st.hpMax * 0.3;
-  const damage = Math.round((special ? 60 : 10) * (pinch ? 1.5 : 1));
-  st.hp = { ...st.hp, [foe]: Math.max(0, st.hp[foe] - damage) };
-  director.play({ kind: 'zap', teamId, nickname: special ? 'プレビュー' : `ゲスト${(st.n % 9) + 1}`, damage, special, pinch, ko: st.hp[foe] === 0, hp: st.hp });
-}
+const pick = (st: PreviewState): RegionId => REGION_IDS[st.n % REGION_IDS.length]!;
 
 export function handlePreviewKey(key: string, director: ArenaDirector, st: PreviewState): boolean {
   st.n++;
+  const name = `ゲスト${(st.n % 9) + 1}`;
   switch (key) {
     case '1':
-      st.region = REGION_IDS[st.n % REGION_IDS.length]!;
-      st.hp = { RAIJIN: st.hpMax, FUJIN: st.hpMax };
-      director.play({ kind: 'roundStart', roundIndex: st.n % 8, roundsTotal: 8, regionId: st.region, hpMax: st.hpMax, hp: st.hp });
+      st.wave++;
+      director.play({ kind: 'waveStart', wave: st.wave, boss: st.wave % 5 === 0 });
       return true;
     case '2':
     case '3': {
-      const t: TeamId = key === '2' ? 'RAIJIN' : 'FUJIN';
-      for (let i = 0; i < 5; i++) setTimeout(() => punch(director, st, t), i * 180);
+      const action = key === '2' ? 'RAIJIN' : 'FUJIN';
+      st.region = pick(st);
+      for (let i = 0; i < 5; i++) {
+        setTimeout(
+          () => director.play({ kind: 'action', action, regionId: st.region, nickname: name, damage: 30, kills: i === 4 ? 1 : 0, liberated: false }),
+          i * 180,
+        );
+      }
       return true;
     }
     case '4':
-      punch(director, st, 'RAIJIN', true);
+      director.play({ kind: 'action', action: 'COMBO', regionId: pick(st), nickname: 'プレビュー', damage: 150, kills: 3, liberated: false });
       return true;
     case '5': {
-      st.hp = { ...st.hp, FUJIN: 0 };
-      director.play({ kind: 'zap', teamId: 'RAIJIN', nickname: 'プレビュー', damage: 10, special: false, pinch: false, ko: true, hp: st.hp });
-      director.play({ kind: 'roundEnd', winner: 'RAIJIN', reason: 'KO', regionId: st.region, finisher: 'プレビュー' });
+      const a = pick(st);
+      const b = REGION_IDS[(st.n + 3) % REGION_IDS.length]!;
+      director.play({
+        kind: 'alienTurn',
+        attacks: [
+          { regionId: a, damage: 40, absorbed: 0, cityHpAfter: 0, fell: true },
+          { regionId: b, damage: 20, absorbed: 20, cityHpAfter: 70, fell: false },
+        ],
+        fell: [a],
+        landed: [REGION_IDS[(st.n + 5) % REGION_IDS.length]!],
+      });
       return true;
     }
     case '6':
-      director.play({ kind: 'roundEnd', winner: null, reason: 'DRAW', regionId: st.region, finisher: null });
+      director.play({ kind: 'action', action: 'RAIJIN', regionId: pick(st), nickname: 'プレビュー', damage: 45, kills: 1, liberated: true });
       return true;
     case '7':
-      director.play({ kind: 'seasonEnd', winner: 'FUJIN', regionCounts: { RAIJIN: 3, FUJIN: 5 } });
+      director.play({ kind: 'waveCleared', wave: st.wave });
       return true;
     case '8':
-      director.play({ kind: 'seasonStart' });
+      director.play({ kind: 'japanFallen', reachedWave: st.wave });
+      return true;
+    case '9':
+      director.play({ kind: 'campaignStart' });
       return true;
     case '0':
-      st.hp = { RAIJIN: st.hpMax, FUJIN: st.hpMax };
-      director.enterRound(st.hp, st.hpMax);
-      director.camera = { preset: 'overview', since: director.time };
+      director.reset();
       return true;
     case '[':
       director.timeScale = Math.max(0.05, director.timeScale / 2);

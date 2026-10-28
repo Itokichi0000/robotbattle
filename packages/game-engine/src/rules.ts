@@ -82,7 +82,10 @@ export interface PlannedAction {
  * 3. Otherwise liberate the easiest captured region, then thin out aliens.
  * Deterministic for a given state (ties broken by region order / enemy id).
  */
-export function recommendAction(s: MatchState): PlannedAction | null {
+/** The parts of the state the hint helpers read (also buildable from a public snapshot). */
+export type Board = Pick<MatchState, 'config' | 'regions' | 'enemies' | 'incoming' | 'combo' | 'actionsThisTurn'>;
+
+export function recommendAction(s: Board): PlannedAction | null {
   const c = s.config;
   const th = threats(s);
   const enemiesIn = (id: RegionId) => s.enemies.filter((e) => e.regionId === id);

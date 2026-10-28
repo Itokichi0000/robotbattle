@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { PublicMatchSnapshot } from '@sats-wars/shared';
-import { REGION_INFO, ROUND_END_LABELS, STATUS_LABELS, TEAM_META } from '@sats-wars/shared';
+import { STATUS_LABELS } from '@sats-wars/shared';
 import { JapanMap2D } from '@/components/JapanMap2D';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
@@ -28,56 +28,40 @@ export function ResultsView({ matchId }: { matchId: string }) {
         </p>
         {r ? (
           <>
-            <p className="sw-display mt-2 text-4xl font-black" style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}>
-              {r.winnerTeamId
-                ? L(`${TEAM_META[r.winnerTeamId].nameJa} 全国制覇！`, `${TEAM_META[r.winnerTeamId].nameEn} conquers Japan!`)
-                : L('引き分け', 'Draw')}
+            <p className="sw-display mt-2 text-4xl font-black text-fuchsia-200">
+              {r.reason === 'CANCELLED' ? L('中止', 'Cancelled') : L(`ウェーブ${r.reachedWave}まで守りぬいた！`, `Held out until wave ${r.reachedWave}!`)}
             </p>
-            <p className="mt-2 text-lg font-bold">
-              {L('雷神', 'RAIJIN')} {r.regionCounts.RAIJIN} – {r.regionCounts.FUJIN} {L('風神', 'FUJIN')}
-            </p>
+            <p className="mt-2 text-sm text-off/75">{L(`クリアしたウェーブ ${r.wavesCleared}`, `Waves cleared: ${r.wavesCleared}`)}</p>
           </>
         ) : (
-          <p className="mt-2">{L('シーズンはまだ終わっていません', 'Season still in progress')}</p>
+          <p className="mt-2">{L('防衛戦はまだ続いています', 'The defence is still going')}</p>
         )}
       </section>
       <section className="sw-panel p-4">
-        <h2 className="font-black">{L('各ラウンドの記録', 'Rounds')}</h2>
-        <table className="mt-2 w-full text-sm">
-          <thead>
-            <tr className="text-off/60">
-              <th className="text-left">#</th>
-              <th className="text-left">{L('地方', 'Region')}</th>
-              <th>{L('勝者', 'Winner')}</th>
-              <th>{L('決まり手', 'How')}</th>
-              <th>{L('パンチ数', 'Punches')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snap.rounds.map((round) => (
-              <tr key={round.index} className="border-t border-white/5 text-center">
-                <td className="text-left">{round.index + 1}</td>
-                <td className="text-left">{L(REGION_INFO[round.regionId].labelJa, REGION_INFO[round.regionId].labelEn)}</td>
-                <td style={{ color: round.winnerTeamId ? TEAM_META[round.winnerTeamId].color : undefined }}>
-                  {round.winnerTeamId ? `${TEAM_META[round.winnerTeamId].symbol} ${L(TEAM_META[round.winnerTeamId].nameJa, TEAM_META[round.winnerTeamId].nameEn)}` : '—'}
-                </td>
-                <td>
-                  {ROUND_END_LABELS[round.endReason][locale]}
-                  {round.finisher ? ` (${round.finisher.nickname})` : ''}
-                </td>
-                <td className="tabular-nums">
-                  {round.zaps.RAIJIN} – {round.zaps.FUJIN}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2 className="font-black">{L('みんなの記録', 'Team record')}</h2>
+        <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+          {(
+            [
+              [L('出撃', 'Moves'), (r?.stats ?? snap.stats).actions],
+              [L('撃破', 'Kills'), (r?.stats ?? snap.stats).kills],
+              [L('合体技', 'Combos'), (r?.stats ?? snap.stats).combos],
+              [L('敵ターン', 'Alien turns'), (r?.stats ?? snap.stats).alienTurns],
+              [L('とられた', 'Captured'), (r?.stats ?? snap.stats).regionsLost],
+              [L('奪還', 'Liberated'), (r?.stats ?? snap.stats).regionsLiberated],
+            ] as const
+          ).map(([k, val]) => (
+            <div key={k} className="rounded bg-black/30 p-2">
+              <dt className="text-off/65">{k}</dt>
+              <dd className="sw-display text-2xl font-black tabular-nums">{val}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
       <section className="sw-panel p-4">
-        <JapanMap2D regions={snap.regions} locale={locale} className="mx-auto h-80 w-full" />
+        <JapanMap2D regions={snap.regions} enemies={snap.enemies} cityHpMax={snap.config.cityHpMax} locale={locale} className="mx-auto h-80 w-full" />
       </section>
       <a href="/play" className="sw-btn flex items-center justify-center bg-amber text-navy">
-        {L('次のシーズンで遊ぶ', 'Play the next season')}
+        {L('次の防衛戦に参加する', 'Join the next defence')}
       </a>
     </main>
   );

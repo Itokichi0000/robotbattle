@@ -440,7 +440,7 @@ export class ArenaDirector {
         tone: 'alien',
         textJa: '日本陥落…',
         textEn: 'JAPAN HAS FALLEN…',
-        subJa: `記録：ウェーブ${reachedWave}　まもなく再出撃！`,
+        subJa: `記録：ウェーブ${reachedWave} ・ まもなく再出撃！`,
         subEn: `Reached wave ${reachedWave} — redeploying soon!`,
         until: s + 30,
       });

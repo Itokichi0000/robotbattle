@@ -9,8 +9,8 @@ export function LandingHeader() {
     <div className="flex flex-col gap-4">
       <p className="text-lg text-off/90">
         {L(
-          '応援するロボットを選んで、satsを送るとパンチ！ 会場の大画面で雷神と風神が殴り合い、先にHPを0にしたチームがその地方をゲット。ビットコインを知らなくても、タップするだけで遊べます。',
-          'Pick a robot and send sats to punch! RAIJIN and FUJIN slug it out on the big screen; knock out the rival to win the region. No bitcoin knowledge needed — just tap.',
+          'エイリアンが日本に攻めてきた！ satsを送ると雷神と風神が出撃。会場のみんなで協力して、8つの地方を守りぬこう。ビットコインを知らなくても、ボタンを押すだけで遊べます。',
+          'Aliens are invading Japan! Send sats and RAIJIN & FUJIN strike back. Everyone at the venue is on the same team — defend all 8 regions. No bitcoin knowledge needed — just tap.',
         )}
       </p>
       <div className="flex flex-wrap gap-3">
@@ -36,24 +36,24 @@ export function LandingRules() {
     <div className="grid gap-4 md:grid-cols-3">
       {[
         [
-          L('ルールはひとつ', 'One rule'),
+          L('みんなで協力', 'All on one team'),
           L(
-            '1タップ＝1パンチ（21 sats）。相手のHPを先に0にしたチームが、その地方をゲット。1ラウンド最長60秒。',
-            'One tap = one punch (21 sats). Knock the rival to 0 HP first to win the region. Rounds last up to 60s.',
+            '1回 21 sats で雷神か風神が1回うごく。迷ったら「おすすめ」ボタンでOK。時間制限はなく、みんなの一手でゲームが進みます。',
+            'Each move costs 21 sats. Not sure what to do? Press Auto. There is no timer: the game advances with every paid move.',
           ),
         ],
         [
-          L('盛り上がる仕掛け', 'Built for hype'),
+          L('敵ターンは予告つき', 'Alien turns are announced'),
           L(
-            'チーム10発ごとに必殺技。HPが減るとパンチ1.5倍で逆転のチャンス。パンチした人の名前が大画面に出ます。',
-            'Every 10th team punch is a special. Low HP hits ×1.5 for comebacks. Your name pops up on the big screen.',
+            'みんなで8回うごくとエイリアンのターン。次にとられる地方には⚠が出るので、倒すか🛡結界で守ろう。⚡は1体に大ダメージ、🌀は全体攻撃、💥は合体技。',
+            'Every 8 moves the aliens strike. Regions about to fall show ⚠: defeat the aliens or raise a 🛡 barrier. ⚡ hits one, 🌀 hits all, 💥 is the combo.',
           ),
         ],
         [
-          L('8地方で全国制覇', 'Conquer Japan'),
+          L('日本陥落まで', 'Until Japan falls'),
           L(
-            '8ラウンドで多くの地方を取ったチームが全国制覇。シーズンは自動で繰り返し、残高はずっと使えます。',
-            'Win the most of 8 regions to conquer Japan. Seasons loop automatically; your credit carries over.',
+            'ウェーブごとに敵は強くなり、5地方とられたら日本陥落。何ウェーブ守れるかに挑戦！ 防衛戦は自動でくり返し、残高はずっと使えます。',
+            'Waves get tougher; 5 captured regions and Japan falls. How long can the venue hold? Campaigns loop automatically and your credit carries over.',
           ),
         ],
       ].map(([title, body]) => (
@@ -82,8 +82,8 @@ export function LandingTerms() {
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>
           {L(
-            'チャージしたsatsはゲーム内のパンチにだけ使えます。賞金・換金・払い戻し・抽選による景品はありません。',
-            'Topped-up sats can only be used for in-game punches. No prizes, cash-out, refunds or lotteries.',
+            'チャージしたsatsはゲーム内の出撃にだけ使えます。賞金・換金・払い戻し・抽選による景品はありません。',
+            'Topped-up sats can only be used for in-game moves. No prizes, cash-out, refunds or lotteries.',
           )}
         </li>
         <li>
@@ -106,7 +106,7 @@ export function LandingTerms() {
         </li>
         <li>
           {L(
-            '子どもの参加は保護者・運営の方針に従ってください。応援（📣）は無料、運営配布のコードでもパンチできます。',
+            '子どもの参加は保護者・運営の方針に従ってください。応援（📣）は無料、運営配布のコードでも遊べます。',
             'Children should follow guardian/organiser guidance; cheering is free and staff codes also work.',
           )}
         </li>
