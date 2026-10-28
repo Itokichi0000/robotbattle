@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { GameConfig } from './config';
-import type { CrewMember, GameEvent } from './events';
+import type { BoardPatch, CrewMember, GameEvent } from './events';
 import type {
   CityState,
   Enemy,
@@ -252,6 +252,34 @@ export interface TaskResponse {
 export interface SubmitResponse {
   result: TaskResult;
   duplicate: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Replay (finished raids)
+// ---------------------------------------------------------------------------
+
+/** An event without its board patch (the replay sends boards as sampled frames). */
+export type ReplayEvent = GameEvent extends infer E
+  ? E extends GameEvent
+    ? Omit<E, 'patch'>
+    : never
+  : never;
+
+export interface ReplayFrame {
+  gameMs: number;
+  board: BoardPatch;
+}
+
+export interface ReplayResponse {
+  raidId: string;
+  configHash: string;
+  /** Last game ms of the raid. */
+  endGameMs: number;
+  /** Public board every `frameMs` of game time (and at every phase change). */
+  frameMs: number;
+  frames: ReplayFrame[];
+  /** All events in order, names already moderated like the live venue screen. */
+  events: ReplayEvent[];
 }
 
 // ---------------------------------------------------------------------------

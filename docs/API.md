@@ -16,15 +16,16 @@ Cookie で認証される変更系リクエスト（POST/PATCH/PUT/DELETE）は 
 
 ## 公開
 
-| メソッド | パス                                     | 説明                                                  |
-| -------- | ---------------------------------------- | ----------------------------------------------------- |
-| GET      | `/health` `/healthz`                     | 生存確認                                              |
-| GET      | `/ready` `/readyz`                       | DB確認込み（503 で未準備）                            |
-| GET      | `/api/public/current-raid`               | `{ snapshot: PublicRaidSnapshot }` 現在のレイドの全量 |
-| GET      | `/api/raids`                             | 最近のレイド20件                                      |
-| GET      | `/api/raids/:id/snapshot`                | 終了済みレイドは最終スナップショット                  |
-| GET      | `/api/raids/:id/results`                 | `{ raidId, result: RaidResult }`                      |
-| GET      | `/api/leaderboard?configHash=&assisted=0 | 1`                                                    | 同じルール・同じAI支援有無・BOTなしのレイドのスコア順 |
+| メソッド | パス                                     | 説明                                                                                                 |
+| -------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| GET      | `/health` `/healthz`                     | 生存確認                                                                                             |
+| GET      | `/ready` `/readyz`                       | DB確認込み（503 で未準備）                                                                           |
+| GET      | `/api/public/current-raid`               | `{ snapshot: PublicRaidSnapshot }` 現在のレイドの全量                                                |
+| GET      | `/api/raids`                             | 最近のレイド20件                                                                                     |
+| GET      | `/api/raids/:id/snapshot`                | 終了済みレイドは最終スナップショット                                                                 |
+| GET      | `/api/raids/:id/results`                 | `{ raidId, result: RaidResult }`                                                                     |
+| GET      | `/api/raids/:id/replay`                  | 終了したレイドのみ（進行中は404）。`{ events（patchなし）, frames（2秒ごとの公開盤面）, endGameMs }` |
+| GET      | `/api/leaderboard?configHash=&assisted=0 | 1`                                                                                                   | 同じルール・同じAI支援有無・BOTなしのレイドのスコア順 |
 
 ## パイロット認証
 
@@ -106,4 +107,4 @@ Cookie で認証される変更系リクエスト（POST/PATCH/PUT/DELETE）は 
 `RAID_STATUS_CHANGED, PHASE_CHANGED, PILOT_BOARDED, PILOT_ROLE_CHANGED, ENEMY_SPAWNED, ENEMY_TELEGRAPH, ATTACK_RESOLVED,
 ENEMY_DEFEATED, TASK_RESOLVED, SYNC_CHANGED, CITY_DESTROYED, CITY_REBUILT, SPECIAL_WINDOW_OPENED, SPECIAL_PROGRESS, SPECIAL_RESOLVED, RAID_ENDED`。
 `seq` はレイド内で1ずつ増える。クライアントは `seq <= lastSeq` を無視し、`seq > lastSeq + 1` なら全量を取り直す。
-公開イベントの名前はサーバーで加工済み（本人が許可していなければ `PILOT-xxxxx`、運営が隠した名前も同様）。
+公開される名前はすべてサーバーで加工済み：`pilotId` と `callsign` を持つ値（イベント・搭乗者・結果のMVP）は、本人が許可していなければ `PILOT-xxxxx`、運営が隠した名前も同様。過去のレイド（スナップショット・結果・ランキング・リプレイ）は**いまの**設定で加工する（後から隠した名前は過去の記録でも隠れる）。

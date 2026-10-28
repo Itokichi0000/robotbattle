@@ -159,6 +159,32 @@ describe('raid timeline', () => {
   });
 });
 
+describe('escort HP floor (playtest switch, off by default)', () => {
+  it('escortMinHits keeps escorts above n gunner CORE hits, but never the training scout or the boss', () => {
+    const off = new Sim();
+    off.board('a', 'GUNNER');
+    off.start();
+    off.to(61);
+    const offScout = off
+      .of('ENEMY_SPAWNED')
+      .map((e) => e.data.enemy)
+      .find((e) => !e.training)!;
+    expect(offScout.hpMax).toBeLessThan(3 * DEFAULT_GAME_CONFIG.gunner.damage.CORE);
+
+    const on = new Sim(makeGameConfig({ escortMinHits: 3 }));
+    on.board('a', 'GUNNER');
+    on.start();
+    on.to(61);
+    const spawned = on.of('ENEMY_SPAWNED').map((e) => e.data.enemy);
+    expect(spawned.find((e) => e.training)!.hpMax).toBe(
+      off.of('ENEMY_SPAWNED')[0]!.data.enemy.hpMax,
+    );
+    expect(spawned.find((e) => !e.training)!.hpMax).toBe(
+      3 * DEFAULT_GAME_CONFIG.gunner.damage.CORE,
+    );
+  });
+});
+
 describe('cockpit seats', () => {
   it('GUNNER: server scores the stop time; damage, cooldown, expiry and bad input', () => {
     const sim = new Sim(makeGameConfig({ scout: { ...DEFAULT_GAME_CONFIG.scout, hp: 200 } }));

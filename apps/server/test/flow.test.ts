@@ -446,3 +446,49 @@ describe('operations', () => {
     expect((await s.inject({ url: '/api/leaderboard' })).json().raids).toHaveLength(0);
   });
 });
+
+describe('replay of a finished raid', () => {
+  it('is only served after the raid ends, with sampled boards and consent-based names (MVPs too)', async () => {
+    s = await makeServer({ env: DEMO });
+    const shy = await guest(s, { callsign: 'ないしょ太郎', deviceId: 'dev-shy-xxxxxxxx' });
+    const loud = await guest(s, { callsign: 'みせる花子', deviceId: 'dev-loud-xxxxxxx' });
+    await s.inject({
+      method: 'PATCH',
+      url: '/api/me',
+      headers: auth(loud.token),
+      payload: { showNameOnArena: true },
+    });
+    expect((await board(s, shy, 'GUNNER')).statusCode).toBe(200);
+    expect((await board(s, loud, 'GUARDIAN')).statusCode).toBe(200);
+    const token = await startRaid(s);
+    await s.advance(8000);
+    await playOnce(s, shy);
+    await playOnce(s, loud);
+    await s.advance(5000);
+    const raidId = s.services.manager.current().raidId;
+    // Still running: no replay yet (it would leak the live board ahead of the screen anyway).
+    expect((await s.inject({ url: `/api/raids/${raidId}/replay` })).statusCode).toBe(404);
+    await admin(s, token, { command: 'END' });
+    const res = await s.inject({ url: `/api/raids/${raidId}/replay` });
+    expect(res.statusCode).toBe(200);
+    const r = res.json();
+    expect(r.raidId).toBe(raidId);
+    expect(r.frames.length).toBeGreaterThan(3);
+    expect(r.frames[0].board.cities).toHaveLength(8);
+    expect(r.events.length).toBeGreaterThan(5);
+    expect(r.events.every((e: Record<string, unknown>) => !('patch' in e))).toBe(true);
+    expect(r.events.at(-1).type).toBe('RAID_ENDED');
+    const body = res.body;
+    expect(body).not.toContain('ないしょ太郎');
+    expect(body).toContain('みせる花子');
+    expect(body).toMatch(/PILOT-\d{5}/);
+    // The same consent rule covers MVP names in results on every public path (live screen included).
+    for (const url of [
+      '/api/public/current-raid',
+      `/api/raids/${raidId}/results`,
+      '/api/leaderboard',
+    ]) {
+      expect((await s.inject({ url })).body, url).not.toContain('ないしょ太郎');
+    }
+  });
+});

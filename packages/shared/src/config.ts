@@ -49,6 +49,8 @@ export const gameConfigSchema = z
 
     // ---- boss & enemies ----
     bossBaseHp: z.number().int().min(1),
+    /** Escorts (not the boss, not training) need at least this many gunner CORE hits: big crews must not erase them before they telegraph. 0 = off. */
+    escortMinHits: z.number().min(0).max(10),
     scout: enemySchema,
     siege: enemySchema,
     saboteur: enemySchema.extend({
@@ -180,6 +182,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   cityRebuildCooldownSeconds: 30,
 
   bossBaseHp: 900,
+  escortMinHits: 0,
   scout: { hp: 60, damage: 18, telegraphMs: [8000, 12000], recoveryMs: [4000, 7000] },
   siege: { hp: 140, damage: 36, telegraphMs: [12000, 18000], recoveryMs: [6000, 9000] },
   saboteur: {

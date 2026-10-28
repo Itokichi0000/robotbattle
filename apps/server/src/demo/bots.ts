@@ -91,7 +91,9 @@ export class DemoBots {
     if (this.bots.length === 0) return;
     const rt = this.manager.current();
     const s = rt.state;
-    const now = this.wall.now();
+    // Game time, not wall time: with the demo time scale the raid runs faster,
+    // and bots must play (and meet mission deadlines) at the raid's pace.
+    const now = rt.nowGameMs();
     for (const bot of this.bots) {
       if (!s.pilots[bot.id]) {
         if (!this.manager.joinOpen() || this.manager.joinStopped) continue;

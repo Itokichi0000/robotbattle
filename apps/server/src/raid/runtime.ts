@@ -1,4 +1,4 @@
-import type { CrewMember, GameConfig, GameEvent, RaidState } from '@sats-wars/shared';
+import type { GameConfig, GameEvent, RaidState } from '@sats-wars/shared';
 import { isClockRunning } from '@sats-wars/shared';
 import {
   type EngineCommand,
@@ -9,6 +9,7 @@ import {
 } from '@sats-wars/game-engine';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
+import { moderateNames } from './names';
 
 /** Distributive Omit so each command variant keeps its own fields. */
 export type CommandInput = EngineCommand extends infer C
@@ -221,22 +222,9 @@ export class RaidRuntime {
     return callsign;
   };
 
-  private crew(c: CrewMember[]): CrewMember[] {
-    return c.map((m) => ({ ...m, callsign: this.displayName(m.pilotId, m.callsign) }));
-  }
-
-  /** Apply name moderation to an event before it leaves the server. */
+  /** Public names everywhere in an event (data, crew, MVPs in a result). */
   presentEvent(e: GameEvent): GameEvent {
-    const patch = e.patch.crew ? { ...e.patch, crew: this.crew(e.patch.crew) } : e.patch;
-    const d = e.data as { pilotId?: string | null; callsign?: string | null };
-    if (d.pilotId && typeof d.callsign === 'string') {
-      return {
-        ...e,
-        patch,
-        data: { ...e.data, callsign: this.displayName(d.pilotId, d.callsign) },
-      } as GameEvent;
-    }
-    return patch === e.patch ? e : ({ ...e, patch } as GameEvent);
+    return moderateNames(e, this.displayName);
   }
 
   snapshotBase() {
@@ -250,7 +238,8 @@ export class RaidRuntime {
     const delta = core.running ? Math.max(0, t - core.clockMs) : 0;
     return {
       ...core,
-      crew: this.crew(core.crew),
+      crew: moderateNames(core.crew, this.displayName),
+      result: moderateNames(core.result, this.displayName),
       clockMs: core.clockMs + delta,
       gameMs: core.gameMs + delta,
     };

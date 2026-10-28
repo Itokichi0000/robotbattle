@@ -10,6 +10,7 @@ import type { PassService } from './payments/passes';
 import type { PilotService } from './pilots/service';
 import type { RaidManager } from './raid/manager';
 import type { PilotActionService } from './raid/pilotActions';
+import type { ReplayService } from './raid/replay';
 
 export interface Services {
   env: Env;
@@ -21,6 +22,7 @@ export interface Services {
   actions: PilotActionService;
   lnurl: LnurlAuthService;
   bots: DemoBots;
+  replays: ReplayService;
   adminAuth: AdminAuth;
   adapter: PaymentAdapter;
   mono: MonoClock;

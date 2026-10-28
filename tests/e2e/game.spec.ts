@@ -127,6 +127,10 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   await r.goto(`/results/${raidId}`);
   await expect(r.getByTestId('result-card')).toBeVisible();
   await expect(r.getByTestId('score-total')).toBeVisible();
+  // Replay from the event log: play it and the guardian's mission shows up in the log.
+  await expect(r.getByTestId('replay')).toBeVisible();
+  await r.getByTestId('replay-play').click();
+  await expect(r.getByTestId('replay-log')).toContainText('シールド', { timeout: 20_000 });
 
   // Next raid: the pass was for one raid only.
   await admin(request, token, { command: 'NEXT_RAID' });

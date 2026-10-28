@@ -11,10 +11,11 @@ import {
 } from '@sats-wars/shared';
 import type { PilotRow } from '../db/repo';
 import { AppError } from '../errors';
+import { dbNameOf, moderateNames } from '../raid/names';
 import type { Services } from '../services';
 
 export function registerPublicRoutes(app: FastifyInstance, services: Services): void {
-  const { manager, pilots, passes, actions, repo, env, sessions } = services;
+  const { manager, pilots, passes, actions, repo, env, sessions, replays } = services;
 
   const requirePilot = (req: FastifyRequest): PilotRow => {
     const auth = sessions.authenticate(req);
@@ -65,7 +66,13 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
     if (id === manager.current().raidId) return { snapshot: manager.snapshot() };
     const row = repo.getRaid(id);
     if (!row?.final_snapshot_json) throw new AppError('NOT_FOUND', 'raid not found');
-    return { snapshot: JSON.parse(row.final_snapshot_json) };
+    // Archived boards are moderated with today's name rules (a name hidden later stays hidden).
+    return {
+      snapshot: moderateNames(
+        JSON.parse(row.final_snapshot_json),
+        dbNameOf(repo, manager.namesHidden),
+      ),
+    };
   });
 
   app.get('/api/raids/:id/results', async (req) => {
@@ -78,7 +85,15 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
           ? JSON.parse(row.result_json)
           : null;
     if (!result) throw new AppError('NOT_FOUND', 'no result yet');
-    return { raidId: id, result };
+    return { raidId: id, result: moderateNames(result, dbNameOf(repo, manager.namesHidden)) };
+  });
+
+  /** Finished raids only: events + sampled boards, names moderated like the venue screen. */
+  app.get('/api/raids/:id/replay', async (req) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const replay = replays.build(id, manager.namesHidden);
+    if (!replay) throw new AppError('NOT_FOUND', 'replay not available (raid not finished)');
+    return replay;
   });
 
   /** Same-rules leaderboard: config hash + assist flag; raids with bots excluded. */
@@ -90,6 +105,7 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
       })
       .parse(req.query);
     const hash = q.configHash ?? manager.current().state.configHash;
+    const nameOf = dbNameOf(repo, manager.namesHidden);
     return {
       configHash: hash,
       assisted: q.assisted === '1',
@@ -99,7 +115,7 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
         score: r.score_total,
         outcome: r.outcome,
         endedAt: r.ended_at,
-        result: r.result_json ? JSON.parse(r.result_json) : null,
+        result: r.result_json ? moderateNames(JSON.parse(r.result_json), nameOf) : null,
       })),
     };
   });

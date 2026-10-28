@@ -464,7 +464,11 @@ function currentScale(s: RaidState): number {
 function spawnEnemy(ctx: Ctx, kind: EnemyKind): void {
   const s = ctx.state;
   const cfg = enemyConfig(s.config, kind);
-  const hp = Math.max(1, Math.round(cfg.hp * currentScale(s)));
+  const training = s.phase === 'INTRO_TRAINING';
+  let hp = Math.max(1, Math.round(cfg.hp * currentScale(s)));
+  // Floor for escorts so a large crew still has to race the telegraph (D-049).
+  if (kind !== 'BOSS' && !training)
+    hp = Math.max(hp, Math.round(s.config.escortMinHits * s.config.gunner.damage.CORE));
   const enemy: Enemy = {
     id: s.nextId++,
     kind,
@@ -477,7 +481,7 @@ function spawnEnemy(ctx: Ctx, kind: EnemyKind): void {
     lastTargets: [],
     partHits: { CORE: 0, ARM: 0, LEG: 0 },
     attacks: 0,
-    training: s.phase === 'INTRO_TRAINING',
+    training,
   };
   s.enemies.push(enemy);
   if (kind === 'BOSS') s.bossId = enemy.id;

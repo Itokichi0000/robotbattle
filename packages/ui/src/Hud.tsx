@@ -183,9 +183,11 @@ export function JapanMapMini({
   const geo = useMemo(() => {
     const b = mapBounds();
     const pad = 0.6;
-    const w = b.maxX - b.minX + pad * 2;
+    // Extra room on the left: 福岡's label sits to the left of Kyushu.
+    const padLeft = 2.2;
+    const w = b.maxX - b.minX + pad + padLeft;
     const h = b.maxY - b.minY + pad * 2;
-    const tx = (x: number) => x - b.minX + pad;
+    const tx = (x: number) => x - b.minX + padLeft;
     const ty = (y: number) => b.maxY - y + pad;
     const paths = Object.fromEntries(
       REGION_IDS.map((id) => [

@@ -25,6 +25,7 @@ import { PilotActionService } from './raid/pilotActions';
 import { type Realtime, createRealtime } from './realtime/socket';
 import { registerAdminRoutes } from './routes/admin';
 import { registerAuthRoutes } from './routes/auth';
+import { ReplayService } from './raid/replay';
 import { registerPublicRoutes } from './routes/public';
 import type { Services } from './services';
 
@@ -128,6 +129,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     env,
     repo,
     manager,
+    replays: new ReplayService(repo, () => wall.now()),
     sessions,
     pilots,
     passes,
