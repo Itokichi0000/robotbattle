@@ -2,17 +2,16 @@ import { z } from 'zod';
 import type { GameConfig } from './config';
 import type { GameEvent } from './events';
 import type {
+  ActionResult,
+  CampaignResult,
+  CampaignStats,
+  Enemy,
+  Landing,
   MatchStatus,
-  Phase,
-  RegionPaint,
-  RoundState,
-  RoundSummary,
-  SeasonResult,
-  TeamState,
-  ZapResult,
+  RegionState,
 } from './state';
-import { TEAM_IDS, type TeamId } from './teams';
-import type { RegionId } from './regions';
+import { PLAYER_ACTIONS } from './state';
+import { REGION_IDS } from './regions';
 
 // ---------------------------------------------------------------------------
 // Public snapshot (safe for the venue screen: no payment data, nicknames moderated)
@@ -32,19 +31,22 @@ export interface PublicMatchSnapshot {
   running: boolean;
   /** Server epoch ms when this snapshot was produced. */
   serverTime: number;
-  phase: Phase;
-  phaseEndsAt: number | null;
-  roundOrder: RegionId[];
-  roundIndex: number;
-  round: RoundState | null;
-  rounds: RoundSummary[];
-  regions: RegionPaint[];
-  teams: Record<TeamId, TeamState>;
-  result: SeasonResult | null;
+  wave: number;
+  waveRemaining: number;
+  actionsThisTurn: number;
+  combo: number;
+  /** In REGION_IDS order. */
+  regions: RegionState[];
+  enemies: Enemy[];
+  incoming: Landing[];
+  stats: CampaignStats;
+  result: CampaignResult | null;
   lastSeq: number;
   recentEvents: GameEvent[];
-  /** Players currently cheering for each team (joined, recently active). */
-  supporters: Record<TeamId, number>;
+  /** Players active in the last few minutes (everyone is on the same side). */
+  playersOnline: number;
+  /** Best wave reached by any campaign (all-time on this server). */
+  bestWave: number;
   paymentsEnabled: boolean;
   paymentMode: PaymentMode;
   playUrl: string;
@@ -72,7 +74,6 @@ export type PaymentMode = (typeof PAYMENT_MODES)[number];
 export const NICKNAME_MAX_LENGTH = 12;
 
 export const joinRequestSchema = z.object({
-  teamId: z.enum(TEAM_IDS),
   nickname: z.string().max(64).optional().default(''),
   /** Random per-device id; limits duplicate players per device. */
   deviceId: z.string().min(8).max(128).optional(),
@@ -84,11 +85,9 @@ export interface JoinResponse {
   /** Bearer token. Store client-side; sent as Authorization header. */
   token: string;
   nickname: string;
-  teamId: TeamId;
   creditSats: number;
 }
 
-export const teamChangeSchema = z.object({ teamId: z.enum(TEAM_IDS) });
 export const nicknameChangeSchema = z.object({ nickname: z.string().max(64) });
 
 export const topupRequestSchema = z.object({ amountSats: z.number().int().positive() });
@@ -99,7 +98,8 @@ export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export interface InvoiceResponse {
   invoiceId: string;
   amountSats: number;
-  zaps: number;
+  /** Actions this top-up buys. */
+  actions: number;
   bolt11: string;
   expiresAt: number;
   status: InvoiceStatus;
@@ -120,11 +120,16 @@ export interface RedeemPassResponse {
   creditSats: number;
 }
 
-export const zapRequestSchema = z.object({ clientActionId: z.string().min(8).max(64) });
-export type ZapRequest = z.infer<typeof zapRequestSchema>;
+export const actionRequestSchema = z.object({
+  clientActionId: z.string().min(8).max(64),
+  action: z.enum(PLAYER_ACTIONS),
+  regionId: z.enum(REGION_IDS).optional(),
+  enemyId: z.number().int().min(0).optional(),
+});
+export type ActionRequest = z.infer<typeof actionRequestSchema>;
 
-export interface ZapResponse {
-  result: ZapResult;
+export interface ActionResponse {
+  result: ActionResult;
   creditSats: number;
   /** True when this clientActionId was already processed (no second charge). */
   duplicate: boolean;
@@ -137,13 +142,12 @@ export const cheerRequestSchema = z.object({ emoji: z.enum(CHEER_EMOJIS).optiona
 export interface MeResponse {
   playerId: string;
   nickname: string;
-  teamId: TeamId;
   creditSats: number;
-  zapsThisSeason: number;
-  zapsTotal: number;
-  kos: number;
+  actionsThisCampaign: number;
+  actionsTotal: number;
+  kills: number;
   pendingInvoice: InvoiceResponse | null;
-  lastResults: ZapResult[];
+  lastResults: ActionResult[];
 }
 
 export interface ApiError {
@@ -180,7 +184,6 @@ export interface ServerNotice {
 }
 
 export interface CheerPush {
-  teamId: TeamId;
   nickname: string;
   emoji: string;
 }
@@ -197,7 +200,7 @@ export interface ServerToClientEvents {
   matchEvent: (event: GameEvent) => void;
   clockTick: (tick: ClockTick) => void;
   cheer: (cheer: CheerPush) => void;
-  presence: (supporters: Record<TeamId, number>) => void;
+  presence: (playersOnline: number) => void;
   credit: (credit: CreditPush) => void;
   serverNotice: (notice: ServerNotice) => void;
 }

@@ -13,7 +13,7 @@ import { DemoBots } from './demo/bots';
 import type { Env } from './env';
 import { AppError } from './errors';
 import { MatchManager } from './match/manager';
-import { ZapService } from './match/zaps';
+import { ActionService } from './match/actions';
 import type { PaymentAdapter } from './payments/adapter';
 import { LnbitsPaymentAdapter } from './payments/lnbits';
 import { MockPaymentAdapter } from './payments/mock';
@@ -65,7 +65,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     (env.PAYMENT_MODE === 'lnbits'
       ? new LnbitsPaymentAdapter(env.LNBITS_URL, env.LNBITS_INVOICE_KEY)
       : new MockPaymentAdapter(wall));
-  const configOverrides = env.OPENING_MS !== undefined ? { openingMs: env.OPENING_MS } : {};
+  const configOverrides = env.ACTIONS_PER_TURN !== undefined ? { actionsPerTurn: env.ACTIONS_PER_TURN } : {};
   const manager = new MatchManager({
     repo,
     mono,
@@ -87,10 +87,10 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     webhookUrl,
     log: app.log,
   });
-  const zaps = new ZapService(repo, manager, wall);
+  const actions = new ActionService(repo, manager, wall);
   const bots = new DemoBots(repo, manager, wall);
-  const botsPerTeam = env.DEMO_BOTS_PER_TEAM || (env.DEMO_AUTOPILOT ? 4 : 0);
-  if (botsPerTeam > 0) bots.setPerTeam(botsPerTeam, 'env');
+  const botCount = env.DEMO_BOTS || (env.DEMO_AUTOPILOT ? 4 : 0);
+  if (botCount > 0) bots.setCount(botCount, 'env');
   const adminAuth = new AdminAuth(env.ADMIN_PASSWORD, wall);
 
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
@@ -102,7 +102,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     repo,
     manager,
     players,
-    zaps,
+    actions,
     bots,
     adminAuth,
     adapter,

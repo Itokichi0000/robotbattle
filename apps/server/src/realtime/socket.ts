@@ -41,7 +41,7 @@ export function createRealtime(
     maxHttpBufferSize: 16_384,
     connectionStateRecovery: undefined,
   });
-  const { manager, players, zaps, adminAuth, wall } = services;
+  const { manager, players, actions, adminAuth, wall } = services;
   const arenaStatus = new Map<string, ArenaStatus & { socketId: string; updatedAt: number }>();
 
   io.on('connection', (socket) => {
@@ -100,20 +100,19 @@ export function createRealtime(
   players.onCredit((playerId, push) => {
     io.to(`p:${playerId}`).emit('credit', push);
   });
-  zaps.onCredit((playerId, creditSats) => {
+  actions.onCredit((playerId, creditSats) => {
     io.to(`p:${playerId}`).emit('credit', { creditSats, invoiceId: null, invoiceStatus: null, addedSats: 0 });
   });
-  zaps.onCheer((cheer) => {
+  actions.onCheer((cheer) => {
     io.to('public').emit('cheer', cheer);
   });
-  // Supporter counts change on join/team switch; broadcast at most once a second.
-  let lastPresence = '';
+  // "Defenders online" changes on join/activity; broadcast at most once a second.
+  let lastPresence = -1;
   const broadcastPresence = () => {
-    const s = manager.supporters();
-    const key = `${s.RAIJIN}:${s.FUJIN}`;
-    if (key === lastPresence) return;
-    lastPresence = key;
-    io.to('public').emit('presence', s);
+    const n = manager.playersOnline();
+    if (n === lastPresence) return;
+    lastPresence = n;
+    io.to('public').emit('presence', n);
   };
 
   const broadcastClock = () => {

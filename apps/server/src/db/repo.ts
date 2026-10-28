@@ -1,11 +1,11 @@
 import type {
+  CampaignResult,
   GameConfig,
   GameEvent,
   InvoiceStatus,
   MatchState,
-  SeasonResult,
-  TeamId,
-  ZapResult,
+  RegionId,
+  ResolvedAction,
 } from '@sats-wars/shared';
 import type { EngineCommand } from '@sats-wars/game-engine';
 import { type Db, transaction } from './database';
@@ -16,12 +16,11 @@ export interface MatchRow {
   config_json: string;
   seed: number;
   status: string;
-  phase: string;
   clock_ms: number;
   created_at: number;
   started_at: number | null;
   ended_at: number | null;
-  winner_team_id: string | null;
+  reached_wave: number | null;
   result_json: string | null;
   final_snapshot_json: string | null;
 }
@@ -32,10 +31,9 @@ export interface PlayerRow {
   device_hash: string | null;
   nickname: string;
   nickname_hidden: number;
-  team_id: TeamId;
   credit_sats: number;
-  zaps_total: number;
-  kos: number;
+  actions_total: number;
+  kills: number;
   created_at: number;
   last_seen_at: number;
 }
@@ -58,17 +56,16 @@ export interface InvoiceRow {
   check_failures: number;
 }
 
-export interface ZapRow {
+export interface ActionRow {
   id: string;
   player_id: string;
   match_id: string;
   client_action_id: string;
-  round_index: number | null;
-  team_id: TeamId;
-  code: ZapResult['code'];
+  action: ResolvedAction;
+  region_id: RegionId | null;
   damage: number;
-  special: number;
-  pinch: number;
+  kills: number;
+  liberated: number;
   cost_sats: number;
   at_game_ms: number;
   created_at: number;
@@ -95,7 +92,7 @@ export interface AuditRow {
   timestamp: number;
 }
 
-export type CreditReason = 'TOPUP' | 'PASS' | 'ZAP' | 'ADJUST';
+export type CreditReason = 'TOPUP' | 'PASS' | 'ACTION' | 'ADJUST';
 
 type Params = Array<string | number | bigint | null | Uint8Array>;
 
@@ -137,7 +134,7 @@ export class Repo {
   // ---- matches ------------------------------------------------------------
   insertMatch(id: string, config: GameConfig, seed: number, now: number): void {
     this.run(
-      "INSERT INTO matches (id, config_version, config_json, seed, status, phase, created_at) VALUES (?, ?, ?, ?, 'CREATED', 'OPENING', ?)",
+      "INSERT INTO matches (id, config_version, config_json, seed, status, created_at) VALUES (?, ?, ?, ?, 'CREATED', ?)",
       id,
       config.version,
       JSON.stringify(config),
@@ -176,17 +173,16 @@ export class Repo {
   /** Persist the engine-derived match row for querying/reporting. */
   saveMatchProjection(s: MatchState, now: number, finalSnapshot?: unknown): void {
     this.run(
-      `UPDATE matches SET status = ?, phase = ?, clock_ms = ?, revision = ?,
+      `UPDATE matches SET status = ?, clock_ms = ?, revision = ?,
          started_at = COALESCE(started_at, ?), ended_at = COALESCE(ended_at, ?),
-         winner_team_id = ?, result_json = ?, final_snapshot_json = COALESCE(?, final_snapshot_json)
+         reached_wave = ?, result_json = ?, final_snapshot_json = COALESCE(?, final_snapshot_json)
        WHERE id = ?`,
       s.status,
-      s.phase,
       s.clockMs,
       s.revision,
       s.liveStartClock !== null ? now : null,
       s.status === 'FINISHED' || s.status === 'CANCELLED' ? now : null,
-      s.result?.winnerTeamId ?? null,
+      s.wave,
       s.result ? JSON.stringify(s.result) : null,
       finalSnapshot ? JSON.stringify(finalSnapshot) : null,
       s.matchId,
@@ -203,23 +199,6 @@ export class Repo {
     );
     for (const e of events) {
       stmt.run(e.matchId, e.seq, e.t, e.gameMs, e.type, JSON.stringify(e), revision);
-      if (e.type === 'ROUND_ENDED') {
-        const r = e.data.summary;
-        this.run(
-          `INSERT OR IGNORE INTO rounds (match_id, round_index, region_id, hp_max, winner_team_id, end_reason, duration_ms,
-             zaps_raijin, zaps_fujin, finisher_player_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          e.matchId,
-          r.index,
-          r.regionId,
-          r.hpMax,
-          r.winnerTeamId,
-          r.endReason,
-          r.durationMs,
-          r.zaps.RAIJIN,
-          r.zaps.FUJIN,
-          r.finisher?.participantId ?? null,
-        );
-      }
     }
   }
 
@@ -242,25 +221,24 @@ export class Repo {
     ).map((r) => JSON.parse(r.payload_json) as GameEvent);
   }
 
-  getResult(matchId: string): SeasonResult | null {
+  getResult(matchId: string): CampaignResult | null {
     const row = this.getMatch(matchId);
-    return row?.result_json ? (JSON.parse(row.result_json) as SeasonResult) : null;
+    return row?.result_json ? (JSON.parse(row.result_json) as CampaignResult) : null;
   }
 
   // ---- players & credit ---------------------------------------------------
   insertPlayer(p: PlayerRow): void {
     this.run(
-      `INSERT INTO players (id, session_id_hash, device_hash, nickname, nickname_hidden, team_id, credit_sats,
-         zaps_total, kos, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO players (id, session_id_hash, device_hash, nickname, nickname_hidden, credit_sats,
+         actions_total, kills, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.id,
       p.session_id_hash,
       p.device_hash,
       p.nickname,
       p.nickname_hidden,
-      p.team_id,
       p.credit_sats,
-      p.zaps_total,
-      p.kos,
+      p.actions_total,
+      p.kills,
       p.created_at,
       p.last_seen_at,
     );
@@ -281,9 +259,6 @@ export class Repo {
   setPlayerSession(id: string, sessionHash: string): void {
     this.run('UPDATE players SET session_id_hash = ? WHERE id = ?', sessionHash, id);
   }
-  setPlayerTeam(id: string, teamId: TeamId): void {
-    this.run('UPDATE players SET team_id = ? WHERE id = ?', teamId, id);
-  }
   setPlayerNickname(id: string, nickname: string): void {
     this.run('UPDATE players SET nickname = ? WHERE id = ?', nickname, id);
   }
@@ -299,15 +274,9 @@ export class Repo {
   listPlayers(limit: number): PlayerRow[] {
     return this.all<PlayerRow>('SELECT * FROM players ORDER BY last_seen_at DESC LIMIT ?', limit);
   }
-  /** Players per team active since `since` (shown as supporters on the screens). */
-  supporters(since: number): Record<TeamId, number> {
-    const out: Record<TeamId, number> = { RAIJIN: 0, FUJIN: 0 };
-    for (const r of this.all<{ team_id: TeamId; n: number }>(
-      'SELECT team_id, COUNT(*) AS n FROM players WHERE last_seen_at >= ? GROUP BY team_id',
-      since,
-    ))
-      out[r.team_id] = r.n;
-    return out;
+  /** Players active since `since` (shown as "defenders online" on the screens). */
+  playersActiveSince(since: number): number {
+    return this.get<{ n: number }>('SELECT COUNT(*) AS n FROM players WHERE last_seen_at >= ?', since)!.n;
   }
 
   /**
@@ -347,63 +316,62 @@ export class Repo {
       outstanding: this.get<{ s: number }>('SELECT COALESCE(SUM(credit_sats), 0) AS s FROM players')!.s,
       toppedUp: sum('TOPUP'),
       passes: sum('PASS'),
-      spent: -sum('ZAP'),
+      spent: -sum('ACTION'),
       adjusted: sum('ADJUST'),
     };
   }
 
-  // ---- zaps ---------------------------------------------------------------
-  getZap(playerId: string, clientActionId: string): ZapRow | undefined {
-    return this.get<ZapRow>(
-      'SELECT * FROM zaps WHERE player_id = ? AND client_action_id = ?',
+  // ---- actions ------------------------------------------------------------
+  getAction(playerId: string, clientActionId: string): ActionRow | undefined {
+    return this.get<ActionRow>(
+      'SELECT * FROM actions WHERE player_id = ? AND client_action_id = ?',
       playerId,
       clientActionId,
     );
   }
-  insertZap(z: ZapRow): void {
+  insertAction(a: ActionRow): void {
     this.run(
-      `INSERT INTO zaps (id, player_id, match_id, client_action_id, round_index, team_id, code, damage, special, pinch,
-         cost_sats, at_game_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      z.id,
-      z.player_id,
-      z.match_id,
-      z.client_action_id,
-      z.round_index,
-      z.team_id,
-      z.code,
-      z.damage,
-      z.special,
-      z.pinch,
-      z.cost_sats,
-      z.at_game_ms,
-      z.created_at,
+      `INSERT INTO actions (id, player_id, match_id, client_action_id, action, region_id, damage, kills, liberated,
+         cost_sats, at_game_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      a.id,
+      a.player_id,
+      a.match_id,
+      a.client_action_id,
+      a.action,
+      a.region_id,
+      a.damage,
+      a.kills,
+      a.liberated,
+      a.cost_sats,
+      a.at_game_ms,
+      a.created_at,
     );
-    this.run(
-      'UPDATE players SET zaps_total = zaps_total + 1, kos = kos + ? WHERE id = ?',
-      z.code === 'KO' ? 1 : 0,
-      z.player_id,
-    );
+    this.run('UPDATE players SET actions_total = actions_total + 1, kills = kills + ? WHERE id = ?', a.kills, a.player_id);
   }
-  recentZaps(playerId: string, limit: number): ZapRow[] {
-    return this.all<ZapRow>(
-      'SELECT * FROM zaps WHERE player_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+  recentActions(playerId: string, limit: number): ActionRow[] {
+    return this.all<ActionRow>(
+      'SELECT * FROM actions WHERE player_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
       playerId,
       limit,
     );
   }
-  zapCountInMatch(matchId: string, playerId: string): number {
+  actionCountInMatch(matchId: string, playerId: string): number {
     return (
-      this.get<{ n: number }>('SELECT COUNT(*) AS n FROM zaps WHERE match_id = ? AND player_id = ?', matchId, playerId)
+      this.get<{ n: number }>('SELECT COUNT(*) AS n FROM actions WHERE match_id = ? AND player_id = ?', matchId, playerId)
         ?.n ?? 0
     );
   }
-  zapStats(matchId: string): { zaps: number; players: number } {
+  actionStats(matchId: string): { actions: number; players: number } {
     return (
-      this.get<{ zaps: number; players: number }>(
-        'SELECT COUNT(*) AS zaps, COUNT(DISTINCT player_id) AS players FROM zaps WHERE match_id = ?',
+      this.get<{ actions: number; players: number }>(
+        'SELECT COUNT(*) AS actions, COUNT(DISTINCT player_id) AS players FROM actions WHERE match_id = ?',
         matchId,
-      ) ?? { zaps: 0, players: 0 }
+      ) ?? { actions: 0, players: 0 }
     );
+  }
+  /** Highest wave reached by any campaign (shown as the record to beat). */
+  bestWave(): number {
+    return this.get<{ w: number | null }>('SELECT MAX(reached_wave) AS w FROM matches')!.w ?? 0;
   }
 
   // ---- invoices -----------------------------------------------------------

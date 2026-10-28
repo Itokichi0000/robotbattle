@@ -10,7 +10,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
-  DATABASE_PATH: z.string().default('./data/sats-wars-v2.db'),
+  DATABASE_PATH: z.string().default('./data/sats-wars-v3.db'),
   /** Comma-separated list of allowed browser origins. Empty = any (development only). */
   ALLOWED_ORIGINS: z.string().default(''),
   /** URL printed in the venue QR code. Must come from deployment config, never user input. */
@@ -28,12 +28,13 @@ const envSchema = z.object({
   ALLOW_REAL_PAYMENTS: boolish,
   PAYEE_DESCRIPTION: z
     .string()
-    .default('SATS WARS パンチ用クレジット / SATS WARS punch credit'),
-  /** Unattended demo: bots on both teams (seasons always loop automatically unless disabled in /admin). */
+    .default('SATS WARS 防衛隊クレジット / SATS WARS defence credit'),
+  /** Rehearsal: 4 demo defenders (campaigns always loop automatically unless disabled in /admin). */
   DEMO_AUTOPILOT: boolish,
-  DEMO_BOTS_PER_TEAM: z.coerce.number().int().min(0).max(200).default(0),
-  /** Opening-show length override for local demos/tests (ms). */
-  OPENING_MS: z.coerce.number().int().min(0).optional(),
+  /** Demo defenders (BOT, no payments). They move the game on their own, so keep 0 at a real event. */
+  DEMO_BOTS: z.coerce.number().int().min(0).max(50).default(0),
+  /** Override actions per alien turn for rehearsals (when no next-config is saved). */
+  ACTIONS_PER_TURN: z.coerce.number().int().min(1).max(200).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 

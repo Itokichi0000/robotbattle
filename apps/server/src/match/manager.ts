@@ -5,10 +5,8 @@ import type {
   MatchState,
   PaymentMode,
   PublicMatchSnapshot,
-  TeamId,
 } from '@sats-wars/shared';
 import { DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
-import { carryOverHp } from '@sats-wars/game-engine';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 import { AppError } from '../errors';
@@ -18,11 +16,11 @@ import { MatchRuntime } from './runtime';
 export const ADMIN_LIFECYCLE_COMMANDS = ['START', 'PAUSE', 'RESUME', 'CANCEL', 'NEXT_MATCH'] as const;
 export type AdminLifecycleCommand = (typeof ADMIN_LIFECYCLE_COMMANDS)[number];
 
-/** Players count as supporters on the screens while active within this window. */
+/** Players count as "defenders online" while active within this window. */
 export const SUPPORTER_WINDOW_MS = 10 * 60_000;
 
 /**
- * After a crash/restart the season comes back PAUSED. With auto-loop on, the
+ * After a crash/restart the campaign comes back PAUSED. With auto-loop on, the
  * venue screen is probably unattended, so resume by itself after this delay
  * (an operator can still pause it from /admin).
  */
@@ -42,8 +40,8 @@ type EventsListener = (events: GameEvent[], state: MatchState) => void;
 type MatchListener = (runtime: MatchRuntime) => void;
 
 /**
- * Holds the current season and keeps the venue running unattended: a new
- * season starts automatically a few seconds after the previous one ends
+ * Holds the current campaign and keeps the venue running unattended: a new
+ * campaign starts automatically a few seconds after Japan falls
  * (unless an operator turns the loop off or cancels).
  */
 export class MatchManager {
@@ -53,14 +51,15 @@ export class MatchManager {
   private matchListeners = new Set<MatchListener>();
   private finishedAt: number | null = null;
   private restartPausedAt: number | null = null;
-  private supportersCache: { at: number; value: Record<TeamId, number> } | null = null;
+  private onlineCache: { at: number; value: number } | null = null;
+  private bestWaveCache: number | null = null;
   readonly repo: Repo;
 
   constructor(private opts: ManagerOptions) {
     this.repo = opts.repo;
   }
 
-  /** Recover the latest unfinished season after a restart, or create a fresh one. */
+  /** Recover the latest unfinished campaign after a restart, or create a fresh one. */
   init(): this {
     const unfinished = this.repo.latestUnfinishedMatch();
     const rt = unfinished
@@ -92,7 +91,7 @@ export class MatchManager {
     this.repo.audit(actor, 'SET_PAYMENTS_ENABLED', null, { before, after: enabled }, this.opts.wall.now());
   }
 
-  /** Continuous play: start seasons automatically and roll to the next one. */
+  /** Continuous play: start campaigns automatically and roll to the next one. */
   get autoLoop(): boolean {
     return this.repo.getSetting<boolean>('autoLoop') ?? true;
   }
@@ -153,9 +152,9 @@ export class MatchManager {
     }
     const now = this.opts.wall.now();
     this.finishedAt ??= now;
-    if (this.autoLoop && now - this.finishedAt >= this.runtime.state.config.nextSeasonDelayMs) {
+    if (this.autoLoop && now - this.finishedAt >= this.runtime.state.config.nextCampaignDelayMs) {
       this.finishedAt = null;
-      this.startNextSeason('auto-loop');
+      this.startNextCampaign('auto-loop');
     }
   }
 
@@ -173,22 +172,29 @@ export class MatchManager {
     this.repo.audit('auto-loop', 'RESUME', this.runtime.matchId, { reason: 'SERVER_RESTART' }, this.opts.wall.now());
   }
 
-  supporters(): Record<TeamId, number> {
+  playersOnline(): number {
     const now = this.opts.wall.now();
-    if (!this.supportersCache || now - this.supportersCache.at > 1000) {
-      this.supportersCache = { at: now, value: this.repo.supporters(now - SUPPORTER_WINDOW_MS) };
+    if (!this.onlineCache || now - this.onlineCache.at > 1000) {
+      this.onlineCache = { at: now, value: this.repo.playersActiveSince(now - SUPPORTER_WINDOW_MS) };
     }
-    return this.supportersCache.value;
+    return this.onlineCache.value;
   }
 
-  invalidateSupporters(): void {
-    this.supportersCache = null;
+  invalidatePresence(): void {
+    this.onlineCache = null;
+  }
+
+  /** Record to beat: best wave of any campaign, including the running one. */
+  bestWave(): number {
+    this.bestWaveCache ??= this.repo.bestWave();
+    return Math.max(this.bestWaveCache, this.runtime.state.wave);
   }
 
   snapshot(): PublicMatchSnapshot {
     return {
       ...this.runtime.snapshotBase(),
-      supporters: this.supporters(),
+      playersOnline: this.playersOnline(),
+      bestWave: this.bestWave(),
       paymentsEnabled: this.paymentsEnabled,
       paymentMode: this.opts.paymentMode,
       playUrl: this.opts.playUrl,
@@ -202,10 +208,10 @@ export class MatchManager {
     const now = this.opts.wall.now();
     if (cmd === 'NEXT_MATCH') {
       if (before === 'LIVE' || before === 'PAUSED') {
-        throw new AppError('INVALID_COMMAND', '進行中のシーズンを先に中止してください / Cancel the running season first');
+        throw new AppError('INVALID_COMMAND', '進行中の防衛戦を先に中止してください / Cancel the running campaign first');
       }
       if (before === 'CREATED') rt.dispatch({ type: 'CANCEL', reason: 'REPLACED' });
-      this.startNextSeason(actor);
+      this.startNextCampaign(actor);
       return;
     }
     const engineCmd =
@@ -221,7 +227,7 @@ export class MatchManager {
     this.repo.audit(actor, cmd, rt.matchId, { before, after: rt.state.status, reason }, now);
   }
 
-  private startNextSeason(actor: string): void {
+  private startNextCampaign(actor: string): void {
     const prev = this.runtime.matchId;
     const next = this.createRuntime();
     this.repo.audit(actor, 'NEXT_MATCH', next.matchId, { previous: prev }, this.opts.wall.now());
@@ -229,23 +235,11 @@ export class MatchManager {
     if (this.autoLoop) next.dispatch({ type: 'START' });
   }
 
-  /**
-   * Config frozen into the next season: the operator's next-config, with
-   * round-1 HP carried over from a season that actually finished, so a busy
-   * venue doesn't restart every season with instant knockouts.
-   */
-  private seasonConfig(): GameConfig {
-    const base = this.nextConfig;
-    const prev = this.runtime?.state;
-    if (!prev || prev.status !== 'FINISHED') return base;
-    return { ...base, hpInitial: carryOverHp(base, prev.rounds[prev.rounds.length - 1]) };
-  }
-
   private createRuntime(): MatchRuntime {
     return MatchRuntime.create(
       this.repo,
       newId('m'),
-      this.seasonConfig(),
+      this.nextConfig,
       randomInt(1, 2 ** 31 - 1),
       this.opts.mono,
       this.opts.wall,
@@ -263,6 +257,7 @@ export class MatchManager {
       ) {
         // Freeze a final public snapshot for /results.
         this.repo.tx(() => this.repo.saveMatchProjection(state, this.opts.wall.now(), this.snapshot()));
+        this.bestWaveCache = null;
       }
       for (const l of this.eventListeners) l(events, state);
     });

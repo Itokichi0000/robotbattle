@@ -1,11 +1,11 @@
 import { Canvas } from '@react-three/fiber';
 import { useRef } from 'react';
 import * as THREE from 'three';
-import type { RegionId, RegionPaint, TeamId } from '@sats-wars/shared';
+import type { Enemy, RegionId, RegionState, TeamId } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import { Effects } from './Effects';
 import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS } from './layout';
-import { MapOverlay } from './MapOverlay';
+import { MapOverlay, type RegionDanger } from './MapOverlay';
 import { ModelRobotActor } from './GlbRobotActor';
 import {
   ArenaStage,
@@ -18,10 +18,12 @@ import {
 
 export interface ArenaSceneProps {
   director: ArenaDirector;
-  regions: RegionPaint[];
-  /** Region at stake in the current round (highlighted on the map). */
-  focusRegionId: RegionId | null;
-  /** 0..1 per robot: extra glow when in a pinch (low HP, punches ×1.5). */
+  regions: RegionState[];
+  enemies: Enemy[];
+  /** What the next alien turn will do (from engine rules), for warning glows. */
+  danger: Partial<Record<RegionId, RegionDanger>>;
+  cityHpMax: number;
+  /** 0..1 per robot: extra glow (e.g. combo gauge full). */
   glow: Record<TeamId, number>;
   quality: Quality;
   reducedMotion: boolean;
@@ -35,7 +37,8 @@ export interface ArenaSceneProps {
 }
 
 /**
- * Venue 3D scene: hologram map behind, RAIJIN (left) vs FUJIN (right) in front.
+ * Venue 3D scene: hologram map of Japan with the invading UFOs behind, RAIJIN
+ * and FUJIN (allies) in front.
  * Pure presentation: everything shown comes from server state + director cues.
  */
 export function ArenaScene(props: ArenaSceneProps) {
@@ -72,7 +75,9 @@ export function ArenaScene(props: ArenaSceneProps) {
       <ArenaStage stars={q.stars} />
       <MapOverlay
         regions={regions}
-        focusRegionId={props.focusRegionId}
+        enemies={props.enemies}
+        danger={props.danger}
+        cityHpMax={props.cityHpMax}
         director={director}
         reducedMotion={reducedMotion}
         locale={props.locale}

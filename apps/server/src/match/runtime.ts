@@ -1,4 +1,4 @@
-import type { Finisher, GameConfig, GameEvent, MatchState, RoundState } from '@sats-wars/shared';
+import type { GameConfig, GameEvent, MatchState } from '@sats-wars/shared';
 import { isClockRunning } from '@sats-wars/shared';
 import {
   type EngineCommand,
@@ -23,7 +23,7 @@ const RECENT_EVENTS = 30;
 const HIDDEN_NAME = '匿名 / Anonymous';
 
 /**
- * Owns one match: engine state, the pause-corrected match clock, persistence
+ * Owns one campaign: engine state, the pause-corrected match clock, persistence
  * of the command log/events, and fan-out to listeners. All mutations go through
  * dispatch(), which is synchronous, so commands are strictly serialized.
  */
@@ -140,12 +140,11 @@ export class MatchRuntime {
     const cmd = { ...input, t } as EngineCommand;
     const r = reduce(this.state, cmd);
     const isTick = cmd.type === 'TICK';
-    // A refused punch (between rounds, paused) changes nothing but the clock, so
-    // it is not logged: a stale phone mashing the button must not grow the log.
-    // Timers replay identically from the next logged command.
-    const refusedZap =
-      cmd.type === 'ZAP' && r.events.length === 0 && r.outcome.kind === 'zap' && !r.outcome.result.ok;
-    const logged = !isTick && !refusedZap;
+    // A refused action (no target, paused…) changes nothing but the clock, so
+    // it is not logged: a stale phone mashing a button must not grow the log.
+    const refused =
+      cmd.type === 'ACT' && r.events.length === 0 && r.outcome.kind === 'action' && !r.outcome.result.ok;
+    const logged = !isTick && !refused;
     const now = this.wall.now();
     if (logged || r.events.length > 0 || persistExtra) {
       this.repo.tx(() => {
@@ -200,28 +199,10 @@ export class MatchRuntime {
   displayName = (participantId: string, nickname: string): string =>
     this.hidden.has(participantId) ? HIDDEN_NAME : nickname;
 
-  private presentFinisher(f: Finisher | null): Finisher | null {
-    return f && this.hidden.has(f.participantId) ? { ...f, nickname: HIDDEN_NAME } : f;
-  }
-
-  private presentRound(r: RoundState | null | undefined): RoundState | null | undefined {
-    if (!r?.finisher || !this.hidden.has(r.finisher.participantId)) return r;
-    return { ...r, finisher: this.presentFinisher(r.finisher) };
-  }
-
   /** Apply nickname moderation to an event before it leaves the server. */
   presentEvent(e: GameEvent): GameEvent {
-    if (e.type === 'ZAP') {
-      if (!this.hidden.has(e.data.participantId)) return e;
+    if (e.type === 'PLAYER_ACTION' && this.hidden.has(e.data.participantId)) {
       return { ...e, data: { ...e.data, nickname: HIDDEN_NAME } };
-    }
-    if (e.type === 'ROUND_ENDED' && e.data.finisher && this.hidden.has(e.data.finisher.participantId)) {
-      const finisher = this.presentFinisher(e.data.finisher);
-      return {
-        ...e,
-        data: { summary: { ...e.data.summary, finisher }, finisher },
-        patch: { ...e.patch, round: this.presentRound(e.patch.round) },
-      };
     }
     return e;
   }
@@ -239,8 +220,6 @@ export class MatchRuntime {
       ...core,
       clockMs: core.clockMs + delta,
       gameMs: core.gameMs + delta,
-      round: this.presentRound(core.round) ?? null,
-      rounds: core.rounds.map((r) => ({ ...r, finisher: this.presentFinisher(r.finisher) })),
     };
   }
 }

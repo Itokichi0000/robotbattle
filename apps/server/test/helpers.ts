@@ -1,7 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { TeamId } from '@sats-wars/shared';
+import { join as pathJoin } from 'node:path';
 import { buildServer, type SatsWarsServer } from '../src/app';
 import { FakeClock } from '../src/clock';
 import { loadEnv } from '../src/env';
@@ -18,7 +17,7 @@ export interface TestServer extends SatsWarsServer {
 }
 
 export function tempDbPath(): string {
-  return join(mkdtempSync(join(tmpdir(), 'satswars-')), 'test.db');
+  return pathJoin(mkdtempSync(pathJoin(tmpdir(), 'satswars-')), 'test.db');
 }
 
 export async function makeServer(
@@ -36,7 +35,6 @@ export async function makeServer(
     ADMIN_PASSWORD,
     LOG_LEVEL: 'silent',
     PUBLIC_PLAY_URL: 'http://localhost:3000/play',
-    OPENING_MS: '1000',
     ...opts.env,
   });
   const server = await buildServer({
@@ -84,11 +82,11 @@ export async function admin(s: TestServer, token: string, body: Record<string, u
   return res.json();
 }
 
-/** Pick a team (free, instant). */
-export async function joinTeam(s: TestServer, teamId: TeamId = 'RAIJIN', extra: { nickname?: string; deviceId?: string } = {}) {
-  const res = await s.inject({ method: 'POST', url: '/api/players', payload: { teamId, ...extra } });
+/** Join the defence (free, instant). */
+export async function join(s: TestServer, extra: { nickname?: string; deviceId?: string } = {}) {
+  const res = await s.inject({ method: 'POST', url: '/api/players', payload: extra });
   if (res.statusCode !== 200) throw new Error(`join failed ${res.statusCode} ${res.body}`);
-  return res.json() as { playerId: string; token: string; nickname: string; teamId: TeamId; creditSats: number };
+  return res.json() as { playerId: string; token: string; nickname: string; creditSats: number };
 }
 
 export async function topup(s: TestServer, token: string, amountSats = 210) {
@@ -100,8 +98,8 @@ export async function mockPay(s: TestServer, token: string, invoiceId: string) {
 }
 
 /** Join, top up and mock-pay in one go. */
-export async function fundedPlayer(s: TestServer, teamId: TeamId = 'RAIJIN', amountSats = 525, nickname?: string) {
-  const p = await joinTeam(s, teamId, nickname ? { nickname } : {});
+export async function fundedPlayer(s: TestServer, amountSats = 525, nickname?: string) {
+  const p = await join(s, nickname ? { nickname } : {});
   const inv = await topup(s, p.token, amountSats);
   if (inv.statusCode !== 200) throw new Error(`topup failed ${inv.body}`);
   const pay = await mockPay(s, p.token, inv.json().invoiceId);
@@ -109,17 +107,12 @@ export async function fundedPlayer(s: TestServer, teamId: TeamId = 'RAIJIN', amo
   return { ...p, invoiceId: inv.json().invoiceId as string, creditSats: pay.json().creditSats as number };
 }
 
-let zapCounter = 0;
-export function zap(s: TestServer, token: string, clientActionId = `cid-${++zapCounter}-${Date.now()}`) {
-  return s.inject({ method: 'POST', url: '/api/zap', headers: auth(token), payload: { clientActionId } });
-}
-
-/** Advance until the current season is in a fighting round. */
-export async function untilRound(s: TestServer, maxMs = 120_000): Promise<void> {
-  let waited = 0;
-  while (s.services.manager.current().state.phase !== 'ROUND') {
-    if (waited >= maxMs) throw new Error('never reached ROUND');
-    await s.advance(100);
-    waited += 100;
-  }
+let actionCounter = 0;
+export function act(
+  s: TestServer,
+  token: string,
+  body: { action?: string; regionId?: string; enemyId?: number; clientActionId?: string } = {},
+) {
+  const payload = { action: 'AUTO', clientActionId: `cid-${++actionCounter}-${Date.now()}`, ...body };
+  return s.inject({ method: 'POST', url: '/api/action', headers: auth(token), payload });
 }

@@ -1,80 +1,99 @@
 import { z } from 'zod';
 
 /**
- * ZAP BATTLE rules (v3). Every balance/timing number is injected through
- * GameConfig; a season stores a frozen copy, edits apply to the next season.
- * Durations are milliseconds of game time (pause-corrected).
+ * EARTH DEFENSE rules (co-op). Every balance number is injected through
+ * GameConfig; a campaign stores a frozen copy, edits apply to the next one.
+ * There are no round timers: the game advances only when players act
+ * (every `actionsPerTurn` paid actions the aliens take a turn).
  */
+const enemyStatsSchema = z.object({
+  hp: z.number().int().min(1).max(100_000),
+  attack: z.number().int().min(0).max(10_000),
+});
+
 export const gameConfigSchema = z
   .object({
     version: z.string().min(1).max(64),
-    /** Season opening show before round 1. */
-    openingMs: z.number().int().min(0).max(120_000),
-    roundsPerSeason: z.number().int().min(1).max(8),
-    /** A round ends by KO or when this time runs out. */
-    roundMaxMs: z.number().int().min(10_000).max(10 * 60_000),
-    /** KO / time-up celebration and "next region" announcement. */
-    roundEndMs: z.number().int().min(1_000).max(120_000),
-    seasonEndMs: z.number().int().min(1_000).max(10 * 60_000),
-    /** Price of one punch, deducted from the player's prepaid credit. */
-    zapCostSats: z.number().int().min(1).max(100_000),
-    /** Top-up amounts offered to players (sats). */
+    /** Price of one action, deducted from the player's prepaid credit. */
+    actionCostSats: z.number().int().min(1).max(100_000),
+    /** Top-up amounts offered on the phone (each should be a multiple of actionCostSats). */
     topupOptionsSats: z.array(z.number().int().min(1).max(1_000_000)).min(1).max(6),
-    zapDamage: z.number().int().min(1).max(10_000),
-    /** At or below this HP ratio a robot is "in a pinch" and hits harder. */
-    pinchHpRatio: z.number().min(0).max(1),
-    pinchMultiplier: z.number().min(1).max(5),
-    /** Every Nth punch of a team in a round is a special move. */
-    specialEvery: z.number().int().min(2).max(1000),
-    specialDamage: z.number().int().min(1).max(100_000),
-    /** HP of each robot in round 1; later rounds adapt to the crowd. */
-    hpInitial: z.number().int().min(10),
-    hpMin: z.number().int().min(10),
-    hpCap: z.number().int().min(10),
-    /** Adaptive HP aims for a round of about this many seconds. */
-    targetRoundSec: z.number().min(5).max(300),
-    /** Max factor by which HP may grow/shrink from one round to the next. */
-    hpMaxChangeFactor: z.number().min(1).max(10),
-    /** Minimum gap between two punches of the same player (server-enforced). */
-    zapCooldownMs: z.number().int().min(0).max(10_000),
+    /** Player actions between two alien turns. */
+    actionsPerTurn: z.number().int().min(1).max(200),
+    /** Each region's city strength; a region is captured at 0. */
+    cityHpMax: z.number().int().min(1).max(100_000),
+    /** RAIJIN: big hit on one alien. */
+    raijinDamage: z.number().int().min(1).max(100_000),
+    /** FUJIN: smaller hit on every alien in the region. */
+    fujinDamage: z.number().int().min(1).max(100_000),
+    /** Barrier: absorbs this much alien damage in the region at the next alien turn. */
+    shieldAbsorb: z.number().int().min(1).max(100_000),
+    /** Combo gauge fills by 1 per action; when full anyone may fire the combo. */
+    comboGaugeMax: z.number().int().min(1).max(1_000),
+    comboDamage: z.number().int().min(1).max(1_000_000),
+    comboHeal: z.number().int().min(0).max(100_000),
+    /** Japan falls (campaign over) when this many regions are captured at once. */
+    fallLimit: z.number().int().min(1).max(8),
+    /** City strength a captured region gets back when liberated. */
+    liberateHp: z.number().int().min(1).max(100_000),
+    /** Every standing region is repaired by this much when a wave is cleared. */
+    waveClearHeal: z.number().int().min(0).max(100_000),
+    scout: enemyStatsSchema,
+    walker: enemyStatsSchema,
+    mothership: enemyStatsSchema,
+    /** Enemy HP and attack grow by these fractions per wave after the first. */
+    hpGrowthPerWave: z.number().min(0).max(10),
+    attackGrowthPerWave: z.number().min(0).max(10),
+    /** Aliens in wave w: waveBase + waveGrowth × w. */
+    waveBase: z.number().int().min(1).max(1_000),
+    waveGrowth: z.number().int().min(0).max(1_000),
+    /** Every Nth wave starts with a mothership. */
+    bossEvery: z.number().int().min(1).max(1_000),
+    /** Landings per alien turn: 1 + floor((wave − 1) / landingsStepWaves). */
+    landingsStepWaves: z.number().int().min(1).max(1_000),
+    /** From this wave on, some landings are walkers instead of scouts. */
+    walkersFromWave: z.number().int().min(1).max(1_000),
+    /** After Japan falls, the result stays on screen this long before a new campaign. */
+    nextCampaignDelayMs: z.number().int().min(0).max(10 * 60_000),
+    /** Minimum gap between two actions of the same player (server-enforced). */
+    actionCooldownMs: z.number().int().min(0).max(10_000),
     cheerCooldownMs: z.number().int().min(0).max(60_000),
-    /** Pause between seasons before the next one starts automatically. */
-    nextSeasonDelayMs: z.number().int().min(0).max(10 * 60_000),
-    invoiceTtlMs: z
-      .number()
-      .int()
-      .min(30_000)
-      .max(60 * 60_000),
+    /** Lightning invoice expiry for top-ups. */
+    invoiceTtlMs: z.number().int().min(60_000).max(24 * 60 * 60_000),
   })
-  .refine((c) => c.hpMin <= c.hpCap && c.hpInitial >= c.hpMin && c.hpInitial <= c.hpCap, {
-    message: 'hpMin <= hpInitial <= hpCap required',
-  });
+  .refine((c) => c.liberateHp <= c.cityHpMax, { message: 'liberateHp <= cityHpMax required' });
 
 export type GameConfig = z.infer<typeof gameConfigSchema>;
+export type EnemyStats = z.infer<typeof enemyStatsSchema>;
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  version: 'zap-2',
-  openingMs: 6_000,
-  roundsPerSeason: 8,
-  roundMaxMs: 60_000,
-  roundEndMs: 8_000,
-  seasonEndMs: 20_000,
-  zapCostSats: 21,
+  version: 'def-1',
+  actionCostSats: 21,
   topupOptionsSats: [105, 210, 525],
-  zapDamage: 10,
-  pinchHpRatio: 0.3,
-  pinchMultiplier: 1.5,
-  specialEvery: 10,
-  specialDamage: 60,
-  hpInitial: 200,
-  hpMin: 150,
-  // Large enough that 100+ people tapping still get ~half-minute rounds (BALANCE_REPORT).
-  hpCap: 100_000,
-  targetRoundSec: 35,
-  hpMaxChangeFactor: 3,
-  zapCooldownMs: 250,
+  actionsPerTurn: 8,
+  cityHpMax: 70,
+  raijinDamage: 45,
+  fujinDamage: 20,
+  shieldAbsorb: 40,
+  comboGaugeMax: 12,
+  comboDamage: 150,
+  comboHeal: 30,
+  fallLimit: 5,
+  liberateHp: 30,
+  waveClearHeal: 15,
+  scout: { hp: 30, attack: 10 },
+  walker: { hp: 70, attack: 20 },
+  mothership: { hp: 260, attack: 32 },
+  hpGrowthPerWave: 0.25,
+  attackGrowthPerWave: 0.2,
+  waveBase: 2,
+  waveGrowth: 2,
+  bossEvery: 5,
+  landingsStepWaves: 1,
+  walkersFromWave: 2,
+  nextCampaignDelayMs: 15_000,
+  actionCooldownMs: 400,
   cheerCooldownMs: 1_000,
-  nextSeasonDelayMs: 6_000,
   invoiceTtlMs: 10 * 60_000,
 };
 
@@ -87,7 +106,7 @@ export function makeGameConfig(overrides: Partial<GameConfig> = {}): GameConfig 
   return gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...overrides });
 }
 
-/** Punches a credit balance can buy. */
-export function zapsFor(creditSats: number, config: Pick<GameConfig, 'zapCostSats'>): number {
-  return Math.floor(creditSats / config.zapCostSats);
+/** Actions a credit balance can buy. */
+export function actionsFor(creditSats: number, config: Pick<GameConfig, 'actionCostSats'>): number {
+  return Math.floor(creditSats / config.actionCostSats);
 }

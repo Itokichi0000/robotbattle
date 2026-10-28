@@ -37,3 +37,18 @@ export const REGION_INFO: Record<RegionId, RegionInfo> = {
     shortJa: '九州',
   },
 };
+
+/**
+ * Which regions border each other (land or a short strait). Aliens spread
+ * from a captured region into a neighbour, so this shapes the defence.
+ */
+export const REGION_NEIGHBORS: Record<RegionId, readonly RegionId[]> = {
+  hokkaido: ['tohoku'],
+  tohoku: ['hokkaido', 'kanto', 'chubu'],
+  kanto: ['tohoku', 'chubu'],
+  chubu: ['tohoku', 'kanto', 'kinki'],
+  kinki: ['chubu', 'chugoku', 'shikoku'],
+  chugoku: ['kinki', 'shikoku', 'kyushu'],
+  shikoku: ['kinki', 'chugoku', 'kyushu'],
+  kyushu: ['chugoku', 'shikoku'],
+};

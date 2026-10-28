@@ -9,18 +9,17 @@ import { DatabaseSync } from 'node:sqlite';
  */
 const MIGRATIONS: string[] = [
   `
-  -- One row per season ("match"). Engine state is rebuilt from match_commands.
+  -- One row per campaign ("match"). Engine state is rebuilt from match_commands.
   CREATE TABLE matches (
     id TEXT PRIMARY KEY,
     config_version TEXT NOT NULL,
     config_json TEXT NOT NULL,
     seed INTEGER NOT NULL,
     status TEXT NOT NULL,
-    phase TEXT NOT NULL,
     clock_ms INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER,
     ended_at INTEGER,
-    winner_team_id TEXT,
+    reached_wave INTEGER,
     result_json TEXT,
     final_snapshot_json TEXT,
     revision INTEGER NOT NULL DEFAULT 0,
@@ -47,36 +46,22 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (match_id, seq)
   );
 
-  CREATE TABLE rounds (
-    match_id TEXT NOT NULL REFERENCES matches(id),
-    round_index INTEGER NOT NULL,
-    region_id TEXT NOT NULL,
-    hp_max INTEGER NOT NULL,
-    winner_team_id TEXT,
-    end_reason TEXT NOT NULL,
-    duration_ms INTEGER NOT NULL,
-    zaps_raijin INTEGER NOT NULL,
-    zaps_fujin INTEGER NOT NULL,
-    finisher_player_id TEXT,
-    PRIMARY KEY (match_id, round_index)
-  );
-
-  -- Players live across seasons: credit (prepaid sats) carries over all day.
+  -- Players live across campaigns: credit (prepaid sats) carries over all day.
+  -- Everyone defends Japan together, so a player has no team.
   CREATE TABLE players (
     id TEXT PRIMARY KEY,
     session_id_hash TEXT NOT NULL UNIQUE,
     device_hash TEXT,
     nickname TEXT NOT NULL,
     nickname_hidden INTEGER NOT NULL DEFAULT 0,
-    team_id TEXT NOT NULL,
     credit_sats INTEGER NOT NULL DEFAULT 0 CHECK (credit_sats >= 0),
-    zaps_total INTEGER NOT NULL DEFAULT 0,
-    kos INTEGER NOT NULL DEFAULT 0,
+    actions_total INTEGER NOT NULL DEFAULT 0,
+    kills INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     last_seen_at INTEGER NOT NULL
   );
   CREATE INDEX players_device ON players(device_hash);
-  CREATE INDEX players_seen ON players(last_seen_at, team_id);
+  CREATE INDEX players_seen ON players(last_seen_at);
 
   -- Every change to a credit balance, for accounting and support.
   CREATE TABLE credit_ledger (
@@ -111,24 +96,23 @@ const MIGRATIONS: string[] = [
   CREATE INDEX invoices_status ON invoices(status);
   CREATE INDEX invoices_player ON invoices(player_id, created_at);
 
-  -- Accepted punches only; the unique key makes client retries idempotent.
-  CREATE TABLE zaps (
+  -- Accepted (charged) actions only; the unique key makes client retries idempotent.
+  CREATE TABLE actions (
     id TEXT PRIMARY KEY,
     player_id TEXT NOT NULL REFERENCES players(id),
     match_id TEXT NOT NULL REFERENCES matches(id),
     client_action_id TEXT NOT NULL,
-    round_index INTEGER,
-    team_id TEXT NOT NULL,
-    code TEXT NOT NULL,
+    action TEXT NOT NULL,
+    region_id TEXT,
     damage INTEGER NOT NULL,
-    special INTEGER NOT NULL,
-    pinch INTEGER NOT NULL,
+    kills INTEGER NOT NULL,
+    liberated INTEGER NOT NULL,
     cost_sats INTEGER NOT NULL,
     at_game_ms INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     UNIQUE (player_id, client_action_id)
   );
-  CREATE INDEX zaps_match_player ON zaps(match_id, player_id);
+  CREATE INDEX actions_match_player ON actions(match_id, player_id);
 
   CREATE TABLE sponsored_passes (
     id_hash TEXT PRIMARY KEY,
@@ -173,13 +157,13 @@ export function openDatabase(path: string): Db {
 }
 
 function migrate(db: Db): void {
-  // Databases from the pre-"ZAP BATTLE" prototype used a different schema.
+  // Databases from earlier prototypes (land-grab, ZAP BATTLE) used a different schema.
   const legacy = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'participants'")
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('participants', 'zaps', 'rounds')")
     .get();
   if (legacy) {
     throw new Error(
-      'This database uses the old prototype schema. Point DATABASE_PATH to a new file (default ./data/sats-wars-v2.db).',
+      'This database uses the old prototype schema. Point DATABASE_PATH to a new file (default ./data/sats-wars-v3.db).',
     );
   }
   db.exec(

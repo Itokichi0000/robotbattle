@@ -5,15 +5,6 @@ import { DEFAULT_GAME_CONFIG } from './config';
 import { REGION_IDS } from './regions';
 import { MatchStore } from './store';
 
-const team = (teamId: 'RAIJIN' | 'FUJIN') => ({
-  teamId,
-  robotId: teamId === 'RAIJIN' ? ('raijin' as const) : ('fujin' as const),
-  regionsWon: 0,
-  zapsTotal: 0,
-  specialsTotal: 0,
-  kos: 0,
-});
-
 function snap(lastSeq = 0): PublicMatchSnapshot {
   return {
     matchId: 'm',
@@ -27,33 +18,34 @@ function snap(lastSeq = 0): PublicMatchSnapshot {
     liveStartClock: 0,
     running: true,
     serverTime: 0,
-    phase: 'ROUND',
-    phaseEndsAt: 60_000,
-    roundOrder: [...REGION_IDS],
-    roundIndex: 0,
-    round: null,
-    rounds: [],
-    regions: REGION_IDS.map((regionId) => ({ regionId, ownerTeamId: null, roundIndex: null })),
-    teams: { RAIJIN: team('RAIJIN'), FUJIN: team('FUJIN') },
+    wave: 1,
+    waveRemaining: 3,
+    actionsThisTurn: 0,
+    combo: 0,
+    regions: REGION_IDS.map((regionId) => ({ regionId, cityHp: 100, fallen: false, shield: 0 })),
+    enemies: [{ id: 1, kind: 'SCOUT', regionId: 'kanto', hp: 30, hpMax: 30, attack: 8 }],
+    incoming: [],
+    stats: { actions: 0, kills: 0, alienTurns: 0, regionsLost: 0, regionsLiberated: 0, combos: 0 },
     result: null,
     lastSeq,
     recentEvents: [],
-    supporters: { RAIJIN: 0, FUJIN: 0 },
+    playersOnline: 0,
+    bestWave: 0,
     paymentsEnabled: true,
     paymentMode: 'mock',
     playUrl: '',
   };
 }
 
-function zap(seq: number): GameEvent {
+function act(seq: number): GameEvent {
   return {
     matchId: 'm',
     seq,
     t: 1000,
     gameMs: 1000,
-    type: 'ZAP',
-    data: { participantId: 'p', nickname: 'n', teamId: 'FUJIN', code: 'HIT', damage: 10, special: false, pinch: false, hp: { RAIJIN: 190, FUJIN: 200 } },
-    patch: { teams: [{ ...team('FUJIN'), zapsTotal: 1 }] },
+    type: 'PLAYER_ACTION',
+    data: { participantId: 'p', nickname: 'n', action: 'RAIJIN', auto: false, regionId: 'kanto', targetIds: [1], damage: 30, kills: 1, liberated: false },
+    patch: { enemies: [], actionsThisTurn: 1, combo: 1 },
   };
 }
 
@@ -61,17 +53,18 @@ describe('MatchStore', () => {
   it('applies in-order events and ignores duplicates', () => {
     const s = new MatchStore();
     s.applySnapshot(snap(5));
-    expect(s.applyEvent(zap(6), 10)).toBe('applied');
-    expect(s.snapshot!.teams.FUJIN.zapsTotal).toBe(1);
-    expect(s.applyEvent(zap(6), 10)).toBe('duplicate');
+    expect(s.applyEvent(act(6), 10)).toBe('applied');
+    expect(s.snapshot!.enemies).toEqual([]);
+    expect(s.snapshot!.actionsThisTurn).toBe(1);
+    expect(s.applyEvent(act(6), 10)).toBe('duplicate');
     expect(s.snapshot!.lastSeq).toBe(6);
   });
   it('reports gaps and other-match events', () => {
     const s = new MatchStore();
-    expect(s.applyEvent(zap(1), 0)).toBe('gap');
+    expect(s.applyEvent(act(1), 0)).toBe('gap');
     s.applySnapshot(snap(5));
-    expect(s.applyEvent(zap(8), 0)).toBe('gap');
-    expect(s.applyEvent({ ...zap(6), matchId: 'other' }, 0)).toBe('gap');
+    expect(s.applyEvent(act(8), 0)).toBe('gap');
+    expect(s.applyEvent({ ...act(6), matchId: 'other' }, 0)).toBe('gap');
     expect(
       s.applyClock({ matchId: 'm', status: 'LIVE', clockMs: 1, gameMs: 1, liveStartClock: 0, running: true, serverTime: 1, lastSeq: 9 }),
     ).toBe('gap');
@@ -80,8 +73,8 @@ describe('MatchStore', () => {
     const s = new MatchStore();
     s.applySnapshot(snap(5));
     expect(s.applySnapshot(snap(3))).toBe('ignored');
-    s.applyPresence({ RAIJIN: 3, FUJIN: 4 });
-    expect(s.snapshot!.supporters.FUJIN).toBe(4);
+    s.applyPresence(7);
+    expect(s.snapshot!.playersOnline).toBe(7);
     expect(s.applySnapshot({ ...snap(1), matchId: 'next' })).toBe('applied');
   });
 });

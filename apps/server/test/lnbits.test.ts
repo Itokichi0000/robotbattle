@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LnbitsPaymentAdapter } from '../src/payments/lnbits';
-import { type TestServer, auth, joinTeam, makeServer, topup } from './helpers';
+import { type TestServer, auth, join, makeServer, topup } from './helpers';
 
 interface FakeInvoice {
   paid: boolean;
@@ -161,7 +161,7 @@ describe('server with LNbits adapter', () => {
         ALLOW_REAL_PAYMENTS: 'true',
       },
     });
-    const r = await joinTeam(s, 'RAIJIN');
+    const r = await join(s);
     const res = await topup(s, r.token, 210);
     expect(res.statusCode).toBe(200);
     const row = s.services.repo.getInvoice(res.json().invoiceId)!;

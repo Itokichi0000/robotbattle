@@ -1,5 +1,5 @@
-import type { RegionId, RoundEndReason, TeamId } from '@sats-wars/shared';
-import { REGION_INFO, TEAM_META } from '@sats-wars/shared';
+import type { AlienAttack, RegionId, ResolvedAction, TeamId } from '@sats-wars/shared';
+import { REGION_INFO } from '@sats-wars/shared';
 
 /** Animation clip names shared by procedural robots and GLB assets. */
 export const CLIP_NAMES = [
@@ -15,17 +15,14 @@ export const CLIP_NAMES = [
 ] as const;
 export type ClipName = (typeof CLIP_NAMES)[number];
 
-/**
- * Seconds; looping clips ignore duration. Punches are short because the crowd
- * can land several per second: a long wind-up would always be interrupted.
- */
+/** Seconds; looping clips ignore duration. Attacks are short because many people act at once. */
 export const CLIP_DURATION: Record<ClipName, number> = {
   Idle: 2.4,
   Intro: 2.2,
   AttackLight: 0.45,
   AttackHeavy: 0.6,
   Guard: 0.8,
-  HitReact: 0.4,
+  HitReact: 0.5,
   Special: 1.6,
   Victory: 2.0,
   Defeat: 1.4,
@@ -52,25 +49,29 @@ export type EffectKind =
   | 'regionPulse'
   | 'shield'
   | 'chargeAura'
-  | 'specialStorm';
+  | 'specialStorm'
+  | 'alienAttack'
+  | 'landing';
 
 export interface DirectorEffect {
   id: number;
   kind: EffectKind;
-  /** For impact/lightning/wind: the ATTACKING team (the effect lands on the other robot). */
+  /** Which god caused it (colour, origin). */
   teamId: TeamId | null;
+  /** Where on the map it lands. */
   regionId: RegionId | null;
   /** Director time (s) at which the effect starts. */
   at: number;
   intensity: number;
 }
 
+export type BannerTone = 'ally' | 'alien' | 'neutral' | 'RAIJIN' | 'FUJIN';
+
 export interface Banner {
-  kind: 'round' | 'fight' | 'special' | 'pinch' | 'ko' | 'timeup' | 'draw' | 'champion' | 'opening';
-  teamId: TeamId | null;
+  kind: 'opening' | 'wave' | 'boss' | 'combo' | 'liberated' | 'alienTurn' | 'fallen' | 'cleared' | 'gameover';
+  tone: BannerTone;
   textJa: string;
   textEn: string;
-  /** Smaller second line (e.g. who landed the finishing blow). */
   subJa?: string;
   subEn?: string;
   until: number;
@@ -85,57 +86,41 @@ export interface RobotCue {
 }
 
 export type Cue =
-  | { kind: 'seasonStart' }
+  | { kind: 'campaignStart' }
+  | { kind: 'waveStart'; wave: number; boss: boolean }
   | {
-      kind: 'roundStart';
-      roundIndex: number;
-      roundsTotal: number;
+      kind: 'action';
+      action: ResolvedAction;
       regionId: RegionId;
-      hpMax: number;
-      hp: Record<TeamId, number>;
-    }
-  | {
-      kind: 'zap';
-      teamId: TeamId;
       nickname: string;
       damage: number;
-      special: boolean;
-      pinch: boolean;
-      ko: boolean;
-      /** Authoritative HP after this punch. */
-      hp: Record<TeamId, number>;
+      kills: number;
+      liberated: boolean;
     }
-  | {
-      kind: 'roundEnd';
-      winner: TeamId | null;
-      reason: RoundEndReason;
-      regionId: RegionId;
-      finisher: string | null;
-    }
-  | { kind: 'seasonEnd'; winner: TeamId | null; regionCounts: Record<TeamId, number> }
-  | { kind: 'cheer'; teamId: TeamId };
+  | { kind: 'alienTurn'; attacks: AlienAttack[]; fell: RegionId[]; landed: RegionId[] }
+  | { kind: 'landed'; regions: RegionId[] }
+  | { kind: 'waveCleared'; wave: number }
+  | { kind: 'japanFallen'; reachedWave: number }
+  | { kind: 'cheer' };
 
 export interface DirectorSettings {
   reducedMotion: boolean;
   /** 0..1 multiplier for camera shake. */
   shakeScale: number;
-  /** Always use the short special-move cut. */
+  /** Always use the short combo cut. */
   shortSpecials: boolean;
 }
 
 type Scheduled = { at: number; run: () => void; order: number };
 
-const TEAMS: TeamId[] = ['RAIJIN', 'FUJIN'];
-const other = (t: TeamId): TeamId => (t === 'RAIJIN' ? 'FUJIN' : 'RAIJIN');
-
-/** Robots stand this far in during a round so punches read clearly. */
-const FIGHT_ADVANCE = 0.45;
+const GODS: TeamId[] = ['RAIJIN', 'FUJIN'];
+const region = (id: RegionId) => REGION_INFO[id];
 
 /**
  * Turns server-confirmed game events into camera moves, robot clips, effects
- * and HP updates. It never decides outcomes: HP shown is always a value the
- * server already sent, applied the moment the punch arrives, so the HUD can't
- * drift from the truth even when the crowd taps faster than animations play.
+ * and sounds. It never decides anything: every number shown comes from the
+ * server. Many people can act per second, so per-action reactions are short
+ * and the heavy effects/sounds are throttled.
  */
 export class ArenaDirector {
   time = 0;
@@ -144,8 +129,6 @@ export class ArenaDirector {
     FUJIN: { clip: 'Idle', start: 0, advance: 0 },
   };
   camera: { preset: CameraPresetName; since: number } = { preset: 'overview', since: 0 };
-  displayHp: Record<TeamId, number> = { RAIJIN: 100, FUJIN: 100 };
-  hpMax = 100;
   shake = 0;
   banner: Banner | null = null;
   /** Until this time a cinematic owns the camera and robot clips. */
@@ -157,12 +140,9 @@ export class ArenaDirector {
   private queue: Scheduled[] = [];
   private order = 0;
   private effectId = 0;
-  private inRound = false;
-  private lastSpecialAt = -100;
-  private pinchAnnounced: Record<TeamId, boolean> = { RAIJIN: false, FUJIN: false };
   private lastFx: Record<string, number> = {};
+  private cheerSide = 0;
   private effectListeners = new Set<(e: DirectorEffect) => void>();
-  private hpListeners = new Set<(hp: Record<TeamId, number>) => void>();
   private bannerListeners = new Set<(b: Banner | null) => void>();
   private soundListeners = new Set<(sound: string, teamId: TeamId | null) => void>();
 
@@ -172,19 +152,13 @@ export class ArenaDirector {
       this.effectListeners.delete(l);
     };
   }
-  onHp(l: (hp: Record<TeamId, number>) => void) {
-    this.hpListeners.add(l);
-    return (): void => {
-      this.hpListeners.delete(l);
-    };
-  }
   onBanner(l: (b: Banner | null) => void) {
     this.bannerListeners.add(l);
     return (): void => {
       this.bannerListeners.delete(l);
     };
   }
-  /** Audio hooks: 'hit', 'thunder', 'wind', 'capture', 'charge', 'special', 'victory', 'ko', 'intro', 'cheer'. */
+  /** Audio hooks: 'hit', 'thunder', 'wind', 'shield', 'capture', 'charge', 'special', 'victory', 'ko', 'intro'. */
   onSound(l: (sound: string, teamId: TeamId | null) => void) {
     this.soundListeners.add(l);
     return (): void => {
@@ -192,40 +166,32 @@ export class ArenaDirector {
     };
   }
 
-  /** Snap HUD HP to authoritative values (snapshot load, resync). */
-  syncHp(hp: Record<TeamId, number>, hpMax?: number): void {
-    if (hpMax) this.hpMax = hpMax;
-    this.displayHp = { ...hp };
-    for (const l of this.hpListeners) l(this.displayHp);
-  }
-
-  /** Put robots in fighting stance without the intro (joining mid-round). */
-  enterRound(hp: Record<TeamId, number>, hpMax: number): void {
-    this.inRound = true;
-    this.syncHp(hp, hpMax);
-    for (const t of TEAMS) this.setClip(t, 'Idle', FIGHT_ADVANCE);
-  }
-
-  /** True while a cinematic (intro/special/KO/result) is playing or queued. */
+  /** True while a cinematic is playing or queued. */
   get busy(): boolean {
     return this.busyUntil > this.time;
   }
 
   play(cue: Cue): void {
     switch (cue.kind) {
-      case 'seasonStart':
-        return this.playSeasonStart();
-      case 'roundStart':
-        return this.playRoundStart(cue);
-      case 'zap':
-        return this.playZap(cue);
-      case 'roundEnd':
-        return this.playRoundEnd(cue);
-      case 'seasonEnd':
-        return this.playSeasonEnd(cue);
+      case 'campaignStart':
+        return this.playCampaignStart();
+      case 'waveStart':
+        return this.playWaveStart(cue.wave, cue.boss);
+      case 'action':
+        return this.playAction(cue);
+      case 'alienTurn':
+        return this.playAlienTurn(cue);
+      case 'landed':
+        for (const id of cue.regions) this.emitEffect('landing', null, id, this.time, 0.8);
+        return;
+      case 'waveCleared':
+        return this.playWaveCleared(cue.wave);
+      case 'japanFallen':
+        return this.playJapanFallen(cue.reachedWave);
       case 'cheer':
-        if (this.throttle(`cheer-${cue.teamId}`, 0.6)) {
-          this.emitEffect('chargeAura', cue.teamId, null, this.time, 0.35);
+        if (this.throttle('cheer', 0.5)) {
+          this.cheerSide = 1 - this.cheerSide;
+          this.emitEffect('chargeAura', GODS[this.cheerSide]!, null, this.time, 0.35);
         }
         return;
     }
@@ -238,10 +204,10 @@ export class ArenaDirector {
     const decay = this.settings.reducedMotion ? 10 : 3.2;
     this.shake = Math.max(0, this.shake - dt * decay);
     if (this.banner && this.banner.until <= this.time) this.setBanner(null);
-    for (const t of TEAMS) {
+    for (const t of GODS) {
       const r = this.robots[t];
       if (!LOOPING_CLIPS.has(r.clip) && r.clip !== 'Defeat' && this.time - r.start > CLIP_DURATION[r.clip] + 0.05) {
-        this.setClip(t, 'Idle', this.inRound ? FIGHT_ADVANCE : 0);
+        this.setClip(t, 'Idle', 0);
       }
     }
   }
@@ -249,6 +215,15 @@ export class ArenaDirector {
   /** Remaining scheduled items (for tests). */
   get pending(): number {
     return this.queue.length;
+  }
+
+  /** Back to a calm stance (new campaign loaded, preview reset). */
+  reset(): void {
+    this.queue = [];
+    this.busyUntil = this.time;
+    for (const t of GODS) this.setClip(t, 'Idle', 0);
+    this.setCamera('overview');
+    this.setBanner(null);
   }
 
   // ---- sequences --------------------------------------------------------
@@ -262,226 +237,213 @@ export class ArenaDirector {
     return Math.max(this.time, Math.min(this.busyUntil, this.time + 3));
   }
 
-  private playSeasonStart(): void {
+  private playCampaignStart(): void {
     const s = this.startTime();
-    this.inRound = false;
     this.at(s, () => {
       this.setCamera('intro');
-      for (const t of TEAMS) this.setClip(t, 'Intro', 0);
+      for (const t of GODS) this.setClip(t, 'Intro', 0);
       this.sound('intro', null);
       this.setBanner({
         kind: 'opening',
-        teamId: null,
-        textJa: '雷神 vs 風神',
-        textEn: 'RAIJIN vs FUJIN',
-        subJa: '新しいシーズン開幕！ 8つの地方を奪い合え',
-        subEn: 'New season! Fight for 8 regions of Japan',
+        tone: 'ally',
+        textJa: '地球防衛軍 出動！',
+        textEn: 'EARTH DEFENSE FORCE, LAUNCH!',
+        subJa: '雷神と風神が手を組んだ。エイリアンから日本を守れ',
+        subEn: 'Raijin and Fujin join forces. Defend Japan from the aliens',
         until: s + 3.5,
       });
     });
     this.at(s + 0.9, () => {
-      for (const t of TEAMS) this.emitEffect('shockwave', t, null, this.time, 0.8);
+      for (const t of GODS) this.emitEffect('shockwave', t, null, this.time, 0.8);
       this.addShake(0.5);
     });
     this.at(s + 2.6, () => this.setCamera('overview'));
     this.busyUntil = s + 2.6;
   }
 
-  private playRoundStart(cue: Extract<Cue, { kind: 'roundStart' }>): void {
+  private playWaveStart(wave: number, boss: boolean): void {
     const s = this.startTime();
-    const info = REGION_INFO[cue.regionId];
-    const intro = this.settings.reducedMotion ? 1.0 : 1.8;
     this.at(s, () => {
-      this.inRound = true;
-      this.pinchAnnounced = { RAIJIN: false, FUJIN: false };
-      this.syncHp(cue.hp, cue.hpMax);
       this.setCamera('mapFocus');
-      for (const t of TEAMS) this.setClip(t, 'Idle', 0);
-      this.emitEffect('regionPulse', null, cue.regionId, this.time, 1);
+      this.sound(boss ? 'special' : 'intro', null);
+      this.setBanner(
+        boss
+          ? {
+              kind: 'boss',
+              tone: 'alien',
+              textJa: `ウェーブ${wave} 母艦接近！`,
+              textEn: `WAVE ${wave}: MOTHERSHIP INCOMING!`,
+              subJa: '雷神の雷撃と合体技で落とせ',
+              subEn: 'Bring it down with Raijin and the combo',
+              until: s + 2.4,
+            }
+          : {
+              kind: 'wave',
+              tone: 'alien',
+              textJa: `ウェーブ${wave}`,
+              textEn: `WAVE ${wave}`,
+              subJa: 'エイリアンが来る！',
+              subEn: 'Aliens incoming!',
+              until: s + 1.8,
+            },
+      );
+    });
+    this.at(s + 1.8, () => this.setCamera('overview'));
+    this.busyUntil = s + 1.8;
+  }
+
+  private playAction(cue: Extract<Cue, { kind: 'action' }>): void {
+    const id = cue.regionId;
+    if (cue.action === 'COMBO') return this.playCombo(cue);
+    if (cue.action === 'SHIELD') {
+      this.emitEffect('shield', null, id, this.time, 1);
+      if (this.throttle('sfx-shield', 0.15)) this.sound('shield', null);
+      if (!this.busy) for (const t of GODS) if (this.robots[t].clip === 'Idle') this.setClip(t, 'Guard', 0);
+    } else {
+      const god: TeamId = cue.action === 'RAIJIN' ? 'RAIJIN' : 'FUJIN';
+      this.emitEffect('impact', god, id, this.time, cue.kills ? 1 : 0.6);
+      if (this.throttle(`sig-${god}`, 0.3)) {
+        this.emitEffect(god === 'RAIJIN' ? 'lightning' : 'wind', god, id, this.time, 0.9);
+        this.sound(god === 'RAIJIN' ? 'thunder' : 'wind', god);
+      }
+      if (this.throttle(`hit-${god}`, 0.08)) this.sound('hit', god);
+      if (!this.busy) {
+        const r = this.robots[god];
+        const canSwing = r.clip === 'Idle' || r.clip === 'Guard' || this.time - r.start > CLIP_DURATION[r.clip] * 0.6;
+        if (canSwing) this.setClip(god, god === 'RAIJIN' ? 'AttackHeavy' : 'AttackLight', 0.25);
+      }
+    }
+    if (cue.kills > 0) {
+      this.emitEffect('sparks', null, id, this.time, Math.min(1.2, 0.5 + cue.kills * 0.25));
+      if (this.throttle('shake', 0.15)) this.addShake(0.15);
+    }
+    if (cue.liberated) {
+      this.emitEffect('regionPulse', 'FUJIN', id, this.time, 1.2);
+      this.sound('capture', null);
       this.setBanner({
-        kind: 'round',
-        teamId: null,
-        textJa: `第${cue.roundIndex + 1}戦\u3000${info.labelJa}をかけて！`,
-        textEn: `ROUND ${cue.roundIndex + 1} — fight for ${info.labelEn}!`,
-        subJa: `${cue.roundIndex + 1} / ${cue.roundsTotal}`,
-        subEn: `${cue.roundIndex + 1} / ${cue.roundsTotal}`,
-        until: s + intro,
+        kind: 'liberated',
+        tone: 'ally',
+        textJa: `${region(id).labelJa} 奪還！`,
+        textEn: `${region(id).labelEn} LIBERATED!`,
+        subJa: `${cue.nickname} がとりかえした`,
+        subEn: `taken back by ${cue.nickname}`,
+        until: this.time + 2.4,
       });
-    });
-    this.at(s + intro, () => {
-      this.setCamera('overview');
-      for (const t of TEAMS) {
-        this.setClip(t, 'Guard', FIGHT_ADVANCE);
-        this.emitEffect('shockwave', t, null, this.time, 0.6);
-      }
-      this.addShake(0.3);
-      this.sound('intro', null);
-      this.setBanner({ kind: 'fight', teamId: null, textJa: 'FIGHT!', textEn: 'FIGHT!', until: s + intro + 1.0 });
-    });
-    this.busyUntil = s + intro;
+    }
   }
 
-  private playZap(cue: Extract<Cue, { kind: 'zap' }>): void {
-    const me = cue.teamId;
-    const foe = other(me);
-    // HP is the server's number, shown immediately.
-    this.displayHp = { ...cue.hp };
-    for (const l of this.hpListeners) l(this.displayHp);
-
-    // Every punch gets a hit flash; heavier effects are throttled so a crowd
-    // of 100 tapping doesn't turn into a white-out or a strobe.
-    this.emitEffect('impact', me, null, this.time, cue.special ? 1.4 : cue.pinch ? 0.9 : 0.6);
-    if (this.throttle(`hit-${me}`, 0.08)) this.sound('hit', me);
-    if (this.throttle(`sig-${me}`, 0.3) || cue.special) {
-      this.emitEffect(me === 'RAIJIN' ? 'lightning' : 'wind', me, null, this.time, cue.special ? 1.5 : 0.7);
-      this.sound(me === 'RAIJIN' ? 'thunder' : 'wind', me);
-    }
-    if (this.throttle('shake', 0.15)) this.addShake(cue.special || cue.ko ? 0.8 : 0.12);
-
-    if (cue.pinch && !this.pinchAnnounced[me]) {
-      this.pinchAnnounced[me] = true;
-      this.emitEffect('chargeAura', me, null, this.time, 1);
-      this.sound('charge', me);
-      if (!cue.special && !cue.ko) {
-        this.setBanner({
-          kind: 'pinch',
-          teamId: me,
-          textJa: `${TEAM_META[me].nameJa}ピンチ！ パンチ1.5倍`,
-          textEn: `${TEAM_META[me].nameEn} in a pinch! Punches ×1.5`,
-          until: this.time + 1.8,
-        });
-      }
-    }
-
-    if (cue.special) return this.playSpecial(me, cue.nickname, cue.damage);
-    if (this.busy) return; // a cinematic owns the robots; effects/HP still update.
-
-    const r = this.robots[me];
-    const canSwing =
-      r.clip === 'Idle' || r.clip === 'Guard' || r.clip === 'HitReact' || this.time - r.start > CLIP_DURATION[r.clip] * 0.6;
-    if (canSwing) {
-      const heavy = cue.pinch || r.clip === 'AttackLight';
-      this.setClip(me, heavy ? 'AttackHeavy' : 'AttackLight', 0.75);
-    }
-    const f = this.robots[foe];
-    if (f.clip === 'Idle' || f.clip === 'Guard') this.setClip(foe, 'HitReact', FIGHT_ADVANCE);
-  }
-
-  private playSpecial(me: TeamId, nickname: string, damage: number): void {
-    const short = this.settings.shortSpecials || this.settings.reducedMotion || this.time - this.lastSpecialAt < 8;
-    this.lastSpecialAt = this.time;
-    const dur = short ? 0.9 : 1.6;
+  private playCombo(cue: Extract<Cue, { kind: 'action' }>): void {
+    const short = this.settings.shortSpecials || this.settings.reducedMotion;
+    const dur = short ? 1.0 : 1.8;
     const s = this.time;
-    if (!short) this.setCamera(me === 'RAIJIN' ? 'specialRAIJIN' : 'specialFUJIN');
-    this.setClip(me, 'Special', 0.75);
-    this.setClip(other(me), 'HitReact', FIGHT_ADVANCE);
-    this.emitEffect('specialStorm', me, null, this.time, short ? 0.5 : 1);
-    this.sound('special', me);
+    if (!short) this.setCamera('final');
+    for (const t of GODS) {
+      this.setClip(t, 'Special', 0.3);
+      this.emitEffect('specialStorm', t, null, this.time, short ? 0.5 : 1);
+    }
+    this.emitEffect('lightning', 'RAIJIN', cue.regionId, this.time, 1.5);
+    this.emitEffect('wind', 'FUJIN', cue.regionId, this.time, 1.5);
+    this.emitEffect('sparks', null, cue.regionId, this.time, 1.4);
+    this.addShake(0.8);
+    this.sound('special', null);
     this.setBanner({
-      kind: 'special',
-      teamId: me,
-      textJa: `${TEAM_META[me].specialJa}！`,
-      textEn: `${TEAM_META[me].specialEn}!`,
-      subJa: `${nickname} の必殺技 −${damage}`,
-      subEn: `${nickname}'s special −${damage}`,
-      until: s + dur + 0.8,
+      kind: 'combo',
+      tone: 'ally',
+      textJa: '合体技 風神雷神！',
+      textEn: 'FŪJIN-RAIJIN COMBO!',
+      subJa: `${cue.nickname} が ${region(cue.regionId).labelJa} を一掃`,
+      subEn: `${cue.nickname} wipes out ${region(cue.regionId).labelEn}`,
+      until: s + dur + 1,
     });
     if (!short) this.at(s + dur, () => this.setCamera('overview'));
     this.busyUntil = Math.max(this.busyUntil, s + dur);
   }
 
-  private playRoundEnd(cue: Extract<Cue, { kind: 'roundEnd' }>): void {
-    const s = Math.max(this.time, Math.min(this.busyUntil, this.time + 0.6));
-    const info = REGION_INFO[cue.regionId];
-    const w = cue.winner;
+  private playAlienTurn(cue: Extract<Cue, { kind: 'alienTurn' }>): void {
+    const s = this.startTime();
+    const intro = this.settings.reducedMotion ? 0.6 : 1.0;
     this.at(s, () => {
-      this.inRound = false;
-      if (w) {
-        const loser = other(w);
-        this.setCamera(w === 'RAIJIN' ? 'victoryRAIJIN' : 'victoryFUJIN');
-        this.setClip(w, 'Victory', 0.3);
-        this.setClip(loser, cue.reason === 'KO' ? 'Defeat' : 'HitReact', 0.2);
-        this.emitEffect('shockwave', w, null, this.time, 1);
-        this.addShake(cue.reason === 'KO' ? 0.9 : 0.4);
-        this.sound(cue.reason === 'KO' ? 'ko' : 'victory', w);
-        this.setBanner({
-          kind: cue.reason === 'KO' ? 'ko' : 'timeup',
-          teamId: w,
-          textJa: cue.reason === 'KO' ? `KO！ ${TEAM_META[w].nameJa}の勝ち` : `タイムアップ！ ${TEAM_META[w].nameJa}の勝ち`,
-          textEn: cue.reason === 'KO' ? `KO! ${TEAM_META[w].nameEn} WINS` : `TIME UP! ${TEAM_META[w].nameEn} WINS`,
-          subJa:
-            cue.reason === 'KO' && cue.finisher
-              ? `とどめ：${cue.finisher}\u3000→ ${info.labelJa}ゲット！`
-              : `${info.labelJa}ゲット！（残りHPが多い）`,
-          subEn:
-            cue.reason === 'KO' && cue.finisher
-              ? `Finisher: ${cue.finisher} → ${info.labelEn} captured!`
-              : `${info.labelEn} captured (more HP left)`,
-          until: s + 4.2,
-        });
-      } else {
-        this.setCamera('final');
-        for (const t of TEAMS) this.setClip(t, 'Guard', 0);
-        this.sound('victory', null);
-        this.setBanner({
-          kind: 'draw',
-          teamId: null,
-          textJa: '引き分け！',
-          textEn: 'DRAW!',
-          subJa: `${info.labelJa}はどちらのものにもならない`,
-          subEn: `${info.labelEn} stays neutral`,
-          until: s + 4.2,
-        });
+      this.setCamera('mapFocus');
+      this.sound('charge', null);
+      this.setBanner({
+        kind: 'alienTurn',
+        tone: 'alien',
+        textJa: 'エイリアンの攻撃！',
+        textEn: 'ALIEN ATTACK!',
+        subJa: cue.attacks.length ? `${cue.attacks.length}つの地方が攻撃された` : '結界ですべて防いだ！',
+        subEn: cue.attacks.length ? `${cue.attacks.length} regions under fire` : 'Every attack blocked!',
+        until: s + intro + 1.6,
+      });
+    });
+    this.at(s + intro, () => {
+      for (const a of cue.attacks) {
+        this.emitEffect('alienAttack', null, a.regionId, this.time, a.damage > a.absorbed ? 1 : 0.4);
+        if (a.absorbed > 0) this.emitEffect('shield', null, a.regionId, this.time, 1);
+      }
+      for (const id of cue.landed) this.emitEffect('landing', null, id, this.time, 0.8);
+      if (cue.attacks.length) {
+        this.addShake(0.5);
+        this.sound('hit', null);
+        for (const t of GODS) this.setClip(t, 'HitReact', 0);
       }
     });
-    if (w) {
-      this.at(s + 2.6, () => {
-        this.setCamera('mapFocus');
-        this.emitEffect('regionPulse', w, cue.regionId, this.time, 1.2);
-        this.sound('capture', w);
+    let end = s + intro + 1.4;
+    if (cue.fell.length) {
+      this.at(s + intro + 1.2, () => {
+        for (const id of cue.fell) this.emitEffect('regionPulse', null, id, this.time, 1.2);
+        this.sound('ko', null);
+        this.setBanner({
+          kind: 'fallen',
+          tone: 'alien',
+          textJa: `${cue.fell.map((id) => region(id).labelJa).join('・')} がとられた！`,
+          textEn: `${cue.fell.map((id) => region(id).labelEn).join(', ')} captured!`,
+          subJa: 'エイリアンを全部倒せば取り返せる',
+          subEn: 'Defeat every alien there to take it back',
+          until: s + intro + 3.6,
+        });
       });
+      end += 1.4;
     }
-    this.at(s + 5, () => {
-      for (const t of TEAMS) this.setClip(t, 'Idle', 0);
-      this.setCamera('overview');
-    });
-    this.busyUntil = s + 5;
+    this.at(end, () => this.setCamera('overview'));
+    this.busyUntil = end;
   }
 
-  private playSeasonEnd(cue: Extract<Cue, { kind: 'seasonEnd' }>): void {
+  private playWaveCleared(wave: number): void {
     const s = this.startTime();
-    const w = cue.winner;
-    const score = `${cue.regionCounts.RAIJIN} – ${cue.regionCounts.FUJIN}`;
     this.at(s, () => {
-      this.inRound = false;
-      if (w) {
-        this.setCamera(w === 'RAIJIN' ? 'victoryRAIJIN' : 'victoryFUJIN');
-        this.setClip(w, 'Victory', 0);
-        this.setClip(other(w), 'Defeat', 0);
-        this.emitEffect('specialStorm', w, null, this.time, 0.7);
-        this.sound('victory', w);
-        this.setBanner({
-          kind: 'champion',
-          teamId: w,
-          textJa: `${TEAM_META[w].nameJa} 全国制覇！`,
-          textEn: `${TEAM_META[w].nameEn} CONQUERS JAPAN!`,
-          subJa: `雷神 ${score} 風神`,
-          subEn: `RAIJIN ${score} FUJIN`,
-          until: s + 30,
-        });
-      } else {
-        this.setCamera('final');
-        for (const t of TEAMS) this.setClip(t, 'Guard', 0);
-        this.setBanner({
-          kind: 'draw',
-          teamId: null,
-          textJa: 'シーズン引き分け！',
-          textEn: 'SEASON DRAW!',
-          subJa: `雷神 ${score} 風神`,
-          subEn: `RAIJIN ${score} FUJIN`,
-          until: s + 30,
-        });
-      }
+      for (const t of GODS) this.setClip(t, 'Victory', 0);
+      this.sound('victory', null);
+      this.setBanner({
+        kind: 'cleared',
+        tone: 'ally',
+        textJa: `ウェーブ${wave} クリア！`,
+        textEn: `WAVE ${wave} CLEARED!`,
+        subJa: '街が少し回復した',
+        subEn: 'Cities repaired a little',
+        until: s + 2.2,
+      });
+    });
+    this.at(s + 2.0, () => {
+      for (const t of GODS) this.setClip(t, 'Idle', 0);
+    });
+    this.busyUntil = s + 1.2;
+  }
+
+  private playJapanFallen(reachedWave: number): void {
+    const s = this.startTime();
+    this.at(s, () => {
+      this.setCamera('final');
+      for (const t of GODS) this.setClip(t, 'Defeat', 0);
+      this.sound('ko', null);
+      this.setBanner({
+        kind: 'gameover',
+        tone: 'alien',
+        textJa: '日本陥落…',
+        textEn: 'JAPAN HAS FALLEN…',
+        subJa: `記録：ウェーブ${reachedWave}　まもなく再出撃！`,
+        subEn: `Reached wave ${reachedWave} — redeploying soon!`,
+        until: s + 30,
+      });
     });
     this.busyUntil = s + 1;
   }

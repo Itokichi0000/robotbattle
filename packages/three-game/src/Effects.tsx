@@ -1,10 +1,10 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import type { TeamId } from '@sats-wars/shared';
+import type { RegionId, TeamId } from '@sats-wars/shared';
 import { otherTeam } from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect } from './director';
-import { ADVANCE_FRACTION, ROBOT_HOME, TEAM_COLORS } from './layout';
+import { ADVANCE_FRACTION, ALIEN_COLOR, ROBOT_HOME, TEAM_COLORS, regionWorldPosition } from './layout';
 
 export interface EffectsProps {
   director: ArenaDirector;
@@ -27,6 +27,7 @@ interface Particle {
 interface Transient {
   kind: DirectorEffect['kind'];
   teamId: TeamId | null;
+  regionId: RegionId | null;
   start: number;
   duration: number;
   intensity: number;
@@ -170,6 +171,7 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
           transients.current.push({
             kind: e.kind,
             teamId: e.teamId,
+            regionId: e.regionId,
             start: director.time,
             duration,
             intensity: e.intensity,
@@ -177,33 +179,52 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
           });
         switch (e.kind) {
           case 'impact':
-            // One punch landing on the other robot: small, fast, attacker-coloured.
+            // One hit landing (on an alien over the map, or on the other robot).
             if (e.teamId) {
-              const at = robotPos(otherTeam(e.teamId), 0.45).setY(2.4);
+              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.45).setY(2.4);
               spawn(Math.round(14 * e.intensity), at, '#FFFFFF', 7, 0.45, { gravity: -8 });
               spawn(Math.round(18 * e.intensity), at, TEAM_COLORS[e.teamId], 6, 0.6, { gravity: -6 });
             }
             break;
-          case 'sparks':
-            spawn(Math.round(90 * e.intensity), CLASH_POINT, '#FFFFFF', 9, 0.9, { gravity: -9 });
-            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.RAIJIN, 7, 1.0, {
-              gravity: -7,
-            });
-            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.FUJIN, 7, 1.0, {
-              gravity: -7,
-            });
+          case 'sparks': {
+            // Explosion: an alien destroyed (at its region) or a clash point.
+            const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : CLASH_POINT;
+            spawn(Math.round(90 * e.intensity), at, '#FFFFFF', 9, 0.9, { gravity: -9 });
+            spawn(Math.round(60 * e.intensity), at, TEAM_COLORS.RAIJIN, 7, 1.0, { gravity: -7 });
+            spawn(Math.round(60 * e.intensity), at, TEAM_COLORS.FUJIN, 7, 1.0, { gravity: -7 });
+            break;
+          }
+          case 'alienAttack':
+            // Alien beams hitting a city.
+            if (e.regionId) {
+              const at = regionWorldPosition(e.regionId, 0.3);
+              spawn(Math.round(70 * e.intensity), at, '#FF5D6C', 6, 0.9, { gravity: -4, up: 1.5 });
+              spawn(Math.round(40 * e.intensity), at, ALIEN_COLOR, 4, 1.1, { gravity: 1, up: 2 });
+            }
+            break;
+          case 'landing':
+            if (e.regionId) {
+              spawn(Math.round(40 * e.intensity), regionWorldPosition(e.regionId, 1.4), ALIEN_COLOR, 3, 1.2, {
+                gravity: -3,
+                spread: 0.5,
+              });
+            }
             break;
           case 'shockwave':
             add(0.9);
             break;
           case 'lightning':
             add(reducedMotion ? 0.25 : 0.45);
-            if (e.teamId) spawn(40, robotPos(otherTeam(e.teamId), 0.6), TEAM_COLORS.RAIJIN, 6, 0.6);
+            if (e.teamId) {
+              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.6);
+              spawn(40, at, TEAM_COLORS.RAIJIN, 6, 0.6);
+            }
             break;
           case 'wind':
             add(1.0);
             if (e.teamId) {
-              spawn(50, robotPos(otherTeam(e.teamId), 0.6), TEAM_COLORS.FUJIN, 3, 1.2, {
+              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.6);
+              spawn(50, at, TEAM_COLORS.FUJIN, 3, 1.2, {
                 gravity: 0.5,
                 swirl: 6,
               });
@@ -310,7 +331,9 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       const rng = seeded(x.seed + i * 131 + frame * 977);
       const target =
         x.kind === 'lightning'
-          ? robotPos('FUJIN', 0.6)
+          ? x.regionId
+            ? regionWorldPosition(x.regionId, 0.6)
+            : robotPos('FUJIN', 0.6)
           : robotPos('RAIJIN').add(new THREE.Vector3((rng() - 0.5) * 6, -2, (rng() - 0.5) * 4));
       const from = target
         .clone()
@@ -331,7 +354,8 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       if (!x) return;
       const u = (t - x.start) / x.duration;
       const layer = i % 3;
-      const p = x.kind === 'wind' ? robotPos('RAIJIN', 0.6) : robotPos('FUJIN');
+      const p =
+        x.kind === 'wind' ? (x.regionId ? regionWorldPosition(x.regionId, 0.2) : robotPos('RAIJIN', 0.6)) : robotPos('FUJIN');
       m.position.set(p.x, 0.6 + layer * 1.1 + u * 0.8, p.z);
       m.rotation.set(Math.PI / 2, 0, t * (6 + layer * 2));
       const s = (0.9 + layer * 0.35) * (0.6 + u * 0.8) * (x.kind === 'specialStorm' ? 1.5 : 1);

@@ -1,6 +1,5 @@
 import type { GameEvent } from './events';
 import type { ClockTick, PublicMatchSnapshot } from './protocol';
-import type { RegionPaint, TeamState } from './state';
 import { isClockRunning } from './time';
 
 export type ApplyResult = 'applied' | 'duplicate' | 'gap' | 'ignored';
@@ -57,15 +56,6 @@ export class MatchStore {
     if (e.seq !== cur.lastSeq + 1) return 'gap';
     const next: PublicMatchSnapshot = { ...cur, lastSeq: e.seq };
     const p = e.patch;
-    if (p.regions?.length) {
-      const byId = new Map<string, RegionPaint>(p.regions.map((r) => [r.regionId, r]));
-      next.regions = cur.regions.map((r) => byId.get(r.regionId) ?? r);
-    }
-    if (p.teams?.length) {
-      const teams = { ...cur.teams };
-      for (const t of p.teams as TeamState[]) teams[t.teamId] = t;
-      next.teams = teams;
-    }
     if (p.status !== undefined) {
       next.status = p.status;
       next.running = isClockRunning(p.status);
@@ -73,14 +63,16 @@ export class MatchStore {
     }
     if (p.pausedFrom !== undefined) next.pausedFrom = p.pausedFrom;
     if (p.liveStartClock !== undefined) next.liveStartClock = p.liveStartClock;
-    if (p.phase !== undefined) next.phase = p.phase;
-    if (p.phaseEndsAt !== undefined) next.phaseEndsAt = p.phaseEndsAt;
-    if (p.roundIndex !== undefined) next.roundIndex = p.roundIndex;
-    if (p.round !== undefined) next.round = p.round;
+    if (p.wave !== undefined) next.wave = p.wave;
+    if (p.waveRemaining !== undefined) next.waveRemaining = p.waveRemaining;
+    if (p.actionsThisTurn !== undefined) next.actionsThisTurn = p.actionsThisTurn;
+    if (p.combo !== undefined) next.combo = p.combo;
+    if (p.regions !== undefined) next.regions = p.regions;
+    if (p.enemies !== undefined) next.enemies = p.enemies;
+    if (p.incoming !== undefined) next.incoming = p.incoming;
+    if (p.stats !== undefined) next.stats = p.stats;
     if (p.result !== undefined) next.result = p.result;
-    if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED')
-      next.pauseReason = e.data.reason;
-    if (e.type === 'ROUND_ENDED') next.rounds = [...cur.rounds, e.data.summary];
+    if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED') next.pauseReason = e.data.reason;
     // Re-anchor the clock at the event time.
     next.clockMs = e.t;
     next.gameMs = e.gameMs;
@@ -92,9 +84,9 @@ export class MatchStore {
     return 'applied';
   }
 
-  applyPresence(supporters: PublicMatchSnapshot['supporters']): void {
+  applyPresence(playersOnline: number): void {
     if (!this.snap) return;
-    this.snap = { ...this.snap, supporters };
+    this.snap = { ...this.snap, playersOnline };
     this.notify();
   }
 

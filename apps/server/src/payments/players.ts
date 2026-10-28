@@ -4,14 +4,13 @@ import type {
   InvoiceStatus,
   JoinResponse,
   MeResponse,
+  ActionResult,
   RedeemPassResponse,
-  TeamId,
   TopupStatusResponse,
-  ZapResult,
 } from '@sats-wars/shared';
-import { TEAM_META, sanitizeNickname, zapsFor } from '@sats-wars/shared';
+import { actionsFor, sanitizeNickname } from '@sats-wars/shared';
 import type { WallClock } from '../clock';
-import type { InvoiceRow, PlayerRow, Repo, ZapRow } from '../db/repo';
+import type { ActionRow, InvoiceRow, PlayerRow, Repo } from '../db/repo';
 import { AppError } from '../errors';
 import type { MatchManager } from '../match/manager';
 import { newId, newPassCode, newToken, normalizePassCode, sha256 } from '../auth/tokens';
@@ -35,24 +34,26 @@ export interface PlayerServiceOptions {
 
 type CreditListener = (playerId: string, push: CreditPush) => void;
 
-export function zapRowToResult(z: ZapRow): ZapResult {
+export function actionRowToResult(a: ActionRow): ActionResult {
   return {
     ok: true,
-    code: z.code,
-    teamId: z.team_id,
-    damage: z.damage,
-    special: z.special === 1,
-    pinch: z.pinch === 1,
-    atGameMs: z.at_game_ms,
-    roundIndex: z.round_index,
+    code: 'OK',
+    action: a.action,
+    regionId: a.region_id,
+    damage: a.damage,
+    kills: a.kills,
+    liberated: a.liberated === 1,
+    triggeredAlienTurn: false,
+    atGameMs: a.at_game_ms,
   };
 }
 
 /**
- * Players and their prepaid credit. Joining is free and instant (pick a team);
- * sats are topped up once via Lightning and then spent punch by punch. Credit
+ * Players and their prepaid credit. Joining is free and instant (no teams:
+ * everyone defends Japan together);
+ * sats are topped up once via Lightning and then spent action by action. Credit
  * is only ever added after the server re-verifies a payment with the provider,
- * exactly once per invoice, and it carries over between seasons.
+ * exactly once per invoice, and it carries over between campaigns.
  */
 export class PlayerService {
   private listeners = new Set<CreditListener>();
@@ -98,11 +99,11 @@ export class PlayerService {
   }
 
   /**
-   * Join with a team. A device that already has a player gets that player
-   * back (with its remaining credit) under a fresh token, so clearing a
-   * browser tab never loses sats.
+   * Join the defence (free). A device that already has a player gets that
+   * player back (with its remaining credit) under a fresh token, so clearing
+   * a browser tab never loses sats.
    */
-  join(input: { teamId: TeamId; nickname?: string; deviceId?: string }): JoinResponse {
+  join(input: { nickname?: string; deviceId?: string }): JoinResponse {
     const now = this.now();
     const token = newToken();
     const deviceHash = input.deviceId ? sha256(`device:${input.deviceId}`) : null;
@@ -110,44 +111,32 @@ export class PlayerService {
       const existing = deviceHash ? this.repo.getPlayerByDevice(deviceHash) : undefined;
       if (existing) {
         this.repo.setPlayerSession(existing.id, sha256(token));
-        this.repo.setPlayerTeam(existing.id, input.teamId);
         if (input.nickname?.trim()) {
           this.repo.setPlayerNickname(existing.id, sanitizeNickname(input.nickname, existing.id.slice(-4)).nickname);
         }
         this.repo.touchPlayer(existing.id, now);
         const p = this.repo.getPlayer(existing.id)!;
-        this.opts.manager.invalidateSupporters();
-        return { playerId: p.id, token, nickname: p.nickname, teamId: p.team_id, creditSats: p.credit_sats };
+        this.opts.manager.invalidatePresence();
+        return { playerId: p.id, token, nickname: p.nickname, creditSats: p.credit_sats };
       }
       const id = newId('p');
-      const fallback = `${TEAM_META[input.teamId].nameJa}ファン${id.slice(-3).toUpperCase()}`;
-      const nickname = input.nickname?.trim()
-        ? sanitizeNickname(input.nickname, id.slice(-4)).nickname
-        : fallback;
+      const fallback = `隊員${id.slice(-3).toUpperCase()}`;
+      const nickname = input.nickname?.trim() ? sanitizeNickname(input.nickname, id.slice(-4)).nickname : fallback;
       this.repo.insertPlayer({
         id,
         session_id_hash: sha256(token),
         device_hash: deviceHash,
         nickname,
         nickname_hidden: 0,
-        team_id: input.teamId,
         credit_sats: 0,
-        zaps_total: 0,
-        kos: 0,
+        actions_total: 0,
+        kills: 0,
         created_at: now,
         last_seen_at: now,
       });
-      this.opts.manager.invalidateSupporters();
-      return { playerId: id, token, nickname, teamId: input.teamId, creditSats: 0 };
+      this.opts.manager.invalidatePresence();
+      return { playerId: id, token, nickname, creditSats: 0 };
     });
-  }
-
-  changeTeam(p: PlayerRow, teamId: TeamId): void {
-    this.repo.tx(() => {
-      this.repo.setPlayerTeam(p.id, teamId);
-      this.repo.touchPlayer(p.id, this.now());
-    });
-    this.opts.manager.invalidateSupporters();
   }
 
   changeNickname(p: PlayerRow, raw: string): string {
@@ -163,13 +152,12 @@ export class PlayerService {
     return {
       playerId: p.id,
       nickname: p.nickname,
-      teamId: p.team_id,
       creditSats: p.credit_sats,
-      zapsThisSeason: this.repo.zapCountInMatch(this.opts.manager.current().matchId, p.id),
-      zapsTotal: p.zaps_total,
-      kos: p.kos,
+      actionsThisCampaign: this.repo.actionCountInMatch(this.opts.manager.current().matchId, p.id),
+      actionsTotal: p.actions_total,
+      kills: p.kills,
       pendingInvoice: inv ? this.invoiceResponse(inv) : null,
-      lastResults: this.repo.recentZaps(p.id, 5).map(zapRowToResult),
+      lastResults: this.repo.recentActions(p.id, 5).map(actionRowToResult),
     };
   }
 
@@ -184,13 +172,13 @@ export class PlayerService {
     if (!manager.paymentsEnabled) {
       throw new AppError(
         'PAYMENTS_DISABLED',
-        '現在、チャージの受付を停止しています。スポンサーコードか無料の応援をご利用ください / Top-ups are paused',
+        '現在、チャージの受付を停止しています。配布コードか無料の応援をご利用ください / Top-ups are paused',
       );
     }
     const existing = this.repo.pendingInvoiceForPlayer(p.id, this.now() + 15_000);
     if (existing && existing.amount_sats === amountSats) return this.invoiceResponse(existing);
     const expirySeconds = Math.floor(cfg.invoiceTtlMs / 1000);
-    const memo = `SATS WARS ${amountSats} sats (${zapsFor(amountSats, cfg)} punches)`;
+    const memo = `SATS WARS ${amountSats} sats (${actionsFor(amountSats, cfg)} actions)`;
     let created;
     try {
       created = await adapter.createInvoice({
@@ -232,7 +220,7 @@ export class PlayerService {
     return {
       invoiceId: row.id,
       amountSats: row.amount_sats,
-      zaps: zapsFor(row.amount_sats, this.opts.manager.liveConfig),
+      actions: actionsFor(row.amount_sats, this.opts.manager.liveConfig),
       bolt11: row.bolt11 ?? '',
       expiresAt: row.expires_at,
       status: row.status,

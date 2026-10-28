@@ -1,36 +1,26 @@
 /**
  * Parameter sweep helper:
- *   pnpm --filter @sats-wars/simulations exec tsx src/tune.ts [seasons]
- * Compares candidate configs on pacing (round length, KO rate) and on how
- * often a smaller crowd (10 vs 6) still takes rounds.
+ *   pnpm --filter @sats-wars/simulations exec tsx src/tune.ts [campaigns]
  */
-import type { GameConfig, TeamId } from '@sats-wars/shared';
-import { aggregate, simulateSeason } from './simulate';
+import type { GameConfig } from '@sats-wars/shared';
+import { aggregate, simulateCampaign } from './simulate';
 
-const N = Number(process.argv[2] ?? 30);
+const N = Number(process.argv[2] ?? 40);
+const base: Partial<GameConfig> = { hpGrowthPerWave: 0.25, attackGrowthPerWave: 0.2, landingsStepWaves: 1 };
 const candidates: Array<[string, Partial<GameConfig>]> = [
-  ['default', {}],
-  ['cap100k x3', { hpCap: 100_000, hpMaxChangeFactor: 3 }],
-  ['cap100k x3 pinch40%', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchHpRatio: 0.4 }],
-  ['cap100k x3 pinch×2', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchMultiplier: 2 }],
-  ['cap100k x3 pinch40% ×2', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchHpRatio: 0.4, pinchMultiplier: 2 }],
-  ['cap100k x4 pinch40% ×2', { hpCap: 100_000, hpMaxChangeFactor: 4, pinchHpRatio: 0.4, pinchMultiplier: 2 }],
+  ['A', base],
+  ['A city60', { ...base, cityHpMax: 60, liberateHp: 30 }],
+  ['A atk x1.6', { ...base, scout: { hp: 30, attack: 13 }, walker: { hp: 70, attack: 24 }, mothership: { hp: 260, attack: 40 } }],
+  ['A city70 atk x1.3', { ...base, cityHpMax: 70, liberateHp: 30, scout: { hp: 30, attack: 10 }, walker: { hp: 70, attack: 20 }, mothership: { hp: 260, attack: 32 } }],
 ];
 
-const run = (players: Record<TeamId, number>, config: Partial<GameConfig>) =>
-  aggregate(Array.from({ length: N }, (_, i) => simulateSeason({ playersPerTeam: players, seed: 500 + i * 101, config })));
-
-console.log(`seasons per cell: ${N}`);
-console.log('candidate | 10v10 round s / KO% | 30v30 round s | 100v100 round s | 10v8 underdog | 10v6 underdog | 2v2 round s');
+console.log(`campaigns per cell: ${N}`);
+console.log('candidate | auto share | wave p10/p50/p90 | actions p50 | sats mean | lost/liberated');
 for (const [name, cfg] of candidates) {
-  const even = run({ RAIJIN: 10, FUJIN: 10 }, cfg);
-  const big = run({ RAIJIN: 30, FUJIN: 30 }, cfg);
-  const huge = run({ RAIJIN: 100, FUJIN: 100 }, cfg);
-  const u8 = run({ RAIJIN: 10, FUJIN: 8 }, cfg);
-  const u6 = run({ RAIJIN: 10, FUJIN: 6 }, cfg);
-  const tiny = run({ RAIJIN: 2, FUJIN: 2 }, cfg);
-  const pct = (a: typeof u8) => `${((a.roundWins.FUJIN / a.rounds) * 100).toFixed(1)}%`;
-  console.log(
-    `${name} | ${even.avgRoundSec.toFixed(1)} / ${(even.koRate * 100).toFixed(0)} | ${big.avgRoundSec.toFixed(1)} | ${huge.avgRoundSec.toFixed(1)} | ${pct(u8)} | ${pct(u6)} | ${tiny.avgRoundSec.toFixed(1)}`,
-  );
+  for (const autoShare of [1, 0.6, 0.2]) {
+    const a = aggregate(Array.from({ length: N }, (_, i) => simulateCampaign({ seed: 11 + i * 97, config: cfg, autoShare })));
+    console.log(
+      `${name} | ${autoShare} | ${a.waveP10}/${a.waveP50}/${a.waveP90} | ${a.actionsP50} | ${Math.round(a.satsMean)} | ${a.regionsLostMean.toFixed(1)}/${a.liberatedMean.toFixed(1)}`,
+    );
+  }
 }

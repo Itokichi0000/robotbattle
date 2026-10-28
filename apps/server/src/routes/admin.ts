@@ -10,8 +10,8 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.enum(ADMIN_LIFECYCLE_COMMANDS), reason: z.string().max(200).optional() }),
   z.object({ command: z.literal('SET_PAYMENTS_ENABLED'), enabled: z.boolean() }),
   z.object({ command: z.literal('SET_AUTO_LOOP'), enabled: z.boolean() }),
-  z.object({ command: z.literal('SET_DEMO_BOTS'), perTeam: z.number().int().min(0).max(100) }),
-  /** Emergency stop: pause the season, stop accepting payments, stop auto-loop — one click. */
+  z.object({ command: z.literal('SET_DEMO_BOTS'), count: z.number().int().min(0).max(50) }),
+  /** Emergency stop: pause the campaign, stop accepting payments, stop auto-loop — one click. */
   z.object({ command: z.literal('EMERGENCY_STOP') }),
 ]);
 
@@ -53,8 +53,8 @@ export function registerAdminRoutes(
       paymentMode: env.PAYMENT_MODE,
       paymentsEnabled: manager.paymentsEnabled,
       autoLoop: manager.autoLoop,
-      demoBotsPerTeam: bots.enabledPerTeam,
-      zaps: repo.zapStats(rt.matchId),
+      demoBots: bots.enabledCount,
+      actions: repo.actionStats(rt.matchId),
       credit: repo.creditTotals(),
       invoices: repo.invoiceSummary(),
       passes: repo.passSummary(),
@@ -80,7 +80,7 @@ export function registerAdminRoutes(
         manager.setAutoLoop(cmd.enabled, actor);
         break;
       case 'SET_DEMO_BOTS':
-        bots.setPerTeam(cmd.perTeam, actor);
+        bots.setCount(cmd.count, actor);
         break;
       case 'EMERGENCY_STOP': {
         manager.setPaymentsEnabled(false, actor);
@@ -111,12 +111,11 @@ export function registerAdminRoutes(
     return {
       players: repo.listPlayers(300).map((p) => ({
         id: p.id,
-        teamId: p.team_id,
         nickname: p.nickname,
         nicknameHidden: p.nickname_hidden === 1,
         creditSats: p.credit_sats,
-        zapsTotal: p.zaps_total,
-        kos: p.kos,
+        actionsTotal: p.actions_total,
+        kills: p.kills,
         createdAt: p.created_at,
         lastSeenAt: p.last_seen_at,
       })),
@@ -178,7 +177,7 @@ export function registerAdminRoutes(
     const body = z
       .object({
         count: z.number().int().min(1).max(500),
-        amountSats: z.number().int().min(cfg.zapCostSats).max(10_000).default(cfg.topupOptionsSats[0]!),
+        amountSats: z.number().int().min(cfg.actionCostSats).max(10_000).default(cfg.topupOptionsSats[0]!),
         expiresInMinutes: z
           .number()
           .int()

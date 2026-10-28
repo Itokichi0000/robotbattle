@@ -1,7 +1,7 @@
 import type { GameEvent, MatchState } from '@sats-wars/shared';
 import { REGION_IDS, isClockRunning } from '@sats-wars/shared';
 
-/** Engine-owned part of the public snapshot. The server adds payment/URL fields. */
+/** Engine-owned part of the public snapshot. The server adds payment/URL/presence fields. */
 export function snapshotCore(state: MatchState, recentEvents: GameEvent[], serverTime: number) {
   return {
     matchId: state.matchId,
@@ -15,14 +15,14 @@ export function snapshotCore(state: MatchState, recentEvents: GameEvent[], serve
     liveStartClock: state.liveStartClock,
     running: isClockRunning(state.status),
     serverTime,
-    phase: state.phase,
-    phaseEndsAt: state.phaseEndsAt,
-    roundOrder: state.roundOrder,
-    roundIndex: state.roundIndex,
-    round: state.round,
-    rounds: state.rounds,
+    wave: state.wave,
+    waveRemaining: state.waveRemaining,
+    actionsThisTurn: state.actionsThisTurn,
+    combo: state.combo,
     regions: REGION_IDS.map((id) => state.regions[id]),
-    teams: state.teams,
+    enemies: state.enemies,
+    incoming: state.incoming,
+    stats: state.stats,
     result: state.result,
     lastSeq: state.seq,
     recentEvents,

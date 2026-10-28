@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  actionRequestSchema,
   cheerRequestSchema,
   joinRequestSchema,
   nicknameChangeSchema,
   redeemPassRequestSchema,
-  teamChangeSchema,
   topupRequestSchema,
-  zapRequestSchema,
 } from '@sats-wars/shared';
 import { extractBearer } from '../auth/tokens';
 import type { PlayerRow } from '../db/repo';
@@ -15,7 +14,7 @@ import { AppError } from '../errors';
 import type { Services } from '../services';
 
 export function registerPublicRoutes(app: FastifyInstance, services: Services): void {
-  const { manager, players, zaps, repo, env } = services;
+  const { manager, players, actions, repo, env } = services;
 
   const requirePlayer = (authorization: string | undefined): PlayerRow => {
     const p = players.authenticate(extractBearer(authorization));
@@ -48,7 +47,7 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
       status: m.status,
       createdAt: m.created_at,
       endedAt: m.ended_at,
-      winnerTeamId: m.winner_team_id,
+      reachedWave: m.reached_wave,
     })),
   }));
 
@@ -67,13 +66,6 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
   });
 
   app.get('/api/me', async (req) => players.me(requirePlayer(req.headers.authorization)));
-
-  app.post('/api/me/team', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    const { teamId } = teamChangeSchema.parse(req.body ?? {});
-    players.changeTeam(p, teamId);
-    return { teamId };
-  });
 
   app.post('/api/me/nickname', async (req) => {
     const p = requirePlayer(req.headers.authorization);
@@ -106,15 +98,15 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
 
   // ---- battle -------------------------------------------------------------------
 
-  app.post('/api/zap', async (req) => {
+  app.post('/api/action', async (req) => {
     const p = requirePlayer(req.headers.authorization);
-    return zaps.zap(p, zapRequestSchema.parse(req.body ?? {}));
+    return actions.act(p, actionRequestSchema.parse(req.body ?? {}));
   });
 
   app.post('/api/cheer', async (req) => {
     const p = requirePlayer(req.headers.authorization);
     const { emoji } = cheerRequestSchema.parse(req.body ?? {});
-    zaps.cheer(p, emoji);
+    actions.cheer(p, emoji);
     return { ok: true };
   });
 

@@ -1,6 +1,7 @@
 export * from './director';
 export * from './layout';
 export { ArenaScene, type ArenaSceneProps } from './ArenaScene';
+export type { RegionDanger } from './MapOverlay';
 export type { FrameStats } from './SceneParts';
 export {
   buildFujin,

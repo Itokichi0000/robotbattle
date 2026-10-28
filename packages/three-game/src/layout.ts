@@ -50,6 +50,9 @@ export const CAMERA_PRESETS: Record<
   victoryFUJIN: { position: [1.2, 3.6, 10.5], target: [3.0, 3.4, 0.4] },
 };
 
+/** The invaders' colour: outside the brand palette on purpose, so "enemy" reads instantly. */
+export const ALIEN_COLOR = '#B65CFF';
+
 export const TEAM_COLORS: Record<TeamId | 'NEUTRAL', string> = {
   RAIJIN: '#F7931A',
   FUJIN: '#25C8D7',

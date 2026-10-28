@@ -9,7 +9,7 @@ import type {
 } from '@sats-wars/shared';
 import { MatchStore } from '@sats-wars/shared';
 import type { CheerPush, CreditPush } from '@sats-wars/shared';
-import { type TestServer, admin, fundedPlayer, joinTeam, makeServer, topup, untilRound, zap } from './helpers';
+import { type TestServer, act, admin, fundedPlayer, join, makeServer, topup } from './helpers';
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -74,11 +74,12 @@ function comparable(snap: PublicMatchSnapshot | null) {
   if (!snap) return null;
   return {
     regions: snap.regions,
-    teams: snap.teams,
+
     status: snap.status,
-    phase: snap.phase,
-    round: snap.round,
-    rounds: snap.rounds,
+    wave: snap.wave,
+    enemies: snap.enemies,
+    incoming: snap.incoming,
+    actionsThisTurn: snap.actionsThisTurn,
     lastSeq: snap.lastSeq,
   };
 }
@@ -88,17 +89,15 @@ describe('realtime sync', () => {
     s = await makeServer();
     const url = await listen(s);
     const clients = await Promise.all([client(url, 'arena'), client(url), client(url)]);
-    const p1 = await fundedPlayer(s, 'RAIJIN', 525, 'a');
-    const p2 = await fundedPlayer(s, 'FUJIN', 525, 'b');
+    const p1 = await fundedPlayer(s, 525, 'a');
+    const p2 = await fundedPlayer(s, 525, 'b');
     const player = await client(url, 'player', p1.token);
     clients.push(player);
-    await untilRound(s);
     for (let i = 0; i < 12; i++) {
-      await zap(s, p1.token);
-      await zap(s, p2.token);
-      await s.advance(300);
+      await act(s, p1.token);
+      await act(s, p2.token);
+      await s.advance(500);
     }
-    await s.advance(61_000);
     const server = s.services.manager.snapshot();
     await waitFor(() => clients.every((c) => c.store.snapshot?.lastSeq === server.lastSeq));
     for (const c of clients) expect(comparable(c.store.snapshot)).toEqual(comparable(server));
@@ -112,12 +111,11 @@ describe('realtime sync', () => {
     s = await makeServer();
     const url = await listen(s);
     const p = await fundedPlayer(s);
-    await untilRound(s);
     const c = await client(url);
     // Simulate a dropped message by removing the listener temporarily.
     c.socket.off('matchEvent');
-    await zap(s, p.token);
-    await s.advance(300);
+    await act(s, p.token);
+    await s.advance(500);
     // Let the in-flight event arrive (and be dropped) before listening again.
     await new Promise((r) => setTimeout(r, 100));
     c.socket.on('matchEvent', (e) => {
@@ -126,7 +124,7 @@ describe('realtime sync', () => {
         c.socket.emit('requestSnapshot', (snap) => c.store.applySnapshot(snap));
       }
     });
-    await zap(s, p.token);
+    await act(s, p.token);
     const server = s.services.manager.snapshot();
     await waitFor(() => c.store.snapshot?.lastSeq === server.lastSeq);
     expect(c.gaps).toBeGreaterThan(0);
@@ -137,32 +135,32 @@ describe('realtime sync', () => {
     s = await makeServer();
     const url = await listen(s);
     const token = await s.adminToken();
-    await admin(s, token, { command: 'SET_DEMO_BOTS', perTeam: 0 });
+    await admin(s, token, { command: 'SET_DEMO_BOTS', count: 0 });
     const c = await client(url);
     c.socket.disconnect();
-    const p = await fundedPlayer(s, 'FUJIN');
-    await untilRound(s);
-    await zap(s, p.token);
+    const p = await fundedPlayer(s);
+    await act(s, p.token);
     c.socket.connect();
     await new Promise<void>((resolve) => c.socket.once('connect', () => resolve()));
     c.socket.emit('joinRoom', { role: 'spectator' });
     const server = s.services.manager.snapshot();
     await waitFor(() => c.store.snapshot?.lastSeq === server.lastSeq);
-    expect(c.store.snapshot?.round?.hp.RAIJIN).toBe(server.round!.hpMax - 10);
+    expect(c.store.snapshot?.enemies).toEqual(server.enemies);
+    expect(c.store.snapshot?.actionsThisTurn).toBe(1);
   });
 
   it('credit updates go only to the paying player; cheers and presence go to every screen', async () => {
     s = await makeServer();
     const url = await listen(s);
-    const p1 = await joinTeam(s, 'RAIJIN', { nickname: 'one' });
-    const p2 = await joinTeam(s, 'FUJIN', { nickname: 'two' });
+    const p1 = await join(s, { nickname: 'one', deviceId: 'device-one-0001' });
+    const p2 = await join(s, { nickname: 'two', deviceId: 'device-two-0002' });
     const c1 = await client(url, 'player', p1.token);
     const c2 = await client(url, 'player', p2.token);
     const screen = await client(url, 'arena');
     const credit1: CreditPush[] = [];
     const credit2: CreditPush[] = [];
     const cheers: CheerPush[] = [];
-    const presence: Array<Record<string, number>> = [];
+    const presence: number[] = [];
     c1.socket.on('credit', (m) => credit1.push(m));
     c2.socket.on('credit', (m) => credit2.push(m));
     screen.socket.on('cheer', (m) => cheers.push(m));
@@ -171,16 +169,15 @@ describe('realtime sync', () => {
     await s.inject({ method: 'POST', url: '/api/dev/mock-pay', headers: { authorization: `Bearer ${p1.token}` }, payload: { invoiceId: inv.invoiceId } });
     await waitFor(() => credit1.length === 1);
     expect(credit1[0]).toMatchObject({ creditSats: 105, addedSats: 105, invoiceStatus: 'PAID' });
-    await untilRound(s);
-    await zap(s, p1.token);
+    await act(s, p1.token);
     await waitFor(() => credit1.length === 2);
     expect(credit1[1]!.creditSats).toBe(84);
     await s.inject({ method: 'POST', url: '/api/cheer', headers: { authorization: `Bearer ${p2.token}` }, payload: { emoji: '👏' } });
     await waitFor(() => cheers.length === 1);
-    expect(cheers[0]).toEqual({ teamId: 'FUJIN', nickname: 'two', emoji: '👏' });
+    expect(cheers[0]).toEqual({ nickname: 'two', emoji: '👏' });
     s.realtime.broadcastPresence();
     await waitFor(() => presence.length === 1);
-    expect(presence[0]).toEqual({ RAIJIN: 1, FUJIN: 1 });
+    expect(presence[0]).toBe(2);
     await new Promise((r) => setTimeout(r, 50));
     expect(credit2).toHaveLength(0);
   });
