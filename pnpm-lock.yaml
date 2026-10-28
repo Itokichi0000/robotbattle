@@ -252,6 +252,34 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
+  tools/model-viewer:
+    dependencies:
+      '@sats-wars/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@sats-wars/three-game':
+        specifier: workspace:*
+        version: link:../../packages/three-game
+      three:
+        specifier: ~0.181.0
+        version: 0.181.2
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.5
+      '@types/three':
+        specifier: ~0.181.0
+        version: 0.181.0
+      esbuild:
+        specifier: ^0.25.11
+        version: 0.25.12
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
   tools/simulations:
     dependencies:
       '@sats-wars/game-engine':

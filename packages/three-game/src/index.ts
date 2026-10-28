@@ -7,8 +7,10 @@ export {
   buildRaijin,
   JOINT_NAMES,
   type JointName,
+  type JointRest,
   type RobotRig,
 } from './robots/build';
 export { applyClip } from './robots/animate';
+export { rigFromScene } from './robots/glbRig';
 export { cueFromEvent } from './cues';
 export { SfxEngine, type SfxName } from './audio';

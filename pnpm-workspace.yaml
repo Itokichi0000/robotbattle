@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - tools/simulations
+  - tools/model-viewer
 
 onlyBuiltDependencies:
   - esbuild

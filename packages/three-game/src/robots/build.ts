@@ -27,13 +27,27 @@ export const JOINT_NAMES = [
 ] as const;
 export type JointName = (typeof JOINT_NAMES)[number];
 
+export interface JointRest {
+  position: THREE.Vector3;
+  rotation: THREE.Euler;
+  /**
+   * Rest orientation relative to the rig root. Absent (= identity) for the procedural
+   * rigs; set for GLB skeletons whose bones point along the limbs (see robots/glbRig.ts).
+   */
+  frame?: THREE.Quaternion;
+  /** Inverse of the parent joint's rest orientation relative to the rig root. */
+  parentFrameInv?: THREE.Quaternion;
+}
+
 export interface RobotRig {
   kind: 'raijin' | 'fujin';
   root: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
-  rest: Record<JointName, { position: THREE.Vector3; rotation: THREE.Euler }>;
+  rest: Record<JointName, JointRest>;
   /** Signature back unit (drum ring / wind bags); spun during specials. */
   backUnit: THREE.Object3D;
+  /** Rest frame of the back unit (GLB skeletons only). */
+  backRest?: JointRest;
   /** Emissive materials whose intensity tracks energy / effects. */
   glowMaterials: THREE.MeshStandardMaterial[];
   baseGlow: number;

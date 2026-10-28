@@ -1,7 +1,33 @@
+import * as THREE from 'three';
 import type { ClipName } from '../director';
 import { CLIP_DURATION } from '../director';
-import type { JointName, RobotRig } from './build';
+import type { JointName, JointRest, RobotRig } from './build';
 import { JOINT_NAMES } from './build';
+
+const _euler = new THREE.Euler();
+const _delta = new THREE.Quaternion();
+const _offset = new THREE.Vector3();
+
+/**
+ * Pose a joint whose rest frame is not the identity (GLB bones point along the limbs).
+ * The clips below are authored as rotations/offsets in the parent's rest axes, which are
+ * world-aligned on the procedural rigs. Re-expressing them as
+ *   local = parentFrame⁻¹ · delta · frame,   position = rest + parentFrame⁻¹ · offset
+ * makes every joint end up with the same world motion as on the procedural rig.
+ */
+function setFramed(
+  j: THREE.Object3D,
+  rest: JointRest,
+  rx: number,
+  ry: number,
+  rz: number,
+  pos: [number, number, number] | undefined,
+): void {
+  _delta.setFromEuler(_euler.set(rx, ry, rz));
+  j.quaternion.copy(rest.parentFrameInv!).multiply(_delta).multiply(rest.frame!);
+  j.position.copy(rest.position);
+  if (pos) j.position.add(_offset.set(...pos).applyQuaternion(rest.parentFrameInv!));
+}
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const easeOut = (u: number) => 1 - (1 - u) ** 3;
@@ -240,6 +266,10 @@ export function applyClip(
     const rest = rig.rest[name];
     const r = pose.rot[name];
     const q = pose.pos[name];
+    if (rest.frame && rest.parentFrameInv) {
+      setFramed(j, rest, r?.[0] ?? 0, r?.[1] ?? 0, r?.[2] ?? 0, q);
+      continue;
+    }
     j.rotation.set(
       rest.rotation.x + (r?.[0] ?? 0),
       rest.rotation.y + (r?.[1] ?? 0),
@@ -251,7 +281,9 @@ export function applyClip(
       rest.position.z + (q?.[2] ?? 0),
     );
   }
-  rig.backUnit.rotation.z = pose.backSpin;
+  if (rig.backRest?.frame && rig.backRest.parentFrameInv)
+    setFramed(rig.backUnit, rig.backRest, 0, 0, pose.backSpin, undefined);
+  else rig.backUnit.rotation.z = pose.backSpin;
   const glow = rig.baseGlow * pose.glow * (1 + energyGlow);
   for (const m of rig.glowMaterials) m.emissiveIntensity = glow;
 }

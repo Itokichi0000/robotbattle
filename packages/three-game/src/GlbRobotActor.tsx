@@ -7,39 +7,7 @@ import { type ClipName, LOOPING_CLIPS } from './director';
 import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
 import { RobotActor, type RobotActorProps } from './RobotActor';
 import { applyClip } from './robots/animate';
-import { JOINT_NAMES, type RobotRig } from './robots/build';
-
-/** Rig view over a loaded GLB, so procedural clips can drive it when a clip is missing. */
-function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): RobotRig | null {
-  const joints = {} as RobotRig['joints'];
-  for (const name of JOINT_NAMES) {
-    const o = scene.getObjectByName(name);
-    if (!o) return null;
-    joints[name] = o;
-  }
-  const rest = {} as RobotRig['rest'];
-  for (const name of JOINT_NAMES)
-    rest[name] = {
-      position: joints[name].position.clone(),
-      rotation: joints[name].rotation.clone(),
-    };
-  const glow: THREE.MeshStandardMaterial[] = [];
-  scene.traverse((o) => {
-    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-    if (m && 'emissive' in m && m.emissive.getHex() !== 0 && !glow.includes(m)) glow.push(m);
-  });
-  return {
-    kind,
-    root: scene as THREE.Group,
-    joints,
-    rest,
-    backUnit: scene.getObjectByName('BackUnit') ?? new THREE.Object3D(),
-    glowMaterials: glow,
-    baseGlow: glow[0]?.emissiveIntensity ?? 1.5,
-    height: 4,
-    dispose() {},
-  };
-}
+import { rigFromScene } from './robots/glbRig';
 
 function GlbRobot({ url, teamId, director, energyRatio }: RobotActorProps & { url: string }) {
   const gltf = useGLTF(url);

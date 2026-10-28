@@ -1,0 +1,25 @@
+{
+  "name": "@sats-wars/model-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "three.js display test for the Blender-built RAIJIN / FUJIN GLB models",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "serve": "node serve.mjs",
+    "e2e": "node build.mjs && playwright test -c playwright.config.ts"
+  },
+  "dependencies": {
+    "@sats-wars/shared": "workspace:*",
+    "@sats-wars/three-game": "workspace:*",
+    "three": "~0.181.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.18.0",
+    "@types/three": "~0.181.0",
+    "esbuild": "^0.25.11",
+    "typescript": "~5.9.3"
+  }
+}
