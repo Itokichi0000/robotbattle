@@ -1,4 +1,11 @@
-import type { CityState, Enemy, PublicRaidSnapshot, RegionId, Role, Telegraph } from '@sats-wars/shared';
+import type {
+  CityState,
+  Enemy,
+  PublicRaidSnapshot,
+  RegionId,
+  Role,
+  Telegraph,
+} from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import { neededRole, pendingCityDamage } from '@sats-wars/game-engine';
 import { boardFrom } from './board';
@@ -6,7 +13,21 @@ import { boardFrom } from './board';
 /** The parts of a raid snapshot the HUDs read (the offline demo builds the same shape). */
 export type RaidLike = Pick<
   PublicRaidSnapshot,
-  'config' | 'status' | 'phase' | 'gameMs' | 'cities' | 'robots' | 'reserveEnergy' | 'jammedUntil' | 'enemies' | 'telegraphs' | 'bossId' | 'sync' | 'special' | 'result' | 'crew'
+  | 'config'
+  | 'status'
+  | 'phase'
+  | 'gameMs'
+  | 'cities'
+  | 'robots'
+  | 'reserveEnergy'
+  | 'jammedUntil'
+  | 'enemies'
+  | 'telegraphs'
+  | 'bossId'
+  | 'sync'
+  | 'special'
+  | 'result'
+  | 'crew'
 >;
 
 export interface CityThreatView {
@@ -57,7 +78,12 @@ export function raidView(s: RaidLike, gameNow: number): RaidView {
   const crewByRole: Record<Role, number> = { GUNNER: 0, GUARDIAN: 0, ROUTER: 0, ENGINEER: 0 };
   for (const m of s.crew) crewByRole[m.role] += 1;
   return {
-    timeLeftMs: s.status === 'LIVE' || s.status === 'PAUSED' ? Math.max(0, c.matchSeconds * 1000 - gameNow) : s.status === 'ENDED' ? 0 : c.matchSeconds * 1000,
+    timeLeftMs:
+      s.status === 'LIVE' || s.status === 'PAUSED'
+        ? Math.max(0, c.matchSeconds * 1000 - gameNow)
+        : s.status === 'ENDED'
+          ? 0
+          : c.matchSeconds * 1000,
     boss,
     bossHpRatio: boss ? boss.hp / boss.hpMax : null,
     citiesStanding: REGION_IDS.filter((id) => !cities[id].destroyed).length,
@@ -65,11 +91,17 @@ export function raidView(s: RaidLike, gameNow: number): RaidView {
     cities,
     threats,
     urgent: first
-      ? { telegraph: first, enemy: s.enemies.find((e) => e.id === first.enemyId) ?? null, cityId: first.targets[0]!, seconds: Math.max(0, (first.resolvesAt - gameNow) / 1000) }
+      ? {
+          telegraph: first,
+          enemy: s.enemies.find((e) => e.id === first.enemyId) ?? null,
+          cityId: first.targets[0]!,
+          seconds: Math.max(0, (first.resolvesAt - gameNow) / 1000),
+        }
       : null,
     needed: neededRole(board),
     specialOpen: s.special.status === 'OPEN',
-    specialSecondsLeft: s.special.status === 'OPEN' ? Math.max(0, (s.special.closesAt - gameNow) / 1000) : null,
+    specialSecondsLeft:
+      s.special.status === 'OPEN' ? Math.max(0, (s.special.closesAt - gameNow) / 1000) : null,
     crewByRole,
   };
 }

@@ -27,17 +27,17 @@
 
 ## パッケージ（仕様書 F2 との対応：D-033）
 
-| 仕様書 | このリポジトリ | 内容 |
-|---|---|---|
-| packages/game-core | `packages/game-engine` | 状態機械、敵AI、ミニゲーム生成/採点/ソルバ、SYNC、必殺、補佐AI、結果 |
-| packages/protocol | `packages/shared` | 型、Zodスキーマ（HTTP/Socket）、GameConfig、都市・地図、i18n、RaidStore |
-| packages/ui | `packages/ui` | 操縦席・ミニゲーム・HUD・結果カード（web と solo で共用、素のCSS） |
-| packages/three-game | `packages/three-game` | 3Dシーン、演出ディレクター、手続き生成ロボ/ボス、効果音 |
-| apps/game-server | `apps/server` | HTTP/Socket、永続化、認証、決済、管理 |
-| apps/web | `apps/web` | 全画面（/play /arena /admin …） |
-| — | `apps/solo` | オフライン体験版（LocalRaid がブラウザ内でエンジンとBOTを実行） |
-| tools/blender | `tools/blender` | bpy 生成スクリプト |
-| tools/simulations | `tools/simulations` | バランスシミュレーター・負荷試験 |
+| 仕様書              | このリポジトリ         | 内容                                                                    |
+| ------------------- | ---------------------- | ----------------------------------------------------------------------- |
+| packages/game-core  | `packages/game-engine` | 状態機械、敵AI、ミニゲーム生成/採点/ソルバ、SYNC、必殺、補佐AI、結果    |
+| packages/protocol   | `packages/shared`      | 型、Zodスキーマ（HTTP/Socket）、GameConfig、都市・地図、i18n、RaidStore |
+| packages/ui         | `packages/ui`          | 操縦席・ミニゲーム・HUD・結果カード（web と solo で共用、素のCSS）      |
+| packages/three-game | `packages/three-game`  | 3Dシーン、演出ディレクター、手続き生成ロボ/ボス、効果音                 |
+| apps/game-server    | `apps/server`          | HTTP/Socket、永続化、認証、決済、管理                                   |
+| apps/web            | `apps/web`             | 全画面（/play /arena /admin …）                                         |
+| —                   | `apps/solo`            | オフライン体験版（LocalRaid がブラウザ内でエンジンとBOTを実行）         |
+| tools/blender       | `tools/blender`        | bpy 生成スクリプト                                                      |
+| tools/simulations   | `tools/simulations`    | バランスシミュレーター・負荷試験                                        |
 
 ## エンジン（`packages/game-engine`）
 
@@ -72,16 +72,16 @@ phase: LOBBY → INTRO_TRAINING → WAVE_1 → WAVE_2 → WAVE_3 → FINAL_WAVE 
 
 ## 永続化（SQLite / `node:sqlite`）
 
-| テーブル | 内容 |
-|---|---|
-| raids | レイド（設定JSON・configHash・seed・状態・結果・最終スナップショット） |
-| raid_commands / raid_events | コマンドログ（リプレイ用）とイベントログ（seq） |
+| テーブル                                              | 内容                                                                    |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| raids                                                 | レイド（設定JSON・configHash・seed・状態・結果・最終スナップショット）  |
+| raid_commands / raid_events                           | コマンドログ（リプレイ用）とイベントログ（seq）                         |
 | pilots / sessions / pilot_auth_keys / auth_challenges | パイロット、セッション（SHA-256）、LNURL鍵（linking key）、k1チャレンジ |
-| entitlements | (raid, pilot) 一意の出撃パス（FREE/SPONSORED/LIGHTNING/DEMO/CREDIT） |
-| pilot_raids / passport_history | 搭乗記録、パスポート（作戦ごとのスタンプ） |
-| submissions | (pilot, clientSubmissionId) の提出結果（冪等） |
-| invoices / sponsored_passes | 請求書（遅延時の扱い）、スポンサーパス（コードはハッシュのみ保存） |
-| admin_audit_log / settings / schema_migrations | 監査ログ、運営スイッチ、マイグレーション |
+| entitlements                                          | (raid, pilot) 一意の出撃パス（FREE/SPONSORED/LIGHTNING/DEMO/CREDIT）    |
+| pilot_raids / passport_history                        | 搭乗記録、パスポート（作戦ごとのスタンプ）                              |
+| submissions                                           | (pilot, clientSubmissionId) の提出結果（冪等）                          |
+| invoices / sponsored_passes                           | 請求書（遅延時の扱い）、スポンサーパス（コードはハッシュのみ保存）      |
+| admin_audit_log / settings / schema_migrations        | 監査ログ、運営スイッチ、マイグレーション                                |
 
 - 「検証 → reduce → コマンドとイベントの保存」を同期APIの1トランザクションで行う（await を挟まない）。
 - 仕様書推奨の PostgreSQL ではなく SQLite を採用（D-037）。`db/repo.ts` が唯一の差し替え点。
@@ -98,6 +98,7 @@ phase: LOBBY → INTRO_TRAINING → WAVE_1 → WAVE_2 → WAVE_3 → FINAL_WAVE 
 ## 出撃パス・決済
 
 `payments/passes.ts`。詳細は `docs/API.md` と `docs/SECURITY.md`。
+
 - `ensureEntitled`：既存パス → FREE/DEMO モード → パス残高（CREDIT）→ なければ 402 PASS_REQUIRED。搭乗締切（240秒）後は 409。
 - 請求書：1パイロット1レイドにつき有効な1件（再要求は同じ請求書）。締切まで45秒を切ったら発行しない。請求書の期限は締切の15秒前まで。Webhook／ポーリング／状態照会のたびに LNbits へ再照会し、
   PAID を確認したら冪等にパス付与（締切後なら次のレイドのパス残高）。決済ボタンや Webhook 本文だけでは何も付与しない。

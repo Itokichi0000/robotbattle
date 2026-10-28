@@ -1,4 +1,9 @@
-import type { EntitlementPush, InvoiceResponse, InvoiceStatus, InvoiceStatusResponse } from '@sats-wars/shared';
+import type {
+  EntitlementPush,
+  InvoiceResponse,
+  InvoiceStatus,
+  InvoiceStatusResponse,
+} from '@sats-wars/shared';
 import type { WallClock } from '../clock';
 import type { EntitlementSource, InvoiceRow, PilotRow, Repo } from '../db/repo';
 import { AppError } from '../errors';
@@ -62,9 +67,23 @@ export class PassService {
     };
   }
 
-  private grant(raidId: string, pilotId: string, source: EntitlementSource, sourceId: string | null): boolean {
-    const ok = this.repo.insertEntitlement({ id: newId('ent'), raid_id: raidId, pilot_id: pilotId, source, source_id: sourceId, granted_at: this.now() });
-    if (ok) for (const l of this.listeners) l(pilotId, { raidId, source, invoiceId: source === 'LIGHTNING' ? sourceId : null });
+  private grant(
+    raidId: string,
+    pilotId: string,
+    source: EntitlementSource,
+    sourceId: string | null,
+  ): boolean {
+    const ok = this.repo.insertEntitlement({
+      id: newId('ent'),
+      raid_id: raidId,
+      pilot_id: pilotId,
+      source,
+      source_id: sourceId,
+      granted_at: this.now(),
+    });
+    if (ok)
+      for (const l of this.listeners)
+        l(pilotId, { raidId, source, invoiceId: source === 'LIGHTNING' ? sourceId : null });
     return ok;
   }
 
@@ -77,7 +96,11 @@ export class PassService {
     const raidId = manager.current().raidId;
     const existing = this.repo.getEntitlement(raidId, p.id);
     if (existing) return existing.source;
-    if (!manager.joinOpen()) throw new AppError('JOIN_CLOSED', '今回の出撃受付は終了しました。次の作戦をお待ちください / Boarding is closed for this raid');
+    if (!manager.joinOpen())
+      throw new AppError(
+        'JOIN_CLOSED',
+        '今回の出撃受付は終了しました。次の作戦をお待ちください / Boarding is closed for this raid',
+      );
     return this.repo.tx(() => {
       if (isDemo) {
         this.grant(raidId, p.id, 'DEMO', null);
@@ -92,7 +115,10 @@ export class PassService {
         this.repo.audit(`pilot:${p.id}`, 'USE_PASS_CREDIT', raidId, null, this.now());
         return 'CREDIT';
       }
-      throw new AppError('PASS_REQUIRED', '出撃パスが必要です（21 sats またはスポンサーパス）/ A raid pass is required');
+      throw new AppError(
+        'PASS_REQUIRED',
+        '出撃パスが必要です（21 sats またはスポンサーパス）/ A raid pass is required',
+      );
     });
   }
 
@@ -102,28 +128,53 @@ export class PassService {
     const { manager, adapter } = this.opts;
     const rt = manager.current();
     const cfg = rt.state.config;
-    if (manager.passMode === 'FREE') throw new AppError('BAD_REQUEST', '無料イベントです。支払いは不要です / This is a free event');
-    if (this.repo.getEntitlement(rt.raidId, p.id)) throw new AppError('ALREADY_ENTITLED', 'この作戦の出撃パスは取得済みです / You already have a pass for this raid');
+    if (manager.passMode === 'FREE')
+      throw new AppError(
+        'BAD_REQUEST',
+        '無料イベントです。支払いは不要です / This is a free event',
+      );
+    if (this.repo.getEntitlement(rt.raidId, p.id))
+      throw new AppError(
+        'ALREADY_ENTITLED',
+        'この作戦の出撃パスは取得済みです / You already have a pass for this raid',
+      );
     if (!manager.paymentsEnabled || !this.integrationEnabled) {
-      throw new AppError('PAYMENTS_DISABLED', '現在、支払いの受付を停止しています。スポンサーパスをご利用ください / Payments are paused');
+      throw new AppError(
+        'PAYMENTS_DISABLED',
+        '現在、支払いの受付を停止しています。スポンサーパスをご利用ください / Payments are paused',
+      );
     }
     const remaining = manager.joinRemainingMs();
     if (!manager.joinOpen() || (remaining !== null && remaining < MIN_JOIN_TIME_FOR_INVOICE_MS)) {
-      throw new AppError('JOIN_CLOSED', '受付締切が近いため請求書を発行できません。次の作戦で参加してください / Too close to the boarding cutoff');
+      throw new AppError(
+        'JOIN_CLOSED',
+        '受付締切が近いため請求書を発行できません。次の作戦で参加してください / Too close to the boarding cutoff',
+      );
     }
     const existing = this.repo.pendingInvoiceFor(p.id, rt.raidId, this.now() + 15_000);
     if (existing) return this.invoiceResponse(existing);
     // The invoice must expire before boarding closes (plus a margin), so nobody pays for a seat that is gone.
-    const ttl = Math.min(cfg.invoiceTtlMs, remaining === null ? cfg.invoiceTtlMs : remaining - 15_000);
+    const ttl = Math.min(
+      cfg.invoiceTtlMs,
+      remaining === null ? cfg.invoiceTtlMs : remaining - 15_000,
+    );
     const expirySeconds = Math.max(30, Math.floor(ttl / 1000));
     const amountSats = cfg.ticketPriceSats;
     const memo = `SATS WARS raid pass ${amountSats} sats`;
     let created;
     try {
-      created = await adapter.createInvoice({ amountSats, memo, expirySeconds, webhookUrl: this.opts.webhookUrl });
+      created = await adapter.createInvoice({
+        amountSats,
+        memo,
+        expirySeconds,
+        webhookUrl: this.opts.webhookUrl,
+      });
     } catch (err) {
       this.opts.log?.warn({ err: String(err) }, 'invoice creation failed');
-      throw new AppError('PAYMENT_PROVIDER_ERROR', '請求書を作成できませんでした。少し待って再試行してください / Could not create invoice, please retry');
+      throw new AppError(
+        'PAYMENT_PROVIDER_ERROR',
+        '請求書を作成できませんでした。少し待って再試行してください / Could not create invoice, please retry',
+      );
     }
     const now = this.now();
     const row: InvoiceRow = {
@@ -171,7 +222,11 @@ export class PassService {
   status(p: PilotRow, invoiceId: string): InvoiceStatusResponse {
     const inv = this.repo.getInvoice(invoiceId);
     if (!inv || inv.pilot_id !== p.id) throw new AppError('NOT_FOUND', 'invoice not found');
-    return { invoiceId, status: inv.status, entitled: !!this.repo.getEntitlement(inv.raid_id, p.id) };
+    return {
+      invoiceId,
+      status: inv.status,
+      entitled: !!this.repo.getEntitlement(inv.raid_id, p.id),
+    };
   }
 
   /**
@@ -183,7 +238,8 @@ export class PassService {
     if (!inv) return null;
     if (inv.status !== 'PENDING' && inv.status !== 'EXPIRED') return inv.status;
     // Expired invoices are re-checked only within the late-payment grace window.
-    if (inv.status === 'EXPIRED' && inv.expires_at + this.lateGraceMs <= this.now()) return inv.status;
+    if (inv.status === 'EXPIRED' && inv.expires_at + this.lateGraceMs <= this.now())
+      return inv.status;
     if (this.checking.has(invoiceId) || !this.integrationEnabled) return inv.status;
     this.checking.add(invoiceId);
     try {
@@ -191,7 +247,10 @@ export class PassService {
       try {
         status = await this.opts.adapter.checkStatus(inv.checking_id, inv.payment_hash);
       } catch (err) {
-        this.repo.updateInvoice(inv.id, { last_checked_at: this.now(), check_failures: inv.check_failures + 1 });
+        this.repo.updateInvoice(inv.id, {
+          last_checked_at: this.now(),
+          check_failures: inv.check_failures + 1,
+        });
         this.opts.log?.warn({ invoiceId, err: String(err) }, 'invoice status check failed');
         return inv.status;
       }
@@ -230,7 +289,13 @@ export class PassService {
       } else {
         this.repo.changePassCredits(inv.pilot_id, 1);
         this.repo.updateInvoice(inv.id, { late_policy: 'NEXT_RAID_CREDIT' });
-        this.repo.audit('payments', 'LATE_PAYMENT_CREDIT', inv.id, { pilotId: inv.pilot_id, raidId: inv.raid_id }, now);
+        this.repo.audit(
+          'payments',
+          'LATE_PAYMENT_CREDIT',
+          inv.id,
+          { pilotId: inv.pilot_id, raidId: inv.raid_id },
+          now,
+        );
       }
     });
     return 'PAID';
@@ -239,7 +304,8 @@ export class PassService {
   /** Dev-only: simulate a wallet paying a mock invoice, then run the normal verification path. */
   async mockPay(p: PilotRow, invoiceId: string): Promise<InvoiceStatus | null> {
     const adapter = this.opts.adapter;
-    if (!(adapter instanceof MockPaymentAdapter)) throw new AppError('NOT_MOCK_MODE', 'not available');
+    if (!(adapter instanceof MockPaymentAdapter))
+      throw new AppError('NOT_MOCK_MODE', 'not available');
     const inv = this.repo.getInvoice(invoiceId);
     if (!inv || inv.pilot_id !== p.id) throw new AppError('NOT_FOUND', 'invoice not found');
     adapter.markPaid(inv.checking_id);
@@ -261,14 +327,28 @@ export class PassService {
 
   // ---- sponsored passes -------------------------------------------------------------
 
-  issueSponsored(count: number, expiresInMs: number, label: string, raidId: string | null, actor: string): string[] {
+  issueSponsored(
+    count: number,
+    expiresInMs: number,
+    label: string,
+    raidId: string | null,
+    actor: string,
+  ): string[] {
     const now = this.now();
     const codes: string[] = [];
     this.repo.tx(() => {
       for (let i = 0; i < count; i++) {
         const code = newPassCode();
         codes.push(code);
-        this.repo.insertSponsoredPass({ id_hash: sha256(code), label, raid_id: raidId, issued_by: actor, issued_at: now, expires_at: now + expiresInMs, status: 'ISSUED' });
+        this.repo.insertSponsoredPass({
+          id_hash: sha256(code),
+          label,
+          raid_id: raidId,
+          issued_by: actor,
+          issued_at: now,
+          expires_at: now + expiresInMs,
+          status: 'ISSUED',
+        });
       }
       this.repo.audit(actor, 'ISSUE_SPONSORED_PASSES', raidId, { count, label, expiresInMs }, now);
     });
@@ -281,11 +361,24 @@ export class PassService {
     const hash = sha256(normalizePassCode(code));
     const pass = this.repo.getSponsoredPass(hash);
     const now = this.now();
-    const invalid = () => new AppError('INVALID_PASS', 'パスが無効か使用済みです / Pass is invalid or already used');
+    const invalid = () =>
+      new AppError('INVALID_PASS', 'パスが無効か使用済みです / Pass is invalid or already used');
     if (!pass || pass.status !== 'ISSUED' || pass.expires_at <= now) throw invalid();
-    if (pass.raid_id && pass.raid_id !== raidId) throw new AppError('INVALID_PASS', 'このパスは別の作戦用です / This pass is for another raid');
-    if (this.repo.getEntitlement(raidId, p.id)) throw new AppError('ALREADY_ENTITLED', 'この作戦の出撃パスは取得済みです（パスは使われていません）/ Already have a pass (code not used)');
-    if (!manager.joinOpen()) throw new AppError('JOIN_CLOSED', '今回の出撃受付は終了しました（パスは使われていません）/ Boarding closed (code not used)');
+    if (pass.raid_id && pass.raid_id !== raidId)
+      throw new AppError(
+        'INVALID_PASS',
+        'このパスは別の作戦用です / This pass is for another raid',
+      );
+    if (this.repo.getEntitlement(raidId, p.id))
+      throw new AppError(
+        'ALREADY_ENTITLED',
+        'この作戦の出撃パスは取得済みです（パスは使われていません）/ Already have a pass (code not used)',
+      );
+    if (!manager.joinOpen())
+      throw new AppError(
+        'JOIN_CLOSED',
+        '今回の出撃受付は終了しました（パスは使われていません）/ Boarding closed (code not used)',
+      );
     this.repo.tx(() => {
       if (!this.repo.redeemSponsoredPass(hash, p.id, raidId, now)) throw invalid();
       this.grant(raidId, p.id, 'SPONSORED', hash.slice(0, 12));

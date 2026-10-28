@@ -52,7 +52,11 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   const { env } = opts;
   const mono = opts.mono ?? systemMonoClock;
   const wall = opts.wall ?? systemWallClock;
-  const app = Fastify({ logger: opts.logger === false ? false : { level: env.LOG_LEVEL }, trustProxy: true, bodyLimit: 32 * 1024 });
+  const app = Fastify({
+    logger: opts.logger === false ? false : { level: env.LOG_LEVEL },
+    trustProxy: true,
+    bodyLimit: 32 * 1024,
+  });
 
   const isAllowedOrigin = (origin: string | undefined): boolean => {
     if (!origin) return true; // non-browser clients (curl, wallets, LNbits webhook)
@@ -63,7 +67,10 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   const db = openDatabase(env.DATABASE_PATH);
   const repo = new Repo(db);
   const adapter: PaymentAdapter =
-    opts.adapter ?? (env.PAYMENT_MODE === 'lnbits' ? new LnbitsPaymentAdapter(env.LNBITS_URL, env.LNBITS_INVOICE_KEY) : new MockPaymentAdapter(wall));
+    opts.adapter ??
+    (env.PAYMENT_MODE === 'lnbits'
+      ? new LnbitsPaymentAdapter(env.LNBITS_URL, env.LNBITS_INVOICE_KEY)
+      : new MockPaymentAdapter(wall));
   const configOverrides: Partial<GameConfig> = {
     ...(env.TICKET_PRICE_SATS !== undefined ? { ticketPriceSats: env.TICKET_PRICE_SATS } : {}),
     ...(env.RAID_SECONDS !== undefined ? { matchSeconds: env.RAID_SECONDS } : {}),
@@ -86,7 +93,15 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
       : undefined;
   const sessions = new SessionService(repo, wall, env.secureCookies);
   const pilots = new PilotService({ repo, manager, sessions, wall });
-  const passes = new PassService({ repo, manager, adapter, wall, payeeDescription: env.PAYEE_DESCRIPTION, webhookUrl, log: app.log });
+  const passes = new PassService({
+    repo,
+    manager,
+    adapter,
+    wall,
+    payeeDescription: env.PAYEE_DESCRIPTION,
+    webhookUrl,
+    log: app.log,
+  });
   const actions = new PilotActionService(repo, manager, pilots, passes, wall);
   const lnurl = new LnurlAuthService(repo, pilots, wall, env.SERVER_PUBLIC_URL);
   const bots = new DemoBots(repo, manager, wall);
@@ -123,10 +138,16 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     adapter,
     mono,
     wall,
-    metrics: { eventLoopLagMs: () => Math.round(loopDelay.mean / 1e6), tickLagMs: () => Math.round(tickLag) },
+    metrics: {
+      eventLoopLagMs: () => Math.round(loopDelay.mean / 1e6),
+      tickLagMs: () => Math.round(tickLag),
+    },
   };
 
-  await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } });
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
   await app.register(cors, {
     origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
     credentials: true,
@@ -139,10 +160,15 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     timeWindow: '1 minute',
     // Venue Wi-Fi often NATs everyone to one IP, so prefer the session.
     keyGenerator: (req) => {
-      const token = extractBearer(req.headers.authorization) ?? readCookie(req.headers.cookie, SESSION_COOKIE);
+      const token =
+        extractBearer(req.headers.authorization) ?? readCookie(req.headers.cookie, SESSION_COOKIE);
       return token ? `t:${sha256(token).slice(0, 24)}` : `ip:${req.ip}`;
     },
-    errorResponseBuilder: () => ({ statusCode: 429, error: 'RATE_LIMITED', message: 'リクエストが多すぎます。少し待ってください / Too many requests' }),
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      error: 'RATE_LIMITED',
+      message: 'リクエストが多すぎます。少し待ってください / Too many requests',
+    }),
   });
 
   // CSRF: a browser request authenticated by the session cookie must come
@@ -156,13 +182,20 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   });
 
   app.setErrorHandler((err, req, reply) => {
-    if (err instanceof AppError) return reply.code(err.statusCode).send({ error: err.code, message: err.message });
+    if (err instanceof AppError)
+      return reply.code(err.statusCode).send({ error: err.code, message: err.message });
     if (err instanceof ZodError) {
-      return reply.code(400).send({ error: 'BAD_REQUEST', message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
+      return reply.code(400).send({
+        error: 'BAD_REQUEST',
+        message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
-      return reply.code(status).send({ error: status === 429 ? 'RATE_LIMITED' : 'BAD_REQUEST', message: (err as Error).message });
+      return reply.code(status).send({
+        error: status === 429 ? 'RATE_LIMITED' : 'BAD_REQUEST',
+        message: (err as Error).message,
+      });
     }
     req.log.error({ err }, 'unhandled error');
     return reply.code(500).send({ error: 'INTERNAL', message: 'Internal error' });

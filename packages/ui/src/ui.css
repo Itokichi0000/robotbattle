@@ -17,7 +17,12 @@
 .swc-header,
 .swc-training {
   color: var(--swc-text);
-  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Hiragino Sans',
+    'Noto Sans JP',
+    sans-serif;
 }
 .swc-cockpit {
   display: flex;

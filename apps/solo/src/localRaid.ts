@@ -1,6 +1,26 @@
-import type { CheerPush, GameConfig, GameEvent, PublicRaidSnapshot, RaidState, RobotId, Role, SubmitResponse, TaskInput, TaskResponse } from '@sats-wars/shared';
+import type {
+  CheerPush,
+  GameConfig,
+  GameEvent,
+  PublicRaidSnapshot,
+  RaidState,
+  RobotId,
+  Role,
+  SubmitResponse,
+  TaskInput,
+  TaskResponse,
+} from '@sats-wars/shared';
 import { CHEER_EMOJIS, DEFAULT_GAME_CONFIG, isClockRunning } from '@sats-wars/shared';
-import { type EngineCommand, type Rng, type TaskChoice, createRaidState, mulberry32, reduce, snapshotCore, solveTask } from '@sats-wars/game-engine';
+import {
+  type EngineCommand,
+  type Rng,
+  type TaskChoice,
+  createRaidState,
+  mulberry32,
+  reduce,
+  snapshotCore,
+  solveTask,
+} from '@sats-wars/game-engine';
 import { ClientError, type RaidClient } from '@sats-wars/ui';
 
 export interface SoloOptions {
@@ -26,8 +46,34 @@ interface Bot {
   pending: { taskId: string; input: TaskInput } | null;
 }
 
-const BOT_NAMES = ['雷丸', 'イナズマ', '疾風', 'ツムジ', 'Volt', 'Gale', '太鼓番', '風袋番', 'Spark', 'Zephyr', '稲光', '颯'];
-const ROLE_CYCLE: Role[] = ['GUARDIAN', 'ROUTER', 'GUNNER', 'ENGINEER', 'GUARDIAN', 'GUNNER', 'ROUTER', 'GUNNER', 'GUARDIAN', 'ENGINEER', 'GUNNER', 'ROUTER'];
+const BOT_NAMES = [
+  '雷丸',
+  'イナズマ',
+  '疾風',
+  'ツムジ',
+  'Volt',
+  'Gale',
+  '太鼓番',
+  '風袋番',
+  'Spark',
+  'Zephyr',
+  '稲光',
+  '颯',
+];
+const ROLE_CYCLE: Role[] = [
+  'GUARDIAN',
+  'ROUTER',
+  'GUNNER',
+  'ENGINEER',
+  'GUARDIAN',
+  'GUNNER',
+  'ROUTER',
+  'GUNNER',
+  'GUARDIAN',
+  'ENGINEER',
+  'GUNNER',
+  'ROUTER',
+];
 export const PLAYER_ID = 'you';
 const LOBBY_MS = 15_000;
 const RESULTS_MS = 30_000;
@@ -144,7 +190,14 @@ export class LocalRaid implements RaidClient {
   private boardBots(t: number): void {
     for (const b of this.bots) {
       if (this.state.pilots[b.id]) continue;
-      this.dispatch({ type: 'BOARD', t, pilotId: b.id, callsign: b.callsign, role: b.role, isBot: true });
+      this.dispatch({
+        type: 'BOARD',
+        t,
+        pilotId: b.id,
+        callsign: b.callsign,
+        role: b.role,
+        isBot: true,
+      });
     }
   }
 
@@ -155,7 +208,13 @@ export class LocalRaid implements RaidClient {
       if (b.nextAt === 0) b.nextAt = t + 1000 + this.rng() * 4000;
       if (t < b.nextAt) continue;
       if (b.pending) {
-        this.dispatch({ type: 'SUBMIT_TASK', t, pilotId: b.id, taskId: b.pending.taskId, input: b.pending.input });
+        this.dispatch({
+          type: 'SUBMIT_TASK',
+          t,
+          pilotId: b.id,
+          taskId: b.pending.taskId,
+          input: b.pending.input,
+        });
         b.pending = null;
         b.nextAt = t + s.config.normalActionCooldownSeconds * 1000 + 1000 + this.rng() * 3000;
         if (this.rng() < 0.05) this.cheer(b.callsign);
@@ -164,9 +223,20 @@ export class LocalRaid implements RaidClient {
       const r = this.dispatch({ type: 'REQUEST_TASK', t, pilotId: b.id });
       if (r.outcome.kind === 'task' && r.outcome.task) {
         const task = r.outcome.task;
-        const input = solveTask(task.params, this.options.botSkill, this.rng, 900, task.target.kind === 'ENERGY' ? task.target.sink : undefined);
+        const input = solveTask(
+          task.params,
+          this.options.botSkill,
+          this.rng,
+          900,
+          task.target.kind === 'ENERGY' ? task.target.sink : undefined,
+        );
         b.pending = { taskId: task.taskId, input };
-        const playMs = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 2500 + this.rng() * 2500;
+        const playMs =
+          'stopAtMs' in input
+            ? input.stopAtMs
+            : 'releaseAtMs' in input
+              ? input.releaseAtMs
+              : 2500 + this.rng() * 2500;
         b.nextAt = t + playMs + 150;
       } else {
         b.nextAt = t + 2500 + this.rng() * 2000;
@@ -204,7 +274,8 @@ export class LocalRaid implements RaidClient {
   setPaused(p: boolean): void {
     if (p && this.pausedAt === null) {
       this.pausedAt = this.now();
-      if (this.state.status === 'LIVE') this.dispatch({ type: 'PAUSE', t: this.clock(), reason: 'SOLO' });
+      if (this.state.status === 'LIVE')
+        this.dispatch({ type: 'PAUSE', t: this.clock(), reason: 'SOLO' });
     } else if (!p && this.pausedAt !== null) {
       this.pausedTotal += this.now() - this.pausedAt;
       this.pausedAt = null;
@@ -216,24 +287,60 @@ export class LocalRaid implements RaidClient {
   // ---- RaidClient (the phone cockpit talks to this) -------------------------
 
   async board(role: Role, robot?: RobotId): Promise<void> {
-    const r = this.dispatch({ type: 'BOARD', t: this.clock(), pilotId: PLAYER_ID, callsign: this.options.callsign, role, ...(robot ? { robot } : {}) });
-    if (r.outcome.kind === 'board' && r.outcome.code !== 'OK' && r.outcome.code !== 'ALREADY_BOARDED') throw new ClientError(r.outcome.code, boardMessage(r.outcome.code));
+    const r = this.dispatch({
+      type: 'BOARD',
+      t: this.clock(),
+      pilotId: PLAYER_ID,
+      callsign: this.options.callsign,
+      role,
+      ...(robot ? { robot } : {}),
+    });
+    if (
+      r.outcome.kind === 'board' &&
+      r.outcome.code !== 'OK' &&
+      r.outcome.code !== 'ALREADY_BOARDED'
+    )
+      throw new ClientError(r.outcome.code, boardMessage(r.outcome.code));
   }
 
   async changeRole(role: Role, robot?: RobotId): Promise<void> {
     if (!this.state.pilots[PLAYER_ID]) return this.board(role, robot);
-    const r = this.dispatch({ type: 'CHANGE_ROLE', t: this.clock(), pilotId: PLAYER_ID, role, ...(robot ? { robot } : {}) });
-    if (r.outcome.kind === 'role' && r.outcome.code !== 'OK') throw new ClientError(r.outcome.code, r.outcome.code === 'ROLE_COOLDOWN' ? '席の変更は少し待ってから' : '席を変えられませんでした');
+    const r = this.dispatch({
+      type: 'CHANGE_ROLE',
+      t: this.clock(),
+      pilotId: PLAYER_ID,
+      role,
+      ...(robot ? { robot } : {}),
+    });
+    if (r.outcome.kind === 'role' && r.outcome.code !== 'OK')
+      throw new ClientError(
+        r.outcome.code,
+        r.outcome.code === 'ROLE_COOLDOWN'
+          ? '席の変更は少し待ってから'
+          : '席を変えられませんでした',
+      );
   }
 
   async requestTask(choice: TaskChoice): Promise<TaskResponse> {
     const r = this.dispatch({ type: 'REQUEST_TASK', t: this.clock(), pilotId: PLAYER_ID, choice });
-    if (r.outcome.kind !== 'task') return { code: 'NOT_LIVE', task: null, cooldownUntil: 0, gameMs: this.state.gameMs };
-    return { code: r.outcome.code, task: r.outcome.task, cooldownUntil: r.outcome.cooldownUntil, gameMs: this.state.gameMs };
+    if (r.outcome.kind !== 'task')
+      return { code: 'NOT_LIVE', task: null, cooldownUntil: 0, gameMs: this.state.gameMs };
+    return {
+      code: r.outcome.code,
+      task: r.outcome.task,
+      cooldownUntil: r.outcome.cooldownUntil,
+      gameMs: this.state.gameMs,
+    };
   }
 
   async submitTask(taskId: string, input: TaskInput): Promise<SubmitResponse> {
-    const r = this.dispatch({ type: 'SUBMIT_TASK', t: this.clock(), pilotId: PLAYER_ID, taskId, input });
+    const r = this.dispatch({
+      type: 'SUBMIT_TASK',
+      t: this.clock(),
+      pilotId: PLAYER_ID,
+      taskId,
+      input,
+    });
     if (r.outcome.kind !== 'submit') throw new ClientError('NOT_LIVE', '作戦が始まっていません');
     return { result: r.outcome.result, duplicate: false };
   }
@@ -253,8 +360,14 @@ export class LocalRaid implements RaidClient {
     const core = snapshotCore(this.state, this.recent, Date.now());
     this.snap = {
       ...core,
-      lobbyEndsAt: this.state.status === 'LOBBY_OPEN' ? Date.now() + Math.max(0, (this.lobbyEndsAt - this.clock()) / this.options.speed) : null,
-      joinOpen: this.state.status === 'LOBBY_OPEN' || (this.state.status === 'LIVE' && this.state.gameMs < this.state.config.cutoffForPaidJoinAtSeconds * 1000),
+      lobbyEndsAt:
+        this.state.status === 'LOBBY_OPEN'
+          ? Date.now() + Math.max(0, (this.lobbyEndsAt - this.clock()) / this.options.speed)
+          : null,
+      joinOpen:
+        this.state.status === 'LOBBY_OPEN' ||
+        (this.state.status === 'LIVE' &&
+          this.state.gameMs < this.state.config.cutoffForPaidJoinAtSeconds * 1000),
       passMode: 'FREE',
       ticketPriceSats: this.state.config.ticketPriceSats,
       paymentsEnabled: false,

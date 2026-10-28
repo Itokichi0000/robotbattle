@@ -17,7 +17,12 @@ interface Start {
 }
 type Status =
   | { status: 'PENDING' | 'FAILED' | 'EXPIRED' }
-  | { status: 'VERIFIED'; purpose: 'LOGIN' | 'LINK'; pilot: PilotProfile; mergeOffer?: { token: string; guestCallsign: string; sorties: number } | null };
+  | {
+      status: 'VERIFIED';
+      purpose: 'LOGIN' | 'LINK';
+      pilot: PilotProfile;
+      mergeOffer?: { token: string; guestCallsign: string; sorties: number } | null;
+    };
 
 /** Only same-site paths are accepted as the return target (no open redirect). */
 function safeNext(raw: string | null): string {
@@ -28,7 +33,10 @@ function safeNext(raw: string | null): string {
 function mockSeed(): string {
   let s = storage.get('sw.mockWalletSeed');
   if (!s) {
-    s = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    s =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     storage.set('sw.mockWalletSeed', s);
   }
   return s;
@@ -71,7 +79,8 @@ export function LightningLogin() {
       try {
         const st = await api<Status>(`/api/auth/lightning/status/${start.challengeId}`);
         if (st.status !== 'PENDING') setStatus(st);
-        if (st.status === 'PENDING' && Date.now() > start.expiresAt) setStatus({ status: 'EXPIRED' });
+        if (st.status === 'PENDING' && Date.now() > start.expiresAt)
+          setStatus({ status: 'EXPIRED' });
       } catch {
         // keep polling
       }
@@ -87,7 +96,9 @@ export function LightningLogin() {
     if (!start) return;
     setBusy(true);
     try {
-      await api('/api/auth/lightning/mock-approve', { body: { challengeId: start.challengeId, walletSeed: mockSeed() } });
+      await api('/api/auth/lightning/mock-approve', {
+        body: { challengeId: start.challengeId, walletSeed: mockSeed() },
+      });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -109,11 +120,18 @@ export function LightningLogin() {
   };
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 p-4" data-testid="lightning-login-page">
+    <main
+      className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 p-4"
+      data-testid="lightning-login-page"
+    >
       <Link href="/" className="sw-focus self-start rounded">
         <Logo size="sm" />
       </Link>
-      <h1 className="sw-display text-2xl">{purpose === 'LINK' ? L('ウォレットを連携', 'Link a wallet') : L('Lightningでログイン', 'Log in with Lightning')}</h1>
+      <h1 className="sw-display text-2xl">
+        {purpose === 'LINK'
+          ? L('ウォレットを連携', 'Link a wallet')
+          : L('Lightningでログイン', 'Log in with Lightning')}
+      </h1>
       <p className="text-sm text-muted">
         {L(
           'ウォレットでQRを読むと、このブラウザでログインできます。鍵を持っていることの確認で、本人確認ではありません。秘密鍵やシードを入力させることはありません。',
@@ -134,10 +152,19 @@ export function LightningLogin() {
             )}
           </p>
           <div className="flex gap-2">
-            <button type="button" className="sw-btn flex-1 bg-amber text-navy" onClick={() => void merge(true)} data-testid="merge-yes">
+            <button
+              type="button"
+              className="sw-btn flex-1 bg-amber text-navy"
+              onClick={() => void merge(true)}
+              data-testid="merge-yes"
+            >
               {L('引き継ぐ', 'Bring them')}
             </button>
-            <button type="button" className="sw-btn flex-1 bg-navy-3" onClick={() => void merge(false)}>
+            <button
+              type="button"
+              className="sw-btn flex-1 bg-navy-3"
+              onClick={() => void merge(false)}
+            >
               {L('引き継がない', 'No thanks')}
             </button>
           </div>
@@ -155,18 +182,34 @@ export function LightningLogin() {
         <div className="sw-panel flex flex-col items-center gap-3 p-4">
           {start.realWallets && (
             <>
-              <QrCode url={`lightning:${start.lnurl}`} size={260} caption={false} label={L('LNURLログイン用QR', 'LNURL login QR')} />
-              <a className="sw-btn sw-focus flex w-full items-center justify-center bg-teal text-navy" href={`lightning:${start.lnurl}`}>
+              <QrCode
+                url={`lightning:${start.lnurl}`}
+                size={260}
+                caption={false}
+                label={L('LNURLログイン用QR', 'LNURL login QR')}
+              />
+              <a
+                className="sw-btn sw-focus flex w-full items-center justify-center bg-teal text-navy"
+                href={`lightning:${start.lnurl}`}
+              >
                 {L('ウォレットを開く', 'Open wallet')}
               </a>
             </>
           )}
           {start.mockWallet && (
-            <button type="button" className="sw-btn w-full bg-amber text-navy" onClick={() => void approveMock()} disabled={busy} data-testid="mock-wallet-approve">
+            <button
+              type="button"
+              className="sw-btn w-full bg-amber text-navy"
+              onClick={() => void approveMock()}
+              disabled={busy}
+              data-testid="mock-wallet-approve"
+            >
               🧪 {L('テスト用ウォレットで承認（デモ）', 'Approve with the test wallet (demo)')}
             </button>
           )}
-          <p className="text-xs text-muted">{L('ウォレットの承認を待っています…', 'Waiting for the wallet…')}</p>
+          <p className="text-xs text-muted">
+            {L('ウォレットの承認を待っています…', 'Waiting for the wallet…')}
+          </p>
         </div>
       ) : (
         <p>{L('準備中…', 'Preparing…')}</p>

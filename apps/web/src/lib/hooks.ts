@@ -3,7 +3,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { PublicRaidSnapshot, RoomRole } from '@sats-wars/shared';
 import { RaidConnection } from './connection';
 
-export function useRaidConnection(role: RoomRole, token: string | null = null): RaidConnection | null {
+export function useRaidConnection(
+  role: RoomRole,
+  token: string | null = null,
+): RaidConnection | null {
   const [conn, setConn] = useState<RaidConnection | null>(null);
   const tokenRef = useRef(token);
   tokenRef.current = token;

@@ -52,15 +52,13 @@ class FakeLnbits {
           memo: b.memo,
           webhook: b.webhook,
         });
-        res
-          .writeHead(201, { 'content-type': 'application/json' })
-          .end(
-            JSON.stringify({
-              payment_hash: hash,
-              payment_request: `lnbc${b.amount}n1fake${hash.slice(0, 20)}`,
-              checking_id: hash,
-            }),
-          );
+        res.writeHead(201, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            payment_hash: hash,
+            payment_request: `lnbc${b.amount}n1fake${hash.slice(0, 20)}`,
+            checking_id: hash,
+          }),
+        );
         return;
       }
       const m = /^\/api\/v1\/payments\/([0-9a-f]{64})$/.exec(req.url ?? '');
@@ -163,7 +161,11 @@ describe('server with LNbits adapter', () => {
       },
     });
     const r = await guest(s);
-    const res = await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(r.token) });
+    const res = await s.inject({
+      method: 'POST',
+      url: '/api/raids/current/pass/invoice',
+      headers: auth(r.token),
+    });
     expect(res.statusCode).toBe(200);
     const row = s.services.repo.getInvoice(res.json().invoiceId)!;
     return { s, lnbits, r, row, invoice: res.json() };
@@ -197,7 +199,11 @@ describe('server with LNbits adapter', () => {
     lnbits.invoices.get(row.payment_hash)!.paid = true;
     await Promise.all([hook(), hook(), hook()]);
     const me = (await s.inject({ url: '/api/me', headers: auth(r.token) })).json();
-    expect(me).toMatchObject({ seat: { entitled: true, entitlementSource: 'LIGHTNING' }, pendingInvoice: null, passCredits: 0 });
+    expect(me).toMatchObject({
+      seat: { entitled: true, entitlementSource: 'LIGHTNING' },
+      pendingInvoice: null,
+      passCredits: 0,
+    });
     expect(s.services.repo.getInvoice(row.id)!.status).toBe('PAID');
     expect(row.amount_sats).toBe(21);
   });
@@ -219,11 +225,20 @@ describe('server with LNbits adapter', () => {
   it('the payment-integration kill switch stops all provider calls', async () => {
     const { s, lnbits, row } = await setup();
     const token = await s.adminToken();
-    await s.inject({ method: 'POST', url: '/api/admin/command', headers: auth(token), payload: { command: 'SET_PAYMENT_INTEGRATION', enabled: false } });
+    await s.inject({
+      method: 'POST',
+      url: '/api/admin/command',
+      headers: auth(token),
+      payload: { command: 'SET_PAYMENT_INTEGRATION', enabled: false },
+    });
     const before = lnbits.requests.length;
     lnbits.invoices.get(row.payment_hash)!.paid = true;
     await s.services.passes.pollPending();
-    await s.inject({ method: 'POST', url: '/api/webhooks/lnbits/whsec-test-0001', payload: { payment_hash: row.payment_hash } });
+    await s.inject({
+      method: 'POST',
+      url: '/api/webhooks/lnbits/whsec-test-0001',
+      payload: { payment_hash: row.payment_hash },
+    });
     expect(lnbits.requests.length).toBe(before);
     expect(s.services.repo.getInvoice(row.id)!.status).toBe('PENDING');
   });

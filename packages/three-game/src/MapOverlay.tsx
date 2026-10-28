@@ -47,14 +47,25 @@ interface RegionVisual {
  * Floating hologram of Japan's 8 defence regions (one city node each).
  * Everything shown mirrors server state; pulses come from the director.
  */
-export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion, locale }: MapOverlayProps) {
+export function MapOverlay({
+  cities,
+  threats,
+  cityMaxHp,
+  director,
+  reducedMotion,
+  locale,
+}: MapOverlayProps) {
   const visuals = useMemo(() => {
     const out = {} as Record<RegionId, RegionVisual>;
-    for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<[RegionId, (typeof REGION_OUTLINES)[RegionId]]>) {
+    for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<
+      [RegionId, (typeof REGION_OUTLINES)[RegionId]]
+    >) {
       const geometries: THREE.BufferGeometry[] = [];
       for (const poly of polys) {
         const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
-        geometries.push(new THREE.ExtrudeGeometry(shape, { depth: EXTRUDE_DEPTH, bevelEnabled: false }));
+        geometries.push(
+          new THREE.ExtrudeGeometry(shape, { depth: EXTRUDE_DEPTH, bevelEnabled: false }),
+        );
         const pts = poly.map((p) => new THREE.Vector3(p.x, p.y, EXTRUDE_DEPTH + 0.01));
         pts.push(pts[0]!.clone());
         geometries.push(new THREE.BufferGeometry().setFromPoints(pts));
@@ -88,13 +99,21 @@ export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion
   );
 
   const byId = useMemo(() => new Map(cities.map((r) => [r.cityId, r])), [cities]);
-  const pulses = useRef<Array<{ regionId: RegionId; start: number; kind: DirectorEffect['kind'] }>>([]);
+  const pulses = useRef<Array<{ regionId: RegionId; start: number; kind: DirectorEffect['kind'] }>>(
+    [],
+  );
   const pulseMeshes = useRef<Array<THREE.Mesh | null>>([]);
 
   useEffect(
     () =>
       director.onEffect((e) => {
-        if ((e.kind === 'shield' || e.kind === 'beam' || e.kind === 'repair' || e.kind === 'cityBlast') && e.to?.kind === 'city') {
+        if (
+          (e.kind === 'shield' ||
+            e.kind === 'beam' ||
+            e.kind === 'repair' ||
+            e.kind === 'cityBlast') &&
+          e.to?.kind === 'city'
+        ) {
           pulses.current.push({ regionId: e.to.id, start: director.time, kind: e.kind });
           if (pulses.current.length > 12) pulses.current.shift();
         }
@@ -112,7 +131,9 @@ export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion
       const d = threats[r.cityId];
       if (d && !r.destroyed) {
         // Under attack: slow 1 Hz glow (≤2 Hz rule; steady with reduced motion), red edge if lethal.
-        v.material.emissiveIntensity = reducedMotion ? 0.9 : 0.5 + 0.45 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2));
+        v.material.emissiveIntensity = reducedMotion
+          ? 0.9
+          : 0.5 + 0.45 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2));
         v.edge.color.set(d.lethal ? '#FF4D5E' : '#FFB04D');
       } else {
         v.material.emissiveIntensity = r.destroyed ? 0.15 : 0.35;
@@ -134,13 +155,26 @@ export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion
       const s = 0.3 + age * (p.kind === 'shield' ? 1.2 : 2.2);
       m.scale.set(s, s, s);
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.set(p.kind === 'beam' || p.kind === 'cityBlast' ? CORRUPT_RED : p.kind === 'shield' ? TEAM_COLORS.FUJIN : p.kind === 'repair' ? '#7DFFB2' : ALIEN_COLOR);
+      mat.color.set(
+        p.kind === 'beam' || p.kind === 'cityBlast'
+          ? CORRUPT_RED
+          : p.kind === 'shield'
+            ? TEAM_COLORS.FUJIN
+            : p.kind === 'repair'
+              ? '#7DFFB2'
+              : ALIEN_COLOR,
+      );
       mat.opacity = (1 - age) * 0.85;
     });
   });
 
   return (
-    <group position={MAP_TRANSFORM.position} rotation={MAP_TRANSFORM.rotation} scale={MAP_TRANSFORM.scale} name="map-overlay">
+    <group
+      position={MAP_TRANSFORM.position}
+      rotation={MAP_TRANSFORM.rotation}
+      scale={MAP_TRANSFORM.scale}
+      name="map-overlay"
+    >
       {/* Hologram base plate */}
       <mesh position={[0, 0, -0.08]}>
         <circleGeometry args={[10.5, 64]} />
@@ -150,7 +184,11 @@ export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion
         <ringGeometry args={[10.2, 10.5, 96]} />
         <meshBasicMaterial color="#3A7BD5" transparent opacity={0.7} />
       </mesh>
-      <gridHelper args={[20, 20, '#1F4A7A', '#14304F']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.05]} />
+      <gridHelper
+        args={[20, 20, '#1F4A7A', '#14304F']}
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[0, 0, -0.05]}
+      />
 
       {(Object.keys(visuals) as RegionId[]).map((id) => {
         const v = visuals[id];
@@ -194,13 +232,26 @@ const LABEL_OFFSET: Record<CityState['cityId'], [number, number]> = {
   kyushu: [-2.4, -0.4],
 };
 
-function CityLabel({ city, threat, locale }: { city: CityState; threat: CityThreat | undefined; locale: 'ja' | 'en' }) {
+function CityLabel({
+  city,
+  threat,
+  locale,
+}: {
+  city: CityState;
+  threat: CityThreat | undefined;
+  locale: 'ja' | 'en';
+}) {
   const c = REGION_CENTROIDS[city.cityId];
   const info = CITY_INFO[city.cityId];
   const state = city.destroyed ? 'down' : threat?.lethal ? 'danger' : threat ? 'threat' : 'ok';
   return (
     <group position={[c.x, c.y, EXTRUDE_DEPTH]}>
-      <Html position={[LABEL_OFFSET[city.cityId][0], LABEL_OFFSET[city.cityId][1], 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <Html
+        position={[LABEL_OFFSET[city.cityId][0], LABEL_OFFSET[city.cityId][1], 0.3]}
+        center
+        zIndexRange={[10, 0]}
+        style={{ pointerEvents: 'none' }}
+      >
         <div className={`sw-map-label is-${state}`} data-state={state}>
           {threat && <span className="sw-map-label-warn">⚠{Math.ceil(threat.seconds)}s</span>}
           <span className="sw-map-label-name">{locale === 'ja' ? info.cityJa : info.cityEn}</span>

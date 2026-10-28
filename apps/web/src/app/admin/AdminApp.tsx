@@ -27,8 +27,23 @@ interface Overview {
   entitlements: Record<string, number>;
   invoices: Record<string, { count: number; sats: number }>;
   sponsored: Record<string, number>;
-  realtime: { connections: number; byRole: Record<string, number>; arenas: Array<{ socketId: string; fps: number; frameMs: number; renderer: string; quality: string }> };
-  server: { uptimeSec: number; memoryMb: number; eventLoopLagMs: number | null; tickLagMs: number | null };
+  realtime: {
+    connections: number;
+    byRole: Record<string, number>;
+    arenas: Array<{
+      socketId: string;
+      fps: number;
+      frameMs: number;
+      renderer: string;
+      quality: string;
+    }>;
+  };
+  server: {
+    uptimeSec: number;
+    memoryMb: number;
+    eventLoopLagMs: number | null;
+    tickLagMs: number | null;
+  };
   nextConfig: GameConfig;
   broadcastTemplates: Record<string, { ja: string; en: string }>;
 }
@@ -154,7 +169,6 @@ function Login({ onToken }: { onToken: (t: string) => void }) {
   );
 }
 
-
 type Tab = 'raid' | 'pilots' | 'passes' | 'monitor' | 'audit';
 
 function Dashboard({ token, onLogout }: { token: string; onLogout: () => void }) {
@@ -199,7 +213,13 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               ['audit', '監査ログ'],
             ] as Array<[Tab, string]>
           ).map(([k, label]) => (
-            <button key={k} type="button" className={`sw-btn px-3 ${tab === k ? 'bg-teal text-navy' : 'bg-navy-3'}`} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
+            <button
+              key={k}
+              type="button"
+              className={`sw-btn px-3 ${tab === k ? 'bg-teal text-navy' : 'bg-navy-3'}`}
+              onClick={() => setTab(k)}
+              data-testid={`tab-${k}`}
+            >
               {label}
             </button>
           ))}
@@ -230,24 +250,76 @@ function EmergencyBar({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
   const s = ov.settings;
   return (
     <section className="sw-panel flex flex-wrap items-center gap-2 p-3" data-testid="kill-switches">
-      <button type="button" className="sw-btn bg-danger px-4 text-navy" onClick={() => void cmd({ command: 'EMERGENCY_STOP' }, '緊急停止：作戦一時停止・搭乗停止・決済停止・自動ループ停止。よろしいですか？')} data-testid="cmd-emergency">
+      <button
+        type="button"
+        className="sw-btn bg-danger px-4 text-navy"
+        onClick={() =>
+          void cmd(
+            { command: 'EMERGENCY_STOP' },
+            '緊急停止：作戦一時停止・搭乗停止・決済停止・自動ループ停止。よろしいですか？',
+          )
+        }
+        data-testid="cmd-emergency"
+      >
         🛑 緊急停止
       </button>
-      <Toggle label="新規決済" on={s.paymentsEnabled} onChange={(v) => void cmd({ command: 'SET_PAYMENTS_ENABLED', enabled: v })} testId="sw-payments" />
-      <Toggle label="決済連携" on={s.paymentIntegration} onChange={(v) => void cmd({ command: 'SET_PAYMENT_INTEGRATION', enabled: v })} testId="sw-integration" />
-      <Toggle label="搭乗受付" on={!s.joinStopped} onChange={(v) => void cmd({ command: 'SET_JOIN_STOPPED', stopped: !v })} testId="sw-join" />
-      <Toggle label="名前表示" on={!s.namesHidden} onChange={(v) => void cmd({ command: 'SET_NAMES_HIDDEN', hidden: !v })} testId="sw-names" />
-      <Toggle label="自動ループ" on={s.autoLoop} onChange={(v) => void cmd({ command: 'SET_AUTO_LOOP', enabled: v })} testId="sw-autoloop" />
+      <Toggle
+        label="新規決済"
+        on={s.paymentsEnabled}
+        onChange={(v) => void cmd({ command: 'SET_PAYMENTS_ENABLED', enabled: v })}
+        testId="sw-payments"
+      />
+      <Toggle
+        label="決済連携"
+        on={s.paymentIntegration}
+        onChange={(v) => void cmd({ command: 'SET_PAYMENT_INTEGRATION', enabled: v })}
+        testId="sw-integration"
+      />
+      <Toggle
+        label="搭乗受付"
+        on={!s.joinStopped}
+        onChange={(v) => void cmd({ command: 'SET_JOIN_STOPPED', stopped: !v })}
+        testId="sw-join"
+      />
+      <Toggle
+        label="名前表示"
+        on={!s.namesHidden}
+        onChange={(v) => void cmd({ command: 'SET_NAMES_HIDDEN', hidden: !v })}
+        testId="sw-names"
+      />
+      <Toggle
+        label="自動ループ"
+        on={s.autoLoop}
+        onChange={(v) => void cmd({ command: 'SET_AUTO_LOOP', enabled: v })}
+        testId="sw-autoloop"
+      />
       <span className="ml-auto text-xs text-muted">
-        PAYMENT_MODE={s.paymentMode} · AUTH={s.authMode} · {s.demoMode ? 'DEMO_MODE' : 'EVENT'} · {s.eventId}
+        PAYMENT_MODE={s.paymentMode} · AUTH={s.authMode} · {s.demoMode ? 'DEMO_MODE' : 'EVENT'} ·{' '}
+        {s.eventId}
       </span>
     </section>
   );
 }
 
-function Toggle({ label, on, onChange, testId }: { label: string; on: boolean; onChange: (v: boolean) => void; testId?: string }) {
+function Toggle({
+  label,
+  on,
+  onChange,
+  testId,
+}: {
+  label: string;
+  on: boolean;
+  onChange: (v: boolean) => void;
+  testId?: string;
+}) {
   return (
-    <button type="button" className={`sw-btn px-3 text-sm ${on ? 'bg-ok/80 text-navy' : 'bg-danger/40'}`} onClick={() => onChange(!on)} aria-pressed={on} data-testid={testId}>
+    <button
+      type="button"
+      className={`sw-btn px-3 text-sm ${on ? 'bg-ok/80 text-navy' : 'bg-danger/40'}`}
+      onClick={() => onChange(!on)}
+      aria-pressed={on}
+      data-testid={testId}
+    >
       {label}：{on ? 'ON' : 'OFF'}
     </button>
   );
@@ -262,7 +334,8 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
   const [tpl, setTpl] = useState(Object.keys(ov.broadcastTemplates)[0] ?? 'CUSTOM');
   const [ja, setJa] = useState('');
   const [en, setEn] = useState('');
-  const phase = snap.status === 'LIVE' ? PHASE_LABELS[snap.phase].ja : STATUS_LABELS[snap.status].ja;
+  const phase =
+    snap.status === 'LIVE' ? PHASE_LABELS[snap.phase].ja : STATUS_LABELS[snap.status].ja;
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <section className="sw-panel flex flex-col gap-3 p-4">
@@ -273,7 +346,8 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
           <span className="font-mono text-xl">{fmtClock(view.timeLeftMs)}</span>
         </div>
         <p className="text-sm text-muted">
-          {snap.raidId} · {snap.configVersion} #{snap.configHash} · 搭乗 {ov.crew.total}（BOT {ov.crew.bots}）
+          {snap.raidId} · {snap.configVersion} #{snap.configHash} · 搭乗 {ov.crew.total}（BOT{' '}
+          {ov.crew.bots}）
         </p>
         <p className="text-sm">
           {ROLES.map((r) => (
@@ -281,44 +355,104 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
               {ROLE_LABELS[r].icon} {ov.crew.roles[r] ?? 0}
             </span>
           ))}
-          SYNC {snap.sync} · 都市 {view.citiesStanding}/8 · NULL CORE {view.boss ? `${view.boss.hp}/${view.boss.hpMax}` : '-'}
+          SYNC {snap.sync} · 都市 {view.citiesStanding}/8 · NULL CORE{' '}
+          {view.boss ? `${view.boss.hp}/${view.boss.hpMax}` : '-'}
         </p>
         <div className="grid grid-cols-3 gap-2">
-          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'OPEN_LOBBY' })} data-testid="cmd-open-lobby">
+          <button
+            className="sw-btn bg-navy-3"
+            onClick={() => void cmd({ command: 'OPEN_LOBBY' })}
+            data-testid="cmd-open-lobby"
+          >
             受付開始
           </button>
-          <button className="sw-btn bg-amber text-navy" onClick={() => void cmd({ command: 'START' })} data-testid="cmd-start">
+          <button
+            className="sw-btn bg-amber text-navy"
+            onClick={() => void cmd({ command: 'START' })}
+            data-testid="cmd-start"
+          >
             出撃開始
           </button>
-          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: snap.status === 'PAUSED' ? 'RESUME' : 'PAUSE' })} data-testid="cmd-pause">
+          <button
+            className="sw-btn bg-navy-3"
+            onClick={() => void cmd({ command: snap.status === 'PAUSED' ? 'RESUME' : 'PAUSE' })}
+            data-testid="cmd-pause"
+          >
             {snap.status === 'PAUSED' ? '再開' : '一時停止'}
           </button>
-          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'END' }, '作戦を終了して結果を確定します。よろしいですか？')} data-testid="cmd-end">
+          <button
+            className="sw-btn bg-navy-3"
+            onClick={() =>
+              void cmd({ command: 'END' }, '作戦を終了して結果を確定します。よろしいですか？')
+            }
+            data-testid="cmd-end"
+          >
             終了
           </button>
-          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'CANCEL' }, '作戦を中止します（記録なし・支払い済みはパス残高へ）。よろしいですか？')} data-testid="cmd-cancel">
+          <button
+            className="sw-btn bg-navy-3"
+            onClick={() =>
+              void cmd(
+                { command: 'CANCEL' },
+                '作戦を中止します（記録なし・支払い済みはパス残高へ）。よろしいですか？',
+              )
+            }
+            data-testid="cmd-cancel"
+          >
             中止
           </button>
-          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'NEXT_RAID' })} data-testid="cmd-next">
+          <button
+            className="sw-btn bg-navy-3"
+            onClick={() => void cmd({ command: 'NEXT_RAID' })}
+            data-testid="cmd-next"
+          >
             次の作戦
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           出撃パス：
-          <Toggle label={s.passMode === 'FREE' ? '無料イベント' : `有料 ${snap.ticketPriceSats} sats`} on={s.passMode === 'FREE'} onChange={(v) => void cmd({ command: 'SET_PASS_MODE', mode: v ? 'FREE' : 'PAID' })} testId="sw-passmode" />
+          <Toggle
+            label={s.passMode === 'FREE' ? '無料イベント' : `有料 ${snap.ticketPriceSats} sats`}
+            on={s.passMode === 'FREE'}
+            onChange={(v) => void cmd({ command: 'SET_PASS_MODE', mode: v ? 'FREE' : 'PAID' })}
+            testId="sw-passmode"
+          />
         </div>
         {s.demoMode && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             デモBOT
-            <input className="w-16 rounded border border-line bg-navy px-2 py-1" value={bots} onChange={(e) => setBots(e.target.value)} data-testid="bots-input" />
+            <input
+              className="w-16 rounded border border-line bg-navy px-2 py-1"
+              value={bots}
+              onChange={(e) => setBots(e.target.value)}
+              data-testid="bots-input"
+            />
             腕前
-            <input className="w-16 rounded border border-line bg-navy px-2 py-1" value={skill} onChange={(e) => setSkill(e.target.value)} />
-            <button className="sw-btn bg-navy-3 px-3" onClick={() => void cmd({ command: 'SET_DEMO_BOTS', count: Number(bots) || 0, skill: Math.min(1, Math.max(0, Number(skill) || 0)) })} data-testid="bots-apply">
+            <input
+              className="w-16 rounded border border-line bg-navy px-2 py-1"
+              value={skill}
+              onChange={(e) => setSkill(e.target.value)}
+            />
+            <button
+              className="sw-btn bg-navy-3 px-3"
+              onClick={() =>
+                void cmd({
+                  command: 'SET_DEMO_BOTS',
+                  count: Number(bots) || 0,
+                  skill: Math.min(1, Math.max(0, Number(skill) || 0)),
+                })
+              }
+              data-testid="bots-apply"
+            >
               適用
             </button>
             速度 ×{s.timeScale}
             {[1, 2, 4].map((x) => (
-              <button key={x} className="sw-btn bg-navy-3 px-2" onClick={() => void cmd({ command: 'SET_TIME_SCALE', speed: x })}>
+              <button
+                key={x}
+                className="sw-btn bg-navy-3 px-2"
+                onClick={() => void cmd({ command: 'SET_TIME_SCALE', speed: x })}
+              >
                 ×{x}
               </button>
             ))}
@@ -328,10 +462,17 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
       <section className="sw-panel p-4">
         <JapanMapMini view={view} locale="ja" maxHp={snap.config.cityMaxHp} />
       </section>
-      <section className="sw-panel flex flex-col gap-2 p-4 md:col-span-2" data-testid="broadcast-panel">
+      <section
+        className="sw-panel flex flex-col gap-2 p-4 md:col-span-2"
+        data-testid="broadcast-panel"
+      >
         <h2 className="font-black">会場アナウンス（定型文優先）</h2>
         <div className="flex flex-wrap gap-2">
-          <select className="rounded border border-line bg-navy px-2 py-2" value={tpl} onChange={(e) => setTpl(e.target.value)}>
+          <select
+            className="rounded border border-line bg-navy px-2 py-2"
+            value={tpl}
+            onChange={(e) => setTpl(e.target.value)}
+          >
             {Object.entries(ov.broadcastTemplates).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.ja}
@@ -341,14 +482,40 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
           </select>
           {tpl === 'CUSTOM' && (
             <>
-              <input className="flex-1 rounded border border-line bg-navy px-2" placeholder="日本語" value={ja} maxLength={80} onChange={(e) => setJa(e.target.value)} />
-              <input className="flex-1 rounded border border-line bg-navy px-2" placeholder="English" value={en} maxLength={80} onChange={(e) => setEn(e.target.value)} />
+              <input
+                className="flex-1 rounded border border-line bg-navy px-2"
+                placeholder="日本語"
+                value={ja}
+                maxLength={80}
+                onChange={(e) => setJa(e.target.value)}
+              />
+              <input
+                className="flex-1 rounded border border-line bg-navy px-2"
+                placeholder="English"
+                value={en}
+                maxLength={80}
+                onChange={(e) => setEn(e.target.value)}
+              />
             </>
           )}
-          <button className="sw-btn bg-teal px-3 text-navy" onClick={() => void cmd({ command: 'BROADCAST', template: tpl, ...(tpl === 'CUSTOM' ? { ja, en } : {}), seconds: 30 })} data-testid="broadcast-send">
+          <button
+            className="sw-btn bg-teal px-3 text-navy"
+            onClick={() =>
+              void cmd({
+                command: 'BROADCAST',
+                template: tpl,
+                ...(tpl === 'CUSTOM' ? { ja, en } : {}),
+                seconds: 30,
+              })
+            }
+            data-testid="broadcast-send"
+          >
             表示（30秒）
           </button>
-          <button className="sw-btn bg-navy-3 px-3" onClick={() => void cmd({ command: 'BROADCAST_CLEAR' })}>
+          <button
+            className="sw-btn bg-navy-3 px-3"
+            onClick={() => void cmd({ command: 'BROADCAST_CLEAR' })}
+          >
             消す
           </button>
         </div>
@@ -360,7 +527,10 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
 
 function PilotsTab({ token }: { token: string }) {
   const [rows, setRows] = useState<PilotRow[]>([]);
-  const load = useCallback(async () => setRows((await api<{ pilots: PilotRow[] }>('/api/admin/pilots', { token })).pilots), [token]);
+  const load = useCallback(
+    async () => setRows((await api<{ pilots: PilotRow[] }>('/api/admin/pilots', { token })).pilots),
+    [token],
+  );
   useEffect(() => {
     void load();
   }, [load]);
@@ -393,7 +563,8 @@ function PilotsTab({ token }: { token: string }) {
             <tr key={p.id} className="border-t border-line">
               <td className="font-mono">{p.code}</td>
               <td className={p.hidden ? 'line-through opacity-60' : ''}>
-                {p.callsign} {p.showName ? '' : <span className="text-xs text-muted">(非公開)</span>}
+                {p.callsign}{' '}
+                {p.showName ? '' : <span className="text-xs text-muted">(非公開)</span>}
               </td>
               <td>{p.authType}</td>
               <td>{p.aboard ? (p.role ?? '○') : ''}</td>
@@ -402,7 +573,10 @@ function PilotsTab({ token }: { token: string }) {
               </td>
               <td>{p.passCredits}</td>
               <td className="flex gap-1 py-1">
-                <button className="sw-btn bg-navy-3 px-2 text-xs" onClick={() => void hide(p.id, !p.hidden)}>
+                <button
+                  className="sw-btn bg-navy-3 px-2 text-xs"
+                  onClick={() => void hide(p.id, !p.hidden)}
+                >
                   {p.hidden ? '名前を戻す' : '名前を隠す'}
                 </button>
                 <button className="sw-btn bg-navy-3 px-2 text-xs" onClick={() => void credit(p.id)}>
@@ -425,13 +599,18 @@ function PassesTab({ token, ov }: { token: string; ov: Overview }) {
   const [label, setLabel] = useState('sponsored');
   const load = useCallback(async () => {
     setInvoices((await api<{ invoices: InvoiceRow[] }>('/api/admin/invoices', { token })).invoices);
-    setPasses((await api<{ passes: SponsoredRow[] }>('/api/admin/sponsored-passes', { token })).passes);
+    setPasses(
+      (await api<{ passes: SponsoredRow[] }>('/api/admin/sponsored-passes', { token })).passes,
+    );
   }, [token]);
   useEffect(() => {
     void load();
   }, [load]);
   const issue = async () => {
-    const r = await api<{ codes: string[] }>('/api/admin/sponsored-passes', { body: { count: Math.max(1, Math.min(500, Number(count) || 1)), label }, token });
+    const r = await api<{ codes: string[] }>('/api/admin/sponsored-passes', {
+      body: { count: Math.max(1, Math.min(500, Number(count) || 1)), label },
+      token,
+    });
     setCodes(r.codes);
     await load();
   };
@@ -439,23 +618,52 @@ function PassesTab({ token, ov }: { token: string; ov: Overview }) {
     <div className="flex flex-col gap-4">
       <section className="sw-panel p-4 text-sm">
         <h2 className="font-black">この作戦の出撃パス</h2>
-        <p>{Object.entries(ov.entitlements).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'なし'}</p>
-        <p className="mt-1">
-          請求書：{Object.entries(ov.invoices).map(([k, v]) => `${k} ${v.count}件/${v.sats} sats`).join(' · ') || 'なし'}
+        <p>
+          {Object.entries(ov.entitlements)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(' · ') || 'なし'}
         </p>
-        <p className="mt-1">スポンサーパス：{Object.entries(ov.sponsored).map(([k, v]) => `${k} ${v}`).join(' · ') || 'なし'}</p>
+        <p className="mt-1">
+          請求書：
+          {Object.entries(ov.invoices)
+            .map(([k, v]) => `${k} ${v.count}件/${v.sats} sats`)
+            .join(' · ') || 'なし'}
+        </p>
+        <p className="mt-1">
+          スポンサーパス：
+          {Object.entries(ov.sponsored)
+            .map(([k, v]) => `${k} ${v}`)
+            .join(' · ') || 'なし'}
+        </p>
       </section>
       <section className="sw-panel flex flex-col gap-2 p-4">
         <h2 className="font-black">スポンサーパス発行（コードは1回だけ表示）</h2>
         <div className="flex flex-wrap gap-2">
-          <input className="w-20 rounded border border-line bg-navy px-2" value={count} onChange={(e) => setCount(e.target.value)} aria-label="枚数" />
-          <input className="rounded border border-line bg-navy px-2" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="ラベル" />
-          <button className="sw-btn bg-amber px-3 text-navy" onClick={() => void issue()} data-testid="issue-passes">
+          <input
+            className="w-20 rounded border border-line bg-navy px-2"
+            value={count}
+            onChange={(e) => setCount(e.target.value)}
+            aria-label="枚数"
+          />
+          <input
+            className="rounded border border-line bg-navy px-2"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            aria-label="ラベル"
+          />
+          <button
+            className="sw-btn bg-amber px-3 text-navy"
+            onClick={() => void issue()}
+            data-testid="issue-passes"
+          >
             発行
           </button>
         </div>
         {codes.length > 0 && (
-          <pre className="max-h-48 overflow-auto rounded bg-black/40 p-2 font-mono text-sm" data-testid="pass-codes">
+          <pre
+            className="max-h-48 overflow-auto rounded bg-black/40 p-2 font-mono text-sm"
+            data-testid="pass-codes"
+          >
             {codes.join('\n')}
           </pre>
         )}
@@ -467,7 +675,10 @@ function PassesTab({ token, ov }: { token: string; ov: Overview }) {
                 <button
                   className="underline"
                   onClick={() =>
-                    void api(`/api/admin/sponsored-passes/${p.idPrefix}/revoke`, { body: {}, token }).then(load)
+                    void api(`/api/admin/sponsored-passes/${p.idPrefix}/revoke`, {
+                      body: {},
+                      token,
+                    }).then(load)
                   }
                 >
                   無効化
@@ -490,7 +701,14 @@ function PassesTab({ token, ov }: { token: string; ov: Overview }) {
                 <td>{new Date(i.createdAt).toLocaleTimeString()}</td>
                 <td>
                   {i.status === 'PENDING' && (
-                    <button className="underline" onClick={() => void api(`/api/admin/invoices/${i.id}/recheck`, { body: {}, token }).then(load)}>
+                    <button
+                      className="underline"
+                      onClick={() =>
+                        void api(`/api/admin/invoices/${i.id}/recheck`, { body: {}, token }).then(
+                          load,
+                        )
+                      }
+                    >
                       再照会
                     </button>
                   )}
@@ -510,7 +728,10 @@ function MonitorTab({ ov }: { ov: Overview }) {
       <div>
         <h2 className="font-black">接続</h2>
         <p>
-          合計 {ov.realtime.connections} · {Object.entries(ov.realtime.byRole).map(([k, v]) => `${k}:${v}`).join(' ')}
+          合計 {ov.realtime.connections} ·{' '}
+          {Object.entries(ov.realtime.byRole)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(' ')}
         </p>
         <ul>
           {ov.realtime.arenas.map((a) => (
@@ -523,9 +744,13 @@ function MonitorTab({ ov }: { ov: Overview }) {
       <div>
         <h2 className="font-black">サーバー</h2>
         <p>
-          稼働 {Math.round(ov.server.uptimeSec / 60)}分 · メモリ {ov.server.memoryMb}MB · イベントループ遅延 {ov.server.eventLoopLagMs ?? '-'}ms · tick遅延 {ov.server.tickLagMs ?? '-'}ms
+          稼働 {Math.round(ov.server.uptimeSec / 60)}分 · メモリ {ov.server.memoryMb}MB ·
+          イベントループ遅延 {ov.server.eventLoopLagMs ?? '-'}ms · tick遅延{' '}
+          {ov.server.tickLagMs ?? '-'}ms
         </p>
-        <p className="mt-1 text-muted">次の作戦の設定：{ov.nextConfig.version}（進行中の作戦には反映しません）</p>
+        <p className="mt-1 text-muted">
+          次の作戦の設定：{ov.nextConfig.version}（進行中の作戦には反映しません）
+        </p>
       </div>
     </section>
   );
@@ -534,7 +759,9 @@ function MonitorTab({ ov }: { ov: Overview }) {
 function AuditTab({ token }: { token: string }) {
   const [rows, setRows] = useState<AuditRow[]>([]);
   useEffect(() => {
-    void api<{ entries: AuditRow[] }>('/api/admin/audit', { token }).then((r) => setRows(r.entries));
+    void api<{ entries: AuditRow[] }>('/api/admin/audit', { token }).then((r) =>
+      setRows(r.entries),
+    );
   }, [token]);
   return (
     <section className="sw-panel overflow-x-auto p-4" data-testid="audit-tab">

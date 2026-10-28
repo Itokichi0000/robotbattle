@@ -1,4 +1,12 @@
-import type { GameConfig, GameEvent, InvoiceStatus, RaidResult, RaidState, RobotId, Role } from '@sats-wars/shared';
+import type {
+  GameConfig,
+  GameEvent,
+  InvoiceStatus,
+  RaidResult,
+  RaidState,
+  RobotId,
+  Role,
+} from '@sats-wars/shared';
 import type { EngineCommand } from '@sats-wars/game-engine';
 import { type Db, transaction } from './database';
 
@@ -165,7 +173,10 @@ export class Repo {
 
   // ---- settings -----------------------------------------------------------
   getSetting<T>(key: string): T | undefined {
-    const row = this.get<{ value_json: string }>('SELECT value_json FROM settings WHERE key = ?', key);
+    const row = this.get<{ value_json: string }>(
+      'SELECT value_json FROM settings WHERE key = ?',
+      key,
+    );
     return row ? (JSON.parse(row.value_json) as T) : undefined;
   }
   setSetting(key: string, value: unknown): void {
@@ -177,7 +188,14 @@ export class Repo {
   }
 
   // ---- raids ----------------------------------------------------------------
-  insertRaid(id: string, eventId: string, config: GameConfig, configHash: string, seed: number, now: number): void {
+  insertRaid(
+    id: string,
+    eventId: string,
+    config: GameConfig,
+    configHash: string,
+    seed: number,
+    now: number,
+  ): void {
     this.run(
       "INSERT INTO raids (id, event_id, config_version, config_hash, config_json, seed, status, phase, created_at) VALUES (?, ?, ?, ?, ?, ?, 'CREATED', 'LOBBY', ?)",
       id,
@@ -193,18 +211,28 @@ export class Repo {
     return this.get<RaidRow>('SELECT * FROM raids WHERE id = ?', id);
   }
   latestUnfinishedRaid(): RaidRow | undefined {
-    return this.get<RaidRow>("SELECT * FROM raids WHERE status NOT IN ('ENDED', 'CANCELLED') ORDER BY created_at DESC LIMIT 1");
+    return this.get<RaidRow>(
+      "SELECT * FROM raids WHERE status NOT IN ('ENDED', 'CANCELLED') ORDER BY created_at DESC LIMIT 1",
+    );
   }
   listRaids(limit: number): RaidRow[] {
     return this.all<RaidRow>('SELECT * FROM raids ORDER BY created_at DESC LIMIT ?', limit);
   }
   appendCommand(raidId: string, idx: number, cmd: EngineCommand, now: number): void {
-    this.run('INSERT INTO raid_commands (raid_id, idx, t, command_json, created_at) VALUES (?, ?, ?, ?, ?)', raidId, idx, cmd.t, JSON.stringify(cmd), now);
+    this.run(
+      'INSERT INTO raid_commands (raid_id, idx, t, command_json, created_at) VALUES (?, ?, ?, ?, ?)',
+      raidId,
+      idx,
+      cmd.t,
+      JSON.stringify(cmd),
+      now,
+    );
   }
   loadCommands(raidId: string): EngineCommand[] {
-    return this.all<{ command_json: string }>('SELECT command_json FROM raid_commands WHERE raid_id = ? ORDER BY idx', raidId).map(
-      (r) => JSON.parse(r.command_json) as EngineCommand,
-    );
+    return this.all<{ command_json: string }>(
+      'SELECT command_json FROM raid_commands WHERE raid_id = ? ORDER BY idx',
+      raidId,
+    ).map((r) => JSON.parse(r.command_json) as EngineCommand);
   }
   saveRaidProjection(s: RaidState, now: number, finalSnapshot?: unknown, bots = 0): void {
     const ended = s.status === 'ENDED' || s.status === 'CANCELLED';
@@ -239,10 +267,15 @@ export class Repo {
     const stmt = this.db.prepare(
       'INSERT OR IGNORE INTO raid_events (raid_id, seq, t, game_ms, type, payload_json, state_revision) VALUES (?, ?, ?, ?, ?, ?, ?)',
     );
-    for (const e of events) stmt.run(e.raidId, e.seq, e.t, e.gameMs, e.type, JSON.stringify(e), revision);
+    for (const e of events)
+      stmt.run(e.raidId, e.seq, e.t, e.gameMs, e.type, JSON.stringify(e), revision);
   }
   recentEvents(raidId: string, limit: number): GameEvent[] {
-    return this.all<{ payload_json: string }>('SELECT payload_json FROM raid_events WHERE raid_id = ? ORDER BY seq DESC LIMIT ?', raidId, limit)
+    return this.all<{ payload_json: string }>(
+      'SELECT payload_json FROM raid_events WHERE raid_id = ? ORDER BY seq DESC LIMIT ?',
+      raidId,
+      limit,
+    )
       .map((r) => JSON.parse(r.payload_json) as GameEvent)
       .reverse();
   }
@@ -264,11 +297,26 @@ export class Repo {
     );
   }
   bestScore(configHash: string): number | null {
-    return this.get<{ s: number | null }>("SELECT MAX(score_total) AS s FROM raids WHERE config_hash = ? AND status = 'ENDED' AND bots = 0", configHash)!.s;
+    return this.get<{ s: number | null }>(
+      "SELECT MAX(score_total) AS s FROM raids WHERE config_hash = ? AND status = 'ENDED' AND bots = 0",
+      configHash,
+    )!.s;
   }
 
   // ---- pilots ----------------------------------------------------------------
-  insertPilot(p: Omit<PilotRow, 'sorties' | 'victories' | 'rank_points' | 'roles_done' | 'titles_json' | 'pass_credits' | 'merged_into' | 'deleted_at'>): void {
+  insertPilot(
+    p: Omit<
+      PilotRow,
+      | 'sorties'
+      | 'victories'
+      | 'rank_points'
+      | 'roles_done'
+      | 'titles_json'
+      | 'pass_credits'
+      | 'merged_into'
+      | 'deleted_at'
+    >,
+  ): void {
     this.run(
       `INSERT INTO pilots (id, code, callsign, callsign_hidden, avatar, locale, show_name, reduced_motion, assist_mode, auth_type, device_hash, created_at, last_seen_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -296,24 +344,59 @@ export class Repo {
       deviceHash,
     );
   }
-  updatePilot(id: string, patch: Partial<Pick<PilotRow, 'callsign' | 'avatar' | 'locale' | 'show_name' | 'reduced_motion' | 'assist_mode' | 'auth_type' | 'device_hash' | 'callsign_hidden' | 'merged_into'>>): void {
+  updatePilot(
+    id: string,
+    patch: Partial<
+      Pick<
+        PilotRow,
+        | 'callsign'
+        | 'avatar'
+        | 'locale'
+        | 'show_name'
+        | 'reduced_motion'
+        | 'assist_mode'
+        | 'auth_type'
+        | 'device_hash'
+        | 'callsign_hidden'
+        | 'merged_into'
+      >
+    >,
+  ): void {
     const keys = Object.keys(patch) as Array<keyof typeof patch>;
     if (!keys.length) return;
-    this.run(`UPDATE pilots SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => patch[k] as string | number | null), id);
+    this.run(
+      `UPDATE pilots SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`,
+      ...keys.map((k) => patch[k] as string | number | null),
+      id,
+    );
   }
   touchPilot(id: string, now: number): void {
     this.run('UPDATE pilots SET last_seen_at = ? WHERE id = ?', now, id);
   }
   hiddenPilotIds(): string[] {
-    return this.all<{ id: string }>('SELECT id FROM pilots WHERE callsign_hidden = 1').map((r) => r.id);
+    return this.all<{ id: string }>('SELECT id FROM pilots WHERE callsign_hidden = 1').map(
+      (r) => r.id,
+    );
   }
   listPilots(limit: number): PilotRow[] {
-    return this.all<PilotRow>('SELECT * FROM pilots WHERE deleted_at IS NULL ORDER BY last_seen_at DESC LIMIT ?', limit);
+    return this.all<PilotRow>(
+      'SELECT * FROM pilots WHERE deleted_at IS NULL ORDER BY last_seen_at DESC LIMIT ?',
+      limit,
+    );
   }
   pilotsActiveSince(since: number): number {
-    return this.get<{ n: number }>('SELECT COUNT(*) AS n FROM pilots WHERE last_seen_at >= ? AND deleted_at IS NULL', since)!.n;
+    return this.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM pilots WHERE last_seen_at >= ? AND deleted_at IS NULL',
+      since,
+    )!.n;
   }
-  recordSortie(id: string, won: boolean, rolesDone: string, titles: string[], rankPoints: number): void {
+  recordSortie(
+    id: string,
+    won: boolean,
+    rolesDone: string,
+    titles: string[],
+    rankPoints: number,
+  ): void {
     this.run(
       'UPDATE pilots SET sorties = sorties + 1, victories = victories + ?, roles_done = ?, titles_json = ?, rank_points = ? WHERE id = ?',
       won ? 1 : 0,
@@ -324,7 +407,14 @@ export class Repo {
     );
   }
   changePassCredits(id: string, delta: number): boolean {
-    return this.run('UPDATE pilots SET pass_credits = pass_credits + ? WHERE id = ? AND pass_credits + ? >= 0', delta, id, delta) === 1;
+    return (
+      this.run(
+        'UPDATE pilots SET pass_credits = pass_credits + ? WHERE id = ? AND pass_credits + ? >= 0',
+        delta,
+        id,
+        delta,
+      ) === 1
+    );
   }
   /** Account deletion: anonymise, keep aggregate raid records consistent. */
   deletePilot(id: string, now: number): void {
@@ -333,22 +423,45 @@ export class Repo {
       now,
       id,
     );
-    this.run('UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL', now, id);
-    this.run('UPDATE pilot_auth_keys SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL', now, id);
+    this.run(
+      'UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL',
+      now,
+      id,
+    );
+    this.run(
+      'UPDATE pilot_auth_keys SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL',
+      now,
+      id,
+    );
   }
 
   // ---- sessions & auth -------------------------------------------------------
   insertSession(s: SessionRow): void {
-    this.run('INSERT INTO sessions (id_hash, pilot_id, kind, issued_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)', s.id_hash, s.pilot_id, s.kind, s.issued_at, s.expires_at);
+    this.run(
+      'INSERT INTO sessions (id_hash, pilot_id, kind, issued_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
+      s.id_hash,
+      s.pilot_id,
+      s.kind,
+      s.issued_at,
+      s.expires_at,
+    );
   }
   getSession(idHash: string): SessionRow | undefined {
     return this.get<SessionRow>('SELECT * FROM sessions WHERE id_hash = ?', idHash);
   }
   revokeSession(idHash: string, now: number): void {
-    this.run('UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL', now, idHash);
+    this.run(
+      'UPDATE sessions SET revoked_at = ? WHERE id_hash = ? AND revoked_at IS NULL',
+      now,
+      idHash,
+    );
   }
   revokeAllSessions(pilotId: string, now: number): number {
-    return this.run('UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL', now, pilotId);
+    return this.run(
+      'UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL',
+      now,
+      pilotId,
+    );
   }
   insertChallenge(c: ChallengeRow): void {
     this.run(
@@ -371,14 +484,27 @@ export class Repo {
   }
   /** Atomic PENDING -> VERIFIED flip: exactly one callback can win. */
   verifyChallenge(id: string, pilotId: string, now: number): boolean {
-    return this.run("UPDATE auth_challenges SET status = 'VERIFIED', result_pilot_id = ?, used_at = ? WHERE id = ? AND status = 'PENDING' AND expires_at > ?", pilotId, now, id, now) === 1;
+    return (
+      this.run(
+        "UPDATE auth_challenges SET status = 'VERIFIED', result_pilot_id = ?, used_at = ? WHERE id = ? AND status = 'PENDING' AND expires_at > ?",
+        pilotId,
+        now,
+        id,
+        now,
+      ) === 1
+    );
   }
   setChallengeStatus(id: string, status: ChallengeRow['status']): boolean {
     return this.run('UPDATE auth_challenges SET status = ? WHERE id = ?', status, id) === 1;
   }
   /** VERIFIED -> CONSUMED by the bound browser session (once). */
   consumeChallenge(id: string): boolean {
-    return this.run("UPDATE auth_challenges SET status = 'CONSUMED' WHERE id = ? AND status = 'VERIFIED'", id) === 1;
+    return (
+      this.run(
+        "UPDATE auth_challenges SET status = 'CONSUMED' WHERE id = ? AND status = 'VERIFIED'",
+        id,
+      ) === 1
+    );
   }
   bumpChallengeAttempts(id: string): void {
     this.run('UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = ?', id);
@@ -386,37 +512,96 @@ export class Repo {
   purgeChallenges(olderThan: number): void {
     this.run('DELETE FROM auth_challenges WHERE created_at < ?', olderThan);
   }
-  getAuthKey(fingerprint: string): { id: string; pilot_id: string; revoked_at: number | null } | undefined {
-    return this.get('SELECT id, pilot_id, revoked_at FROM pilot_auth_keys WHERE key_fingerprint = ?', fingerprint);
+  getAuthKey(
+    fingerprint: string,
+  ): { id: string; pilot_id: string; revoked_at: number | null } | undefined {
+    return this.get(
+      'SELECT id, pilot_id, revoked_at FROM pilot_auth_keys WHERE key_fingerprint = ?',
+      fingerprint,
+    );
   }
-  insertAuthKey(id: string, pilotId: string, provider: string, fingerprint: string, now: number): void {
-    this.run('INSERT INTO pilot_auth_keys (id, pilot_id, provider, key_fingerprint, linked_at) VALUES (?, ?, ?, ?, ?)', id, pilotId, provider, fingerprint, now);
+  insertAuthKey(
+    id: string,
+    pilotId: string,
+    provider: string,
+    fingerprint: string,
+    now: number,
+  ): void {
+    this.run(
+      'INSERT INTO pilot_auth_keys (id, pilot_id, provider, key_fingerprint, linked_at) VALUES (?, ?, ?, ?, ?)',
+      id,
+      pilotId,
+      provider,
+      fingerprint,
+      now,
+    );
   }
   activeAuthKeys(pilotId: string): number {
-    return this.get<{ n: number }>('SELECT COUNT(*) AS n FROM pilot_auth_keys WHERE pilot_id = ? AND revoked_at IS NULL', pilotId)!.n;
+    return this.get<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM pilot_auth_keys WHERE pilot_id = ? AND revoked_at IS NULL',
+      pilotId,
+    )!.n;
   }
 
   // ---- entitlements & crew --------------------------------------------------
   getEntitlement(raidId: string, pilotId: string): EntitlementRow | undefined {
-    return this.get<EntitlementRow>('SELECT * FROM entitlements WHERE raid_id = ? AND pilot_id = ? AND revoked_at IS NULL', raidId, pilotId);
+    return this.get<EntitlementRow>(
+      'SELECT * FROM entitlements WHERE raid_id = ? AND pilot_id = ? AND revoked_at IS NULL',
+      raidId,
+      pilotId,
+    );
   }
   /** Returns false if the pilot already holds a pass for this raid (UNIQUE). */
   insertEntitlement(e: Omit<EntitlementRow, 'revoked_at'>): boolean {
-    return this.run('INSERT OR IGNORE INTO entitlements (id, raid_id, pilot_id, source, source_id, granted_at) VALUES (?, ?, ?, ?, ?, ?)', e.id, e.raid_id, e.pilot_id, e.source, e.source_id, e.granted_at) === 1;
+    return (
+      this.run(
+        'INSERT OR IGNORE INTO entitlements (id, raid_id, pilot_id, source, source_id, granted_at) VALUES (?, ?, ?, ?, ?, ?)',
+        e.id,
+        e.raid_id,
+        e.pilot_id,
+        e.source,
+        e.source_id,
+        e.granted_at,
+      ) === 1
+    );
   }
   entitlementSummary(raidId: string): Record<string, number> {
-    const rows = this.all<{ source: string; n: number }>('SELECT source, COUNT(*) AS n FROM entitlements WHERE raid_id = ? GROUP BY source', raidId);
+    const rows = this.all<{ source: string; n: number }>(
+      'SELECT source, COUNT(*) AS n FROM entitlements WHERE raid_id = ? GROUP BY source',
+      raidId,
+    );
     return Object.fromEntries(rows.map((r) => [r.source, r.n]));
   }
   insertPilotRaid(raidId: string, pilotId: string, role: Role, robot: RobotId, now: number): void {
-    this.run('INSERT OR IGNORE INTO pilot_raids (raid_id, pilot_id, role, robot, joined_at) VALUES (?, ?, ?, ?, ?)', raidId, pilotId, role, robot, now);
+    this.run(
+      'INSERT OR IGNORE INTO pilot_raids (raid_id, pilot_id, role, robot, joined_at) VALUES (?, ?, ?, ?, ?)',
+      raidId,
+      pilotId,
+      role,
+      robot,
+      now,
+    );
   }
 
   // ---- submissions ----------------------------------------------------------
-  getSubmission(pilotId: string, clientSubmissionId: string): { result_json: string; raid_id: string } | undefined {
-    return this.get('SELECT result_json, raid_id FROM submissions WHERE pilot_id = ? AND client_submission_id = ?', pilotId, clientSubmissionId);
+  getSubmission(
+    pilotId: string,
+    clientSubmissionId: string,
+  ): { result_json: string; raid_id: string } | undefined {
+    return this.get(
+      'SELECT result_json, raid_id FROM submissions WHERE pilot_id = ? AND client_submission_id = ?',
+      pilotId,
+      clientSubmissionId,
+    );
   }
-  insertSubmission(pilotId: string, clientSubmissionId: string, raidId: string, taskId: string, resultJson: string, now: number): void {
+  insertSubmission(
+    pilotId: string,
+    clientSubmissionId: string,
+    raidId: string,
+    taskId: string,
+    resultJson: string,
+    now: number,
+  ): void {
     this.run(
       'INSERT INTO submissions (pilot_id, client_submission_id, raid_id, task_id, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       pilotId,
@@ -462,30 +647,57 @@ export class Repo {
     );
   }
   invoicesToCheck(): InvoiceRow[] {
-    return this.all<InvoiceRow>("SELECT * FROM invoices WHERE status = 'PENDING' ORDER BY created_at");
+    return this.all<InvoiceRow>(
+      "SELECT * FROM invoices WHERE status = 'PENDING' ORDER BY created_at",
+    );
   }
   listInvoices(limit: number): InvoiceRow[] {
     return this.all<InvoiceRow>('SELECT * FROM invoices ORDER BY created_at DESC LIMIT ?', limit);
   }
-  updateInvoice(id: string, patch: Partial<Pick<InvoiceRow, 'status' | 'last_checked_at' | 'check_failures' | 'entitlement_granted_at' | 'late_policy'>>): void {
+  updateInvoice(
+    id: string,
+    patch: Partial<
+      Pick<
+        InvoiceRow,
+        'status' | 'last_checked_at' | 'check_failures' | 'entitlement_granted_at' | 'late_policy'
+      >
+    >,
+  ): void {
     const keys = Object.keys(patch) as Array<keyof typeof patch>;
     if (!keys.length) return;
-    this.run(`UPDATE invoices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => patch[k] as string | number | null), id);
+    this.run(
+      `UPDATE invoices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`,
+      ...keys.map((k) => patch[k] as string | number | null),
+      id,
+    );
   }
   /** Atomic flip to PAID; returns true only for the call that actually flipped it. */
   markInvoicePaid(id: string, now: number): boolean {
-    return this.run("UPDATE invoices SET status = 'PAID', verified_at = ? WHERE id = ? AND status IN ('PENDING', 'EXPIRED')", now, id) === 1;
+    return (
+      this.run(
+        "UPDATE invoices SET status = 'PAID', verified_at = ? WHERE id = ? AND status IN ('PENDING', 'EXPIRED')",
+        now,
+        id,
+      ) === 1
+    );
   }
   invoiceSummary(): Record<string, { count: number; sats: number }> {
-    const rows = this.all<{ status: string; n: number; sats: number }>('SELECT status, COUNT(*) AS n, COALESCE(SUM(amount_sats), 0) AS sats FROM invoices GROUP BY status');
+    const rows = this.all<{ status: string; n: number; sats: number }>(
+      'SELECT status, COUNT(*) AS n, COALESCE(SUM(amount_sats), 0) AS sats FROM invoices GROUP BY status',
+    );
     return Object.fromEntries(rows.map((r) => [r.status, { count: r.n, sats: r.sats }]));
   }
   purgeBolt11(olderThan: number): number {
-    return this.run("UPDATE invoices SET bolt11 = NULL WHERE bolt11 IS NOT NULL AND status != 'PENDING' AND created_at < ?", olderThan);
+    return this.run(
+      "UPDATE invoices SET bolt11 = NULL WHERE bolt11 IS NOT NULL AND status != 'PENDING' AND created_at < ?",
+      olderThan,
+    );
   }
 
   // ---- sponsored passes ----------------------------------------------------------
-  insertSponsoredPass(p: Omit<SponsoredPassRow, 'redeemed_by' | 'redeemed_at' | 'redeemed_raid_id'>): void {
+  insertSponsoredPass(
+    p: Omit<SponsoredPassRow, 'redeemed_by' | 'redeemed_at' | 'redeemed_raid_id'>,
+  ): void {
     this.run(
       'INSERT INTO sponsored_passes (id_hash, label, raid_id, issued_by, issued_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
       p.id_hash,
@@ -513,13 +725,23 @@ export class Repo {
     );
   }
   revokeSponsoredPass(hash: string): boolean {
-    return this.run("UPDATE sponsored_passes SET status = 'REVOKED' WHERE id_hash = ? AND status = 'ISSUED'", hash) === 1;
+    return (
+      this.run(
+        "UPDATE sponsored_passes SET status = 'REVOKED' WHERE id_hash = ? AND status = 'ISSUED'",
+        hash,
+      ) === 1
+    );
   }
   listSponsoredPasses(limit: number): SponsoredPassRow[] {
-    return this.all<SponsoredPassRow>('SELECT * FROM sponsored_passes ORDER BY issued_at DESC LIMIT ?', limit);
+    return this.all<SponsoredPassRow>(
+      'SELECT * FROM sponsored_passes ORDER BY issued_at DESC LIMIT ?',
+      limit,
+    );
   }
   sponsoredSummary(): Record<string, number> {
-    const rows = this.all<{ status: string; n: number }>('SELECT status, COUNT(*) AS n FROM sponsored_passes GROUP BY status');
+    const rows = this.all<{ status: string; n: number }>(
+      'SELECT status, COUNT(*) AS n FROM sponsored_passes GROUP BY status',
+    );
     return Object.fromEntries(rows.map((r) => [r.status, r.n]));
   }
 
@@ -539,10 +761,20 @@ export class Repo {
     );
   }
   passportHistory(pilotId: string, limit = 50): PassportRow[] {
-    return this.all<PassportRow>('SELECT * FROM passport_history WHERE pilot_id = ? ORDER BY created_at DESC LIMIT ?', pilotId, limit);
+    return this.all<PassportRow>(
+      'SELECT * FROM passport_history WHERE pilot_id = ? ORDER BY created_at DESC LIMIT ?',
+      pilotId,
+      limit,
+    );
   }
   /** Guest merge: career counters and credits move to the target; titles are unioned by the caller. */
-  mergePilotInto(fromId: string, toId: string, titlesJson: string, rolesDone: string, now: number): void {
+  mergePilotInto(
+    fromId: string,
+    toId: string,
+    titlesJson: string,
+    rolesDone: string,
+    now: number,
+  ): void {
     const from = this.getPilot(fromId)!;
     this.run(
       'UPDATE pilots SET sorties = sorties + ?, victories = victories + ?, rank_points = rank_points + ?, pass_credits = pass_credits + ?, titles_json = ?, roles_done = ? WHERE id = ?',
@@ -554,16 +786,35 @@ export class Repo {
       rolesDone,
       toId,
     );
-    this.run("UPDATE pilots SET merged_into = ?, pass_credits = 0, device_hash = NULL, last_seen_at = ? WHERE id = ?", toId, now, fromId);
-    this.run('UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL', now, fromId);
+    this.run(
+      'UPDATE pilots SET merged_into = ?, pass_credits = 0, device_hash = NULL, last_seen_at = ? WHERE id = ?',
+      toId,
+      now,
+      fromId,
+    );
+    this.run(
+      'UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL',
+      now,
+      fromId,
+    );
   }
   /** Guest merge: move history to the target pilot (skips raids both flew). */
   moveHistory(fromPilot: string, toPilot: string): void {
-    this.run('UPDATE OR IGNORE passport_history SET pilot_id = ? WHERE pilot_id = ?', toPilot, fromPilot);
+    this.run(
+      'UPDATE OR IGNORE passport_history SET pilot_id = ? WHERE pilot_id = ?',
+      toPilot,
+      fromPilot,
+    );
   }
 
   // ---- audit ------------------------------------------------------------------------
-  audit(actor: string, action: string, targetId: string | null, beforeAfter: unknown, now: number): void {
+  audit(
+    actor: string,
+    action: string,
+    targetId: string | null,
+    beforeAfter: unknown,
+    now: number,
+  ): void {
     this.run(
       'INSERT INTO admin_audit_log (actor, action, target_id, before_after_json, timestamp) VALUES (?, ?, ?, ?, ?)',
       actor,

@@ -26,7 +26,13 @@ function board(over: Partial<BoardPatch> = {}): BoardPatch {
     phase: 'WAVE_1',
     pausedFrom: null,
     liveStartClock: 0,
-    cities: REGION_IDS.map((cityId) => ({ cityId, hp: 100, shield: 0, destroyed: false, rebuildReadyAt: 0 })),
+    cities: REGION_IDS.map((cityId) => ({
+      cityId,
+      hp: 100,
+      shield: 0,
+      destroyed: false,
+      rebuildReadyAt: 0,
+    })),
     robots: [
       { robotId: 'RAIJIN', health: 100, energy: 20, componentDamaged: false },
       { robotId: 'FUJIN', health: 100, energy: 20, componentDamaged: false },
@@ -37,7 +43,13 @@ function board(over: Partial<BoardPatch> = {}): BoardPatch {
     telegraphs: [],
     bossId: null,
     sync: 0,
-    special: { status: 'LOCKED', opensAt: 390_000, closesAt: 420_000, contributors: {}, resolvedAt: null },
+    special: {
+      status: 'LOCKED',
+      opensAt: 390_000,
+      closesAt: 420_000,
+      contributors: {},
+      resolvedAt: null,
+    },
     stats,
     result: null,
     ...over,
@@ -99,7 +111,10 @@ describe('RaidStore', () => {
 
   it('keeps the crew unless the event carries it, and re-anchors the clock', () => {
     const s = new RaidStore();
-    s.applySnapshot({ ...snap(0), crew: [{ pilotId: 'p', callsign: 'A', role: 'GUNNER', robot: 'RAIJIN', isBot: false }] });
+    s.applySnapshot({
+      ...snap(0),
+      crew: [{ pilotId: 'p', callsign: 'A', role: 'GUNNER', robot: 'RAIJIN', isBot: false }],
+    });
     s.applyEvent(ev(1), 5000);
     expect(s.snapshot!.crew).toHaveLength(1);
     expect(s.snapshot!.gameMs).toBe(1000);
@@ -113,7 +128,16 @@ describe('RaidStore', () => {
     s.applySnapshot(snap(5));
     expect(s.applySnapshot(snap(3))).toBe('ignored');
     expect(
-      s.applyClock({ raidId: 'r', status: 'LIVE', clockMs: 1, gameMs: 1, liveStartClock: 0, running: true, serverTime: 1, lastSeq: 9 }),
+      s.applyClock({
+        raidId: 'r',
+        status: 'LIVE',
+        clockMs: 1,
+        gameMs: 1,
+        liveStartClock: 0,
+        running: true,
+        serverTime: 1,
+        lastSeq: 9,
+      }),
     ).toBe('gap');
   });
 });

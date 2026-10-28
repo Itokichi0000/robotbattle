@@ -20,7 +20,10 @@ export function ConnectionPill({ state }: { state: ConnectionState }) {
       role="status"
       aria-live="polite"
     >
-      <span aria-hidden>●</span> <span className={state === 'connected' ? 'sr-only min-[400px]:not-sr-only' : ''}>{m.text}</span>
+      <span aria-hidden>●</span>{' '}
+      <span className={state === 'connected' ? 'sr-only min-[400px]:not-sr-only' : ''}>
+        {m.text}
+      </span>
     </span>
   );
 }

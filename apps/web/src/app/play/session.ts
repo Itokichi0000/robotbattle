@@ -7,7 +7,10 @@ import { storage } from '@/lib/api';
 export function deviceId(): string {
   let id = storage.get('sw.device');
   if (!id) {
-    id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     storage.set('sw.device', id);
   }
   return id;

@@ -230,7 +230,9 @@ export function openDatabase(path: string): Db {
 function migrate(db: Db): void {
   // Databases from earlier prototypes (team battle, turn-based co-op) used a different schema.
   const legacy = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('participants', 'zaps', 'rounds', 'matches', 'players')")
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('participants', 'zaps', 'rounds', 'matches', 'players')",
+    )
     .get();
   if (legacy) {
     throw new Error(

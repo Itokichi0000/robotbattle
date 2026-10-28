@@ -49,7 +49,14 @@ import {
   roleScale,
   standingCities,
 } from './rules';
-import { engineerParams, evaluateTask, guardianParams, gunnerParams, randomDirection, routerParams } from './tasks';
+import {
+  engineerParams,
+  evaluateTask,
+  guardianParams,
+  gunnerParams,
+  randomDirection,
+  routerParams,
+} from './tasks';
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -70,7 +77,15 @@ export type EngineCommand =
   | { type: 'OPEN_LOBBY'; t: number }
   | { type: 'START'; t: number }
   | { type: 'TICK'; t: number }
-  | { type: 'BOARD'; t: number; pilotId: string; callsign: string; role: Role; robot?: RobotId; isBot?: boolean }
+  | {
+      type: 'BOARD';
+      t: number;
+      pilotId: string;
+      callsign: string;
+      role: Role;
+      robot?: RobotId;
+      isBot?: boolean;
+    }
   | { type: 'CHANGE_ROLE'; t: number; pilotId: string; role: Role; robot?: RobotId }
   | { type: 'REQUEST_TASK'; t: number; pilotId: string; choice?: TaskChoice }
   | { type: 'SUBMIT_TASK'; t: number; pilotId: string; taskId: string; input: TaskInput }
@@ -121,7 +136,14 @@ const emptyStats = (): RaidStats => ({
 
 export function createRaidState(raidId: string, config: GameConfig, seed = 1): RaidState {
   const cities = {} as Record<RegionId, CityState>;
-  for (const cityId of REGION_IDS) cities[cityId] = { cityId, hp: config.cityMaxHp, shield: 0, destroyed: false, rebuildReadyAt: 0 };
+  for (const cityId of REGION_IDS)
+    cities[cityId] = {
+      cityId,
+      hp: config.cityMaxHp,
+      shield: 0,
+      destroyed: false,
+      rebuildReadyAt: 0,
+    };
   const sp = config.special;
   return {
     raidId,
@@ -220,7 +242,12 @@ export function reduce(prev: RaidState, cmd: EngineCommand): ReduceResult {
 }
 
 /** Replay a full command log from scratch (recovery and verification). */
-export function replay(raidId: string, config: GameConfig, seed: number, commands: EngineCommand[]): { state: RaidState; events: GameEvent[] } {
+export function replay(
+  raidId: string,
+  config: GameConfig,
+  seed: number,
+  commands: EngineCommand[],
+): { state: RaidState; events: GameEvent[] } {
   let state = createRaidState(raidId, config, seed);
   const events: GameEvent[] = [];
   for (const cmd of commands) {
@@ -232,7 +259,13 @@ export function replay(raidId: string, config: GameConfig, seed: number, command
 }
 
 export function crewOf(s: RaidState): CrewMember[] {
-  return Object.values(s.pilots).map((p) => ({ pilotId: p.pilotId, callsign: p.callsign, role: p.role, robot: p.robot, isBot: p.isBot }));
+  return Object.values(s.pilots).map((p) => ({
+    pilotId: p.pilotId,
+    callsign: p.callsign,
+    role: p.role,
+    robot: p.robot,
+    isBot: p.isBot,
+  }));
 }
 
 class Ctx {
@@ -261,7 +294,11 @@ class Ctx {
     };
   }
 
-  emit<T extends GameEvent['type']>(type: T, data: Extract<GameEvent, { type: T }>['data'], withCrew = false): void {
+  emit<T extends GameEvent['type']>(
+    type: T,
+    data: Extract<GameEvent, { type: T }>['data'],
+    withCrew = false,
+  ): void {
     const s = this.state;
     s.seq += 1;
     this.events.push({
@@ -307,14 +344,17 @@ class Ctx {
 // Time
 // ---------------------------------------------------------------------------
 
-type TimerKind = 'PHASE' | 'SPAWN' | 'ENEMY' | 'SPECIAL_OPEN' | 'SPECIAL_CLOSE' | 'DECAY' | 'ASSIST' | 'TIMEOUT';
+type TimerKind =
+  'PHASE' | 'SPAWN' | 'ENEMY' | 'SPECIAL_OPEN' | 'SPECIAL_CLOSE' | 'DECAY' | 'ASSIST' | 'TIMEOUT';
 
 function nextTimer(s: RaidState): { at: number; kind: TimerKind; enemyId?: number } | null {
   const c = s.config;
   const cands: Array<{ at: number; kind: TimerKind; enemyId?: number }> = [];
   const p = c.phaseStartsSeconds;
   for (const ph of ['WAVE_1', 'WAVE_2', 'WAVE_3', 'FINAL_WAVE'] as const) {
-    if (COMBAT_PHASES.indexOf(s.phase as (typeof COMBAT_PHASES)[number]) < COMBAT_PHASES.indexOf(ph)) {
+    if (
+      COMBAT_PHASES.indexOf(s.phase as (typeof COMBAT_PHASES)[number]) < COMBAT_PHASES.indexOf(ph)
+    ) {
       cands.push({ at: ms(p[ph]), kind: 'PHASE' });
       break;
     }
@@ -390,7 +430,12 @@ function runTimer(ctx: Ctx, kind: TimerKind, enemyId?: number): void {
       assistTurn(ctx);
       return;
     case 'TIMEOUT':
-      endRaid(ctx, s.bossId !== null && liveEnemies(s).some((e) => e.id === s.bossId) ? 'TIMEOUT' : 'BOSS_DEFEATED');
+      endRaid(
+        ctx,
+        s.bossId !== null && liveEnemies(s).some((e) => e.id === s.bossId)
+          ? 'TIMEOUT'
+          : 'BOSS_DEFEATED',
+      );
       return;
   }
 }
@@ -452,7 +497,9 @@ function pickTargets(ctx: Ctx, e: Enemy, count: number): RegionId[] {
       const alt = pool.filter((id) => id !== recent[0]);
       if (alt.length) pool = alt;
     }
-    const w = pool.map((id) => 1 + (1.5 * (s.config.cityMaxHp - s.cities[id].hp)) / s.config.cityMaxHp);
+    const w = pool.map(
+      (id) => 1 + (1.5 * (s.config.cityMaxHp - s.cities[id].hp)) / s.config.cityMaxHp,
+    );
     let r = ctx.rand() * w.reduce((a, b) => a + b, 0);
     let pick = pool[pool.length - 1]!;
     for (let i = 0; i < pool.length; i++) {
@@ -529,7 +576,8 @@ function stepEnemy(ctx: Ctx, enemyId: number): void {
     if (tg) resolveAttack(ctx, e, tg);
     if (s.status !== 'LIVE') return;
     e.ai = 'RECOVERY';
-    e.aiUntil = s.gameMs + ctx.between(enemyConfig(s.config, e.kind).recoveryMs as [number, number]);
+    e.aiUntil =
+      s.gameMs + ctx.between(enemyConfig(s.config, e.kind).recoveryMs as [number, number]);
     return;
   }
   // IDLE or RECOVERY over: aim the next attack.
@@ -560,7 +608,8 @@ function applyCityHits(ctx: Ctx, hits: CityHit[]): void {
       ctx.emit('CITY_DESTROYED', { cityId: h.cityId });
     }
   }
-  if (standingCities(s.cities).length < s.config.minimumSurvivingCities) endRaid(ctx, 'CITIES_LOST');
+  if (standingCities(s.cities).length < s.config.minimumSurvivingCities)
+    endRaid(ctx, 'CITIES_LOST');
 }
 
 function damageRobot(s: RaidState, robot: RobotId, amount: number): void {
@@ -590,7 +639,16 @@ function resolveAttack(ctx: Ctx, e: Enemy, tg: Telegraph): void {
   if (tg.kind === 'BOMBARD' || tg.kind === 'SWEEP') robotHit = 'FUJIN';
   if (tg.kind === 'CORE_BEAM') robotHit = 'RAIJIN';
   if (robotHit) damageRobot(s, robotHit, tg.kind === 'CORE_BEAM' ? 15 : 12);
-  ctx.emit('ATTACK_RESOLVED', { telegraphId: tg.id, enemyId: e.id, enemyKind: e.kind, kind: tg.kind, hits, jammedUntil, energyDrained, robotHit });
+  ctx.emit('ATTACK_RESOLVED', {
+    telegraphId: tg.id,
+    enemyId: e.id,
+    enemyKind: e.kind,
+    kind: tg.kind,
+    hits,
+    jammedUntil,
+    energyDrained,
+    robotHit,
+  });
   applyCityHits(ctx, hits);
 }
 
@@ -609,14 +667,16 @@ function defeatEnemy(ctx: Ctx, e: Enemy, pilotId: string | null, callsign: strin
 
 function openLobby(ctx: Ctx): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'CREATED') return { kind: 'rejected', reason: `cannot open lobby from ${s.status}` };
+  if (s.status !== 'CREATED')
+    return { kind: 'rejected', reason: `cannot open lobby from ${s.status}` };
   ctx.setStatus('LOBBY_OPEN', 'LOBBY');
   return { kind: 'none' };
 }
 
 function start(ctx: Ctx): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'CREATED' && s.status !== 'LOBBY_OPEN') return { kind: 'rejected', reason: `cannot start from ${s.status}` };
+  if (s.status !== 'CREATED' && s.status !== 'LOBBY_OPEN')
+    return { kind: 'rejected', reason: `cannot start from ${s.status}` };
   s.liveStartClock = s.clockMs;
   s.gameMs = 0;
   // Lobby pilots count as active at the start (difficulty of the first spawns).
@@ -628,7 +688,8 @@ function start(ctx: Ctx): CommandOutcome {
 
 function pause(ctx: Ctx, reason: string): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'LIVE' && s.status !== 'LOBBY_OPEN') return { kind: 'rejected', reason: `cannot pause from ${s.status}` };
+  if (s.status !== 'LIVE' && s.status !== 'LOBBY_OPEN')
+    return { kind: 'rejected', reason: `cannot pause from ${s.status}` };
   s.pausedFrom = s.status;
   s.pauseReason = reason;
   ctx.setStatus('PAUSED', reason);
@@ -637,7 +698,8 @@ function pause(ctx: Ctx, reason: string): CommandOutcome {
 
 function resume(ctx: Ctx): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'PAUSED' || s.pausedFrom === null) return { kind: 'rejected', reason: `cannot resume from ${s.status}` };
+  if (s.status !== 'PAUSED' || s.pausedFrom === null)
+    return { kind: 'rejected', reason: `cannot resume from ${s.status}` };
   const to = s.pausedFrom;
   s.pausedFrom = null;
   s.pauseReason = null;
@@ -649,7 +711,8 @@ function resume(ctx: Ctx): CommandOutcome {
 
 function adminEnd(ctx: Ctx, reason: string): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'LIVE' && s.status !== 'PAUSED') return { kind: 'rejected', reason: `cannot end from ${s.status}` };
+  if (s.status !== 'LIVE' && s.status !== 'PAUSED')
+    return { kind: 'rejected', reason: `cannot end from ${s.status}` };
   s.pausedFrom = null;
   endRaid(ctx, 'ADMIN_END', reason);
   return { kind: 'none' };
@@ -657,7 +720,8 @@ function adminEnd(ctx: Ctx, reason: string): CommandOutcome {
 
 function cancel(ctx: Ctx, reason: string): CommandOutcome {
   const s = ctx.state;
-  if (s.status === 'ENDED' || s.status === 'CANCELLED') return { kind: 'rejected', reason: `cannot cancel from ${s.status}` };
+  if (s.status === 'ENDED' || s.status === 'CANCELLED')
+    return { kind: 'rejected', reason: `cannot cancel from ${s.status}` };
   s.pausedFrom = null;
   s.result = buildResult(s, 'CANCELLED', 'CANCELLED');
   ctx.setStatus('CANCELLED', reason);
@@ -669,7 +733,10 @@ function endRaid(ctx: Ctx, reason: RaidEndReason, statusReason?: string): void {
   const s = ctx.state;
   if (s.status === 'ENDED' || s.status === 'CANCELLED') return;
   const bossAlive = s.bossId !== null && s.enemies.some((e) => e.id === s.bossId);
-  const won = reason === 'BOSS_DEFEATED' && !bossAlive && standingCities(s.cities).length >= s.config.minimumSurvivingCities;
+  const won =
+    reason === 'BOSS_DEFEATED' &&
+    !bossAlive &&
+    standingCities(s.cities).length >= s.config.minimumSurvivingCities;
   const outcome = won ? 'SUCCEEDED' : 'FAILED';
   s.stats.syncSum += s.sync;
   s.stats.syncSamples += 1;
@@ -681,7 +748,11 @@ function endRaid(ctx: Ctx, reason: RaidEndReason, statusReason?: string): void {
   ctx.emit('RAID_ENDED', { result: s.result });
 }
 
-function buildResult(s: RaidState, outcome: RaidResult['outcome'], reason: RaidEndReason): RaidResult {
+function buildResult(
+  s: RaidState,
+  outcome: RaidResult['outcome'],
+  reason: RaidEndReason,
+): RaidResult {
   const c = s.config;
   const standing = standingCities(s.cities);
   const cityHpTotal = REGION_IDS.reduce((a, id) => a + s.cities[id].hp, 0);
@@ -690,7 +761,9 @@ function buildResult(s: RaidState, outcome: RaidResult['outcome'], reason: RaidE
   const syncAverage = s.stats.syncSamples ? s.stats.syncSum / s.stats.syncSamples : s.sync;
   const citySurvival = Math.round((400 * cityHpTotal) / (REGION_IDS.length * c.cityMaxHp));
   const window = ms(c.matchSeconds - c.phaseStartsSeconds.WAVE_3);
-  const speed = success ? Math.round(Math.max(0, Math.min(200, (200 * (ms(c.matchSeconds) - s.gameMs)) / window))) : 0;
+  const speed = success
+    ? Math.round(Math.max(0, Math.min(200, (200 * (ms(c.matchSeconds) - s.gameMs)) / window)))
+    : 0;
   const coordination = Math.round((200 * syncAverage) / c.sync.max);
   const bossDefeat = success ? 200 : 0;
   const pilots = Object.values(s.pilots);
@@ -704,7 +777,13 @@ function buildResult(s: RaidState, outcome: RaidResult['outcome'], reason: RaidE
     syncAverage: Math.round(syncAverage * 10) / 10,
     syncPeak: s.stats.syncPeak,
     special: s.special.status,
-    score: { citySurvival, speed, coordination, bossDefeat, total: citySurvival + speed + coordination + bossDefeat },
+    score: {
+      citySurvival,
+      speed,
+      coordination,
+      bossDefeat,
+      total: citySurvival + speed + coordination + bossDefeat,
+    },
     mvps: pickMvps(s),
     pilots: pilots.filter((p) => !p.isBot).length,
     bots: pilots.filter((p) => p.isBot).length,
@@ -726,9 +805,22 @@ function pickMvps(s: RaidState): RaidResult['mvps'] {
     for (const pool of [humans, pilots]) {
       const ranked = pool
         .filter((p) => value(p) > 0)
-        .map((p) => ({ p, rate: value(p) / Math.max(1, (s.gameMs - Math.max(0, p.joinedAt)) / 60_000) }))
-        .sort((a, z) => z.rate - a.rate || z.p.stats.successSum - a.p.stats.successSum || a.p.pilotId.localeCompare(z.p.pilotId));
-      if (ranked[0]) return { pilotId: ranked[0].p.pilotId, callsign: ranked[0].p.callsign, value: Math.round(value(ranked[0].p)) };
+        .map((p) => ({
+          p,
+          rate: value(p) / Math.max(1, (s.gameMs - Math.max(0, p.joinedAt)) / 60_000),
+        }))
+        .sort(
+          (a, z) =>
+            z.rate - a.rate ||
+            z.p.stats.successSum - a.p.stats.successSum ||
+            a.p.pilotId.localeCompare(z.p.pilotId),
+        );
+      if (ranked[0])
+        return {
+          pilotId: ranked[0].p.pilotId,
+          callsign: ranked[0].p.callsign,
+          value: Math.round(value(ranked[0].p)),
+        };
     }
     return undefined;
   };
@@ -736,11 +828,26 @@ function pickMvps(s: RaidState): RaidResult['mvps'] {
   const set = (k: Role | 'SYNC', v: MvpEntry | undefined) => {
     if (v) out[k] = v;
   };
-  set('GUNNER', pick((p) => p.stats.damage));
-  set('GUARDIAN', pick((p) => p.stats.shielded));
-  set('ROUTER', pick((p) => p.stats.energy));
-  set('ENGINEER', pick((p) => p.stats.repairs));
-  set('SYNC', pick((p) => p.stats.syncPoints));
+  set(
+    'GUNNER',
+    pick((p) => p.stats.damage),
+  );
+  set(
+    'GUARDIAN',
+    pick((p) => p.stats.shielded),
+  );
+  set(
+    'ROUTER',
+    pick((p) => p.stats.energy),
+  );
+  set(
+    'ENGINEER',
+    pick((p) => p.stats.repairs),
+  );
+  set(
+    'SYNC',
+    pick((p) => p.stats.syncPoints),
+  );
   return out;
 }
 
@@ -753,7 +860,10 @@ function robotFor(s: RaidState, role: Role, wanted?: RobotId): RobotId {
   if (fixed) return fixed;
   if (wanted) return wanted;
   // Support seats go to the robot with fewer support pilots.
-  const support = (r: RobotId) => Object.values(s.pilots).filter((p) => p.robot === r && (p.role === 'ROUTER' || p.role === 'ENGINEER')).length;
+  const support = (r: RobotId) =>
+    Object.values(s.pilots).filter(
+      (p) => p.robot === r && (p.role === 'ROUTER' || p.role === 'ENGINEER'),
+    ).length;
   return support('FUJIN') < support('RAIJIN') ? 'FUJIN' : 'RAIJIN';
 }
 
@@ -762,10 +872,15 @@ function board(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'BOARD' }>): Comman
   const c = s.config;
   const existing = s.pilots[cmd.pilotId];
   if (existing) return { kind: 'board', code: 'ALREADY_BOARDED', pilot: existing };
-  const open = s.status === 'LOBBY_OPEN' || s.status === 'CREATED' || ((s.status === 'LIVE' || s.status === 'PAUSED') && s.liveStartClock !== null);
+  const open =
+    s.status === 'LOBBY_OPEN' ||
+    s.status === 'CREATED' ||
+    ((s.status === 'LIVE' || s.status === 'PAUSED') && s.liveStartClock !== null);
   if (!open) return { kind: 'board', code: 'NOT_OPEN', pilot: null };
-  if (s.liveStartClock !== null && s.gameMs > ms(c.cutoffForPaidJoinAtSeconds)) return { kind: 'board', code: 'JOIN_CLOSED', pilot: null };
-  if (Object.keys(s.pilots).length >= c.maxPilots) return { kind: 'board', code: 'RAID_FULL', pilot: null };
+  if (s.liveStartClock !== null && s.gameMs > ms(c.cutoffForPaidJoinAtSeconds))
+    return { kind: 'board', code: 'JOIN_CLOSED', pilot: null };
+  if (Object.keys(s.pilots).length >= c.maxPilots)
+    return { kind: 'board', code: 'RAID_FULL', pilot: null };
   const robot = robotFor(s, cmd.role, cmd.robot);
   const pilot: Pilot = {
     pilotId: cmd.pilotId,
@@ -779,29 +894,66 @@ function board(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'BOARD' }>): Comman
     roleChangedAt: -Infinity,
     cooldownUntil: s.gameMs,
     task: null,
-    stats: { tasks: 0, successes: 0, successSum: 0, expired: 0, damage: 0, shielded: 0, energy: 0, repairs: 0, syncPoints: 0 },
+    stats: {
+      tasks: 0,
+      successes: 0,
+      successSum: 0,
+      expired: 0,
+      damage: 0,
+      shielded: 0,
+      energy: 0,
+      repairs: 0,
+      syncPoints: 0,
+    },
   };
   s.pilots[cmd.pilotId] = pilot;
   s.stats.peakPilots = Math.max(s.stats.peakPilots, activePilotIds(s).length);
-  ctx.emit('PILOT_BOARDED', { pilotId: pilot.pilotId, callsign: pilot.callsign, role: pilot.role, robot, isBot: pilot.isBot }, true);
+  ctx.emit(
+    'PILOT_BOARDED',
+    {
+      pilotId: pilot.pilotId,
+      callsign: pilot.callsign,
+      role: pilot.role,
+      robot,
+      isBot: pilot.isBot,
+    },
+    true,
+  );
   return { kind: 'board', code: 'OK', pilot };
 }
 
-function changeRole(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'CHANGE_ROLE' }>): CommandOutcome {
+function changeRole(
+  ctx: Ctx,
+  cmd: Extract<EngineCommand, { type: 'CHANGE_ROLE' }>,
+): CommandOutcome {
   const s = ctx.state;
   const p = s.pilots[cmd.pilotId];
   if (!p) return { kind: 'role', code: 'NOT_BOARDED', pilot: null };
-  if (s.status === 'ENDED' || s.status === 'CANCELLED') return { kind: 'role', code: 'NOT_OPEN', pilot: p };
+  if (s.status === 'ENDED' || s.status === 'CANCELLED')
+    return { kind: 'role', code: 'NOT_OPEN', pilot: p };
   const inCombat = s.liveStartClock !== null;
-  if (inCombat && s.gameMs - p.roleChangedAt < ms(s.config.roleChangeCooldownSeconds)) return { kind: 'role', code: 'ROLE_COOLDOWN', pilot: p };
-  if (p.role === cmd.role && (!cmd.robot || cmd.robot === p.robot)) return { kind: 'role', code: 'OK', pilot: p };
+  if (inCombat && s.gameMs - p.roleChangedAt < ms(s.config.roleChangeCooldownSeconds))
+    return { kind: 'role', code: 'ROLE_COOLDOWN', pilot: p };
+  if (p.role === cmd.role && (!cmd.robot || cmd.robot === p.robot))
+    return { kind: 'role', code: 'OK', pilot: p };
   const from = p.role;
   p.role = cmd.role;
   p.robot = robotFor(s, cmd.role, cmd.robot);
   p.task = null;
   if (inCombat) p.roleChangedAt = s.gameMs;
   p.lastActiveAt = s.gameMs;
-  ctx.emit('PILOT_ROLE_CHANGED', { pilotId: p.pilotId, callsign: p.callsign, role: p.role, robot: p.robot, isBot: p.isBot, from }, true);
+  ctx.emit(
+    'PILOT_ROLE_CHANGED',
+    {
+      pilotId: p.pilotId,
+      callsign: p.callsign,
+      role: p.role,
+      robot: p.robot,
+      isBot: p.isBot,
+      from,
+    },
+    true,
+  );
   return { kind: 'role', code: 'OK', pilot: p };
 }
 
@@ -819,24 +971,37 @@ function resolveTarget(s: RaidState, role: Role, choice: TaskChoice): TaskTarget
   switch (role) {
     case 'GUNNER': {
       const enemies = liveEnemies(s);
-      const chosen = choice.enemyId !== undefined ? enemies.find((e) => e.id === choice.enemyId) : undefined;
+      const chosen =
+        choice.enemyId !== undefined ? enemies.find((e) => e.id === choice.enemyId) : undefined;
       const rec = recommendGunnerTarget(s);
       const enemyId = chosen?.id ?? rec?.enemyId;
       if (enemyId === undefined) return null;
-      return { kind: 'ENEMY', enemyId, weakpoint: choice.weakpoint ?? (chosen ? 'CORE' : rec!.weakpoint) };
+      return {
+        kind: 'ENEMY',
+        enemyId,
+        weakpoint: choice.weakpoint ?? (chosen ? 'CORE' : rec!.weakpoint),
+      };
     }
     case 'GUARDIAN': {
-      const tg = choice.telegraphId !== undefined ? s.telegraphs.find((t) => t.id === choice.telegraphId) : undefined;
+      const tg =
+        choice.telegraphId !== undefined
+          ? s.telegraphs.find((t) => t.id === choice.telegraphId)
+          : undefined;
       if (tg) {
-        const city = choice.cityId && tg.targets.includes(choice.cityId) ? choice.cityId : tg.targets[0]!;
+        const city =
+          choice.cityId && tg.targets.includes(choice.cityId) ? choice.cityId : tg.targets[0]!;
         return { kind: 'TELEGRAPH', telegraphId: tg.id, cityId: city };
       }
       if (choice.cityId && !s.cities[choice.cityId].destroyed) {
         const onCity = s.telegraphs.find((t) => t.targets.includes(choice.cityId!));
-        return onCity ? { kind: 'TELEGRAPH', telegraphId: onCity.id, cityId: choice.cityId } : { kind: 'CITY_STANDBY', cityId: choice.cityId };
+        return onCity
+          ? { kind: 'TELEGRAPH', telegraphId: onCity.id, cityId: choice.cityId }
+          : { kind: 'CITY_STANDBY', cityId: choice.cityId };
       }
       const rec = recommendGuardianTarget(s);
-      return 'telegraphId' in rec ? { kind: 'TELEGRAPH', telegraphId: rec.telegraphId, cityId: rec.cityId } : { kind: 'CITY_STANDBY', cityId: rec.cityId };
+      return 'telegraphId' in rec
+        ? { kind: 'TELEGRAPH', telegraphId: rec.telegraphId, cityId: rec.cityId }
+        : { kind: 'CITY_STANDBY', cityId: rec.cityId };
     }
     case 'ROUTER':
       return { kind: 'ENERGY', sink: choice.sink ?? recommendSink(s) };
@@ -851,11 +1016,19 @@ function makeParams(ctx: Ctx, role: Role, target: TaskTarget, difficulty: TaskDi
     case 'GUNNER':
       return gunnerParams(ctx.rand, difficulty, facilityActive(s, 'SENSOR') ? 1.25 : 1);
     case 'GUARDIAN': {
-      const tg = target.kind === 'TELEGRAPH' ? s.telegraphs.find((t) => t.id === target.telegraphId) : undefined;
+      const tg =
+        target.kind === 'TELEGRAPH'
+          ? s.telegraphs.find((t) => t.id === target.telegraphId)
+          : undefined;
       return guardianParams(ctx.rand, difficulty, tg?.direction ?? randomDirection(ctx.rand));
     }
     case 'ROUTER':
-      return routerParams(ctx.rand, difficulty, target.kind === 'ENERGY' ? target.sink : 'RESERVE', s.jammedUntil > s.gameMs);
+      return routerParams(
+        ctx.rand,
+        difficulty,
+        target.kind === 'ENERGY' ? target.sink : 'RESERVE',
+        s.jammedUntil > s.gameMs,
+      );
     case 'ENGINEER':
       return engineerParams(ctx.rand, difficulty);
   }
@@ -864,7 +1037,12 @@ function makeParams(ctx: Ctx, role: Role, target: TaskTarget, difficulty: TaskDi
 function requestTask(ctx: Ctx, pilotId: string, choice: TaskChoice): CommandOutcome {
   const s = ctx.state;
   const p = s.pilots[pilotId];
-  const fail = (code: TaskErrorCode, task: Task | null = null): CommandOutcome => ({ kind: 'task', code, task, cooldownUntil: p?.cooldownUntil ?? 0 });
+  const fail = (code: TaskErrorCode, task: Task | null = null): CommandOutcome => ({
+    kind: 'task',
+    code,
+    task,
+    cooldownUntil: p?.cooldownUntil ?? 0,
+  });
   if (!p) return fail('NOT_BOARDED');
   // Asking for a mission is presence even when there is nothing to do.
   p.lastActiveAt = s.gameMs;
@@ -924,7 +1102,12 @@ function submitTask(ctx: Ctx, pilotId: string, taskId: string, input: TaskInput)
     p.stats.expired += 1;
     return result('EXPIRED');
   }
-  const ev = evaluateTask(task.params, input, s.gameMs - task.createdAt, ms(c.miniGameDurationSeconds));
+  const ev = evaluateTask(
+    task.params,
+    input,
+    s.gameMs - task.createdAt,
+    ms(c.miniGameDurationSeconds),
+  );
   // Malformed input still closes the task (no free retries by probing).
   p.task = null;
   p.stats.tasks += 1;
@@ -932,7 +1115,8 @@ function submitTask(ctx: Ctx, pilotId: string, taskId: string, input: TaskInput)
   p.cooldownUntil = s.gameMs + ms(c.normalActionCooldownSeconds);
   if (!ev.valid) return result('INVALID_INPUT', { cooldownUntil: p.cooldownUntil });
   const success = ev.success;
-  const target: TaskTarget = task.role === 'ROUTER' && ev.sink ? { kind: 'ENERGY', sink: ev.sink } : task.target;
+  const target: TaskTarget =
+    task.role === 'ROUTER' && ev.sink ? { kind: 'ENERGY', sink: ev.sink } : task.target;
   const { effect, syncGain } = applyAction(ctx, p, task.role, task.robot, target, success);
   return result('OK', { success, effect, syncGain, cooldownUntil: p.cooldownUntil });
 }
@@ -974,8 +1158,14 @@ function applyAction(
         }
         if (!e) break;
         const raijin = s.robots.RAIJIN;
-        const armor = e.kind === 'BOSS' && s.phase === 'FINAL_WAVE' && s.special.status !== 'ACTIVATED' ? c.boss.finalArmorFactor : 1;
-        const amount = Math.max(1, Math.round(c.gunner.damage[weakpoint] * success * scale * robotPower(c, raijin) * armor));
+        const armor =
+          e.kind === 'BOSS' && s.phase === 'FINAL_WAVE' && s.special.status !== 'ACTIVATED'
+            ? c.boss.finalArmorFactor
+            : 1;
+        const amount = Math.max(
+          1,
+          Math.round(c.gunner.damage[weakpoint] * success * scale * robotPower(c, raijin) * armor),
+        );
         raijin.energy = Math.max(0, raijin.energy - c.gunner.energyPerHit);
         e.hp = Math.max(0, e.hp - amount);
         e.partHits[weakpoint] += 1;
@@ -994,18 +1184,32 @@ function applyAction(
           }
         }
         if (actor) actor.stats.damage += amount;
-        effect = { kind: 'DAMAGE', enemyId: e.id, enemyKind: e.kind, weakpoint, amount, defeated: e.hp === 0, note };
+        effect = {
+          kind: 'DAMAGE',
+          enemyId: e.id,
+          enemyKind: e.kind,
+          weakpoint,
+          amount,
+          defeated: e.hp === 0,
+          note,
+        };
         break;
       }
       case 'GUARDIAN': {
-        const cityId = target.kind === 'TELEGRAPH' || target.kind === 'CITY_STANDBY' ? target.cityId : null;
+        const cityId =
+          target.kind === 'TELEGRAPH' || target.kind === 'CITY_STANDBY' ? target.cityId : null;
         if (!cityId) break;
         const city = s.cities[cityId];
         if (city.destroyed) break;
         const fujin = s.robots.FUJIN;
         const standby = target.kind === 'CITY_STANDBY' ? c.guardian.standbyRatio : 1;
         const bastion = facilityActive(s, 'BASTION') ? 1.2 : 1;
-        const amount = Math.max(1, Math.round(c.guardian.shield * success * scale * robotPower(c, fujin) * standby * bastion));
+        const amount = Math.max(
+          1,
+          Math.round(
+            c.guardian.shield * success * scale * robotPower(c, fujin) * standby * bastion,
+          ),
+        );
         const added = Math.min(c.cityShieldMax - city.shield, amount);
         city.shield += added;
         fujin.energy = Math.max(0, fujin.energy - 8);
@@ -1018,7 +1222,10 @@ function applyAction(
         const jam = s.jammedUntil > s.gameMs ? 0.5 : 1;
         const hub = facilityActive(s, 'HUB') ? 1.2 : 1;
         const plant = target.sink === 'RESERVE' && facilityActive(s, 'RESERVE_PLANT') ? 1.2 : 1;
-        const amount = Math.max(1, Math.round(c.router.energy * success * scale * jam * hub * plant));
+        const amount = Math.max(
+          1,
+          Math.round(c.router.energy * success * scale * jam * hub * plant),
+        );
         let added: number;
         if (target.sink === 'RESERVE') {
           added = Math.min(100 - s.reserveEnergy, amount);
@@ -1046,7 +1253,10 @@ function applyAction(
         } else if (rep.type === 'ROBOT') {
           const r = s.robots[rep.robot];
           const before = r.health;
-          r.health = Math.min(100, r.health + Math.round(c.engineer.repairRobot * success * scale * dock));
+          r.health = Math.min(
+            100,
+            r.health + Math.round(c.engineer.repairRobot * success * scale * dock),
+          );
           r.componentDamaged = r.health < 50;
           amount = r.health - before;
         } else {
@@ -1061,7 +1271,10 @@ function applyAction(
             }
           } else {
             const before = city.hp;
-            city.hp = Math.min(c.cityMaxHp, city.hp + Math.round(c.engineer.repairCity * success * scale * dock));
+            city.hp = Math.min(
+              c.cityMaxHp,
+              city.hp + Math.round(c.engineer.repairCity * success * scale * dock),
+            );
             amount = city.hp - before;
           }
         }
@@ -1075,7 +1288,16 @@ function applyAction(
 
   const syncGain = success >= 0.5 ? syncContribution(s, actorId, role) : 0;
   if (actor) actor.stats.syncPoints += syncGain;
-  ctx.emit('TASK_RESOLVED', { pilotId: actorId, callsign, role, robot, success, effect, syncGain, assist: !actor });
+  ctx.emit('TASK_RESOLVED', {
+    pilotId: actorId,
+    callsign,
+    role,
+    robot,
+    success,
+    effect,
+    syncGain,
+    assist: !actor,
+  });
   if (syncGain > 0) ctx.emit('SYNC_CHANGED', { sync: s.sync, delta: syncGain, reason: 'COOP' });
   if (success >= 0.5) specialContribution(ctx, actorId, callsign, role);
   // Order matters: the boss may fall to this hit (win) after SYNC/special bookkeeping.
@@ -1104,7 +1326,14 @@ function syncContribution(s: RaidState, pilotId: string, role: Role): number {
   w.roles[role] = pilotId;
   w.pilots.push(pilotId);
   const n = Object.keys(w.roles).length;
-  const gain = n === 2 ? c.sync.gainTwoRoles : n === 3 ? c.sync.gainThreeRoles : n === 4 ? c.sync.gainFourRoles : 0;
+  const gain =
+    n === 2
+      ? c.sync.gainTwoRoles
+      : n === 3
+        ? c.sync.gainThreeRoles
+        : n === 4
+          ? c.sync.gainFourRoles
+          : 0;
   const before = s.sync;
   s.sync = Math.min(c.sync.max, s.sync + gain);
   s.stats.syncPeak = Math.max(s.stats.syncPeak, s.sync);
@@ -1135,7 +1364,11 @@ function tryActivateSpecial(ctx: Ctx): void {
   if (sp.status !== 'OPEN' || s.status !== 'LIVE') return;
   const filled = SPECIAL_ROLES.filter((r) => sp.contributors[r]).length;
   const distinct = new Set(Object.values(sp.contributors)).size;
-  if (filled < SPECIAL_ROLES.length || distinct < Math.min(c.requiredDistinctPilots, SPECIAL_ROLES.length)) return;
+  if (
+    filled < SPECIAL_ROLES.length ||
+    distinct < Math.min(c.requiredDistinctPilots, SPECIAL_ROLES.length)
+  )
+    return;
   if (s.sync < c.syncMinimum || s.reserveEnergy < c.energyMinimum) return;
   resolveSpecial(ctx, 'ACTIVATED');
 }
@@ -1146,7 +1379,10 @@ function closeSpecial(ctx: Ctx): void {
   tryActivateSpecial(ctx);
   if (s.special.status !== 'OPEN') return;
   const filled = SPECIAL_ROLES.filter((r) => s.special.contributors[r]).length;
-  resolveSpecial(ctx, filled >= 2 || s.sync >= s.config.special.fallbackSyncMinimum ? 'FALLBACK' : 'FAILED');
+  resolveSpecial(
+    ctx,
+    filled >= 2 || s.sync >= s.config.special.fallbackSyncMinimum ? 'FALLBACK' : 'FAILED',
+  );
 }
 
 function resolveSpecial(ctx: Ctx, outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED'): void {
@@ -1165,7 +1401,8 @@ function resolveSpecial(ctx: Ctx, outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED'):
     const before = s.sync;
     s.sync = Math.max(0, s.sync - 30);
     s.reserveEnergy = 0;
-    if (before !== s.sync) ctx.emit('SYNC_CHANGED', { sync: s.sync, delta: s.sync - before, reason: 'SPECIAL' });
+    if (before !== s.sync)
+      ctx.emit('SYNC_CHANGED', { sync: s.sync, delta: s.sync - before, reason: 'SPECIAL' });
   } else if (outcome === 'FALLBACK') {
     damage = Math.round(c.fallbackDamage * bossScale);
   } else {
@@ -1173,7 +1410,12 @@ function resolveSpecial(ctx: Ctx, outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED'):
     cityHits = standingCities(s.cities).map((id) => hitCity(ctx, id, c.failBeamDamage));
   }
   if (boss && damage > 0) boss.hp = Math.max(0, boss.hp - damage);
-  ctx.emit('SPECIAL_RESOLVED', { outcome, damage, cityHits, contributors: Object.values(sp.contributors) as string[] });
+  ctx.emit('SPECIAL_RESOLVED', {
+    outcome,
+    damage,
+    cityHits,
+    contributors: Object.values(sp.contributors) as string[],
+  });
   if (cityHits.length) applyCityHits(ctx, cityHits);
   if (boss && boss.hp === 0 && s.status === 'LIVE') defeatEnemy(ctx, boss, null, null);
 }
@@ -1193,7 +1435,8 @@ function assistTurn(ctx: Ctx): void {
   if (s.status !== 'LIVE' || s.phase === 'INTRO_TRAINING') return;
   const humansActive = activePilotIds(s).length;
   if (humansActive >= c.assistBelowPilots) return;
-  const lastSuccess = (role: Role) => Math.max(-1, ...Object.values(s.pilots).map((p) => p.lastSuccessAt[role] ?? -1));
+  const lastSuccess = (role: Role) =>
+    Math.max(-1, ...Object.values(s.pilots).map((p) => p.lastSuccessAt[role] ?? -1));
   let roles: Role[] = [...ROLES].sort((a, z) => lastSuccess(a) - lastSuccess(z));
   if (s.special.status === 'OPEN') {
     const missing = SPECIAL_ROLES.filter((r) => !s.special.contributors[r]);

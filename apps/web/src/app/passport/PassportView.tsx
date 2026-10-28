@@ -51,7 +51,15 @@ export function PassportView() {
     URL.revokeObjectURL(a.href);
   };
   const remove = async () => {
-    if (!window.confirm(L('パイロット記録を削除します。元に戻せません。よろしいですか？', 'Delete your pilot record? This cannot be undone.'))) return;
+    if (
+      !window.confirm(
+        L(
+          'パイロット記録を削除します。元に戻せません。よろしいですか？',
+          'Delete your pilot record? This cannot be undone.',
+        ),
+      )
+    )
+      return;
     await api('/api/me', { method: 'DELETE' });
     window.location.href = '/';
   };
@@ -66,7 +74,10 @@ export function PassportView() {
       <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
         <Logo size="sm" />
         <p>{L('まだパイロット登録していません。', 'You are not a pilot yet.')}</p>
-        <Link className="sw-btn sw-focus flex items-center justify-center bg-amber text-navy" href="/play">
+        <Link
+          className="sw-btn sw-focus flex items-center justify-center bg-amber text-navy"
+          href="/play"
+        >
           {L('搭乗する', 'Board now')}
         </Link>
       </main>
@@ -79,14 +90,23 @@ export function PassportView() {
         <Logo size="sm" />
       </Link>
       <section className="sw-panel relative overflow-hidden p-5" data-testid="license">
-        <div className="absolute -top-8 -right-8 h-32 w-32 rounded-full bg-gradient-to-br from-amber/40 to-teal/40 blur-xl" aria-hidden="true" />
-        <p className="text-xs tracking-[0.3em] text-muted">SATS WARS · EARTH DEFENSE · PILOT LICENSE</p>
+        <div
+          className="absolute -top-8 -right-8 h-32 w-32 rounded-full bg-gradient-to-br from-amber/40 to-teal/40 blur-xl"
+          aria-hidden="true"
+        />
+        <p className="text-xs tracking-[0.3em] text-muted">
+          SATS WARS · EARTH DEFENSE · PILOT LICENSE
+        </p>
         <h1 className="sw-display mt-1 text-3xl" data-testid="passport-callsign">
           {p.callsign}
         </h1>
         <p className="mt-1 font-bold text-amber">
           {L(data.rankNameJa, data.rankNameEn)}
-          {data.nextRankAt !== null && <span className="ml-2 text-xs text-muted">{L(`次の階級まで あと${data.nextRankAt}pt`, `${data.nextRankAt} pts to next rank`)}</span>}
+          {data.nextRankAt !== null && (
+            <span className="ml-2 text-xs text-muted">
+              {L(`次の階級まで あと${data.nextRankAt}pt`, `${data.nextRankAt} pts to next rank`)}
+            </span>
+          )}
         </p>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div>
@@ -99,7 +119,9 @@ export function PassportView() {
           </div>
           <div>
             <dt className="text-xs text-muted">{L('認証', 'Login')}</dt>
-            <dd className="text-sm font-bold">{p.lightningLinked ? '⚡ Lightning' : L('ゲスト', 'Guest')}</dd>
+            <dd className="text-sm font-bold">
+              {p.lightningLinked ? '⚡ Lightning' : L('ゲスト', 'Guest')}
+            </dd>
           </div>
         </dl>
         {p.titles.length > 0 && (
@@ -114,20 +136,31 @@ export function PassportView() {
       </section>
 
       <section className="sw-panel p-4">
-        <h2 className="font-black">{L('出撃記録（SATS PASSPORT）', 'Raid history (SATS PASSPORT)')}</h2>
+        <h2 className="font-black">
+          {L('出撃記録（SATS PASSPORT）', 'Raid history (SATS PASSPORT)')}
+        </h2>
         {data.history.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">{L('まだ記録はありません。出撃してスタンプを集めよう！', 'No stamps yet. Fly a raid!')}</p>
+          <p className="mt-2 text-sm text-muted">
+            {L('まだ記録はありません。出撃してスタンプを集めよう！', 'No stamps yet. Fly a raid!')}
+          </p>
         ) : (
           <ol className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {data.history.map((h) => (
-              <li key={h.raidId} className={`rounded-xl border-2 p-2 text-center text-sm ${h.outcome === 'SUCCEEDED' ? 'border-amber' : 'border-line'}`}>
+              <li
+                key={h.raidId}
+                className={`rounded-xl border-2 p-2 text-center text-sm ${h.outcome === 'SUCCEEDED' ? 'border-amber' : 'border-line'}`}
+              >
                 <Link href={`/results/${h.raidId}`} className="block">
                   <div className="text-2xl">{h.outcome === 'SUCCEEDED' ? '🏆' : '🛡'}</div>
                   <div className="font-bold">
                     {ROLE_LABELS[h.role].icon} {L(ROLE_LABELS[h.role].ja, ROLE_LABELS[h.role].en)}
                   </div>
-                  <div className="text-xs text-muted">{new Date(h.endedAt).toLocaleDateString()}</div>
-                  <div className="text-xs">{L(`スコア ${Math.round(h.score)}`, `Score ${Math.round(h.score)}`)}</div>
+                  <div className="text-xs text-muted">
+                    {new Date(h.endedAt).toLocaleDateString()}
+                  </div>
+                  <div className="text-xs">
+                    {L(`スコア ${Math.round(h.score)}`, `Score ${Math.round(h.score)}`)}
+                  </div>
                 </Link>
               </li>
             ))}
@@ -144,14 +177,24 @@ export function PassportView() {
             void patch({ callsign });
           }}
         >
-          <input className="sw-focus min-h-11 flex-1 rounded-lg border border-line bg-navy px-3" value={callsign} maxLength={20} onChange={(e) => setCallsign(e.target.value)} aria-label={L('コールサイン', 'Callsign')} />
+          <input
+            className="sw-focus min-h-11 flex-1 rounded-lg border border-line bg-navy px-3"
+            value={callsign}
+            maxLength={20}
+            onChange={(e) => setCallsign(e.target.value)}
+            aria-label={L('コールサイン', 'Callsign')}
+          />
           <button type="submit" className="sw-btn bg-teal px-4 text-navy">
             {L('変更', 'Save')}
           </button>
         </form>
         <label className="flex items-center gap-2 text-sm">
           {L('アバター', 'Avatar')}
-          <select className="sw-focus min-h-11 rounded-lg border border-line bg-navy px-2" value={p.avatar} onChange={(e) => void patch({ avatar: e.target.value })}>
+          <select
+            className="sw-focus min-h-11 rounded-lg border border-line bg-navy px-2"
+            value={p.avatar}
+            onChange={(e) => void patch({ avatar: e.target.value })}
+          >
             {AVATAR_PRESETS.map((a) => (
               <option key={a} value={a}>
                 {a}
@@ -160,11 +203,22 @@ export function PassportView() {
           </select>
         </label>
         <label className="flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={p.showNameOnArena} onChange={(e) => void patch({ showNameOnArena: e.target.checked })} />
-          {L('大画面にコールサインを表示する（オフなら PILOT-番号）', 'Show my callsign on the big screen (PILOT-number otherwise)')}
+          <input
+            type="checkbox"
+            checked={p.showNameOnArena}
+            onChange={(e) => void patch({ showNameOnArena: e.target.checked })}
+          />
+          {L(
+            '大画面にコールサインを表示する（オフなら PILOT-番号）',
+            'Show my callsign on the big screen (PILOT-number otherwise)',
+          )}
         </label>
         <label className="flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={p.reducedMotion} onChange={(e) => void patch({ reducedMotion: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={p.reducedMotion}
+            onChange={(e) => void patch({ reducedMotion: e.target.checked })}
+          />
           {L('動きを減らす', 'Reduce motion')}
         </label>
         {msg && <p className="text-sm text-muted">{msg}</p>}
@@ -173,18 +227,33 @@ export function PassportView() {
       <section className="sw-panel flex flex-col gap-2 p-4 text-sm">
         <h2 className="font-black">{L('アカウント', 'Account')}</h2>
         {!p.lightningLinked && (
-          <Link className="sw-btn sw-focus flex items-center justify-center bg-navy-3" href="/auth/lightning?link=1&next=/passport">
-            ⚡ {L('Lightningウォレットを連携して記録を守る', 'Link a Lightning wallet to keep your records')}
+          <Link
+            className="sw-btn sw-focus flex items-center justify-center bg-navy-3"
+            href="/auth/lightning?link=1&next=/passport"
+          >
+            ⚡{' '}
+            {L(
+              'Lightningウォレットを連携して記録を守る',
+              'Link a Lightning wallet to keep your records',
+            )}
           </Link>
         )}
         <button type="button" className="sw-btn bg-navy-3" onClick={() => void exportData()}>
           ⬇ {L('自分のデータをダウンロード', 'Download my data')}
         </button>
         <div className="flex gap-2">
-          <button type="button" className="sw-btn flex-1 bg-navy-3" onClick={() => void logout(false)}>
+          <button
+            type="button"
+            className="sw-btn flex-1 bg-navy-3"
+            onClick={() => void logout(false)}
+          >
             {L('ログアウト', 'Log out')}
           </button>
-          <button type="button" className="sw-btn flex-1 bg-navy-3" onClick={() => void logout(true)}>
+          <button
+            type="button"
+            className="sw-btn flex-1 bg-navy-3"
+            onClick={() => void logout(true)}
+          >
             {L('全端末からログアウト', 'Log out everywhere')}
           </button>
         </div>

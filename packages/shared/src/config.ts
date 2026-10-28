@@ -51,7 +51,10 @@ export const gameConfigSchema = z
     bossBaseHp: z.number().int().min(1),
     scout: enemySchema,
     siege: enemySchema,
-    saboteur: enemySchema.extend({ energyDrain: z.number().int().min(0), jamSeconds: z.number().int().min(0) }),
+    saboteur: enemySchema.extend({
+      energyDrain: z.number().int().min(0),
+      jamSeconds: z.number().int().min(0),
+    }),
     boss: enemySchema.omit({ hp: true }).extend({
       /** Below this HP share the boss alternates its beam with a sweep over 3 cities. */
       sweepBelowHpRatio: z.number().min(0).max(1),
@@ -63,7 +66,9 @@ export const gameConfigSchema = z
       finalArmorFactor: z.number().min(0).max(1),
     }),
     /** When each enemy enters (game seconds). The boss is the BOSS entry. */
-    spawns: z.array(z.object({ atSeconds: z.number().int().min(0), kind: z.enum(ENEMY_KINDS) })).min(1),
+    spawns: z
+      .array(z.object({ atSeconds: z.number().int().min(0), kind: z.enum(ENEMY_KINDS) }))
+      .min(1),
     /** INTRO_TRAINING attacks deal this share of their damage (no fatal blows while learning). */
     trainingDamageRatio: z.number().min(0).max(1),
 
@@ -92,7 +97,10 @@ export const gameConfigSchema = z
     }),
     guardian: z.object({ shield: z.number().int().min(0), standbyRatio: z.number().min(0).max(1) }),
     router: z.object({ energy: z.number().int().min(0) }),
-    engineer: z.object({ repairCity: z.number().int().min(0), repairRobot: z.number().int().min(0) }),
+    engineer: z.object({
+      repairCity: z.number().int().min(0),
+      repairRobot: z.number().int().min(0),
+    }),
     /** Robot energy boosts its seat's effect by up to this share. */
     energyBoostMax: z.number().min(0).max(2),
     /** Damaged component (Raijin drum / Fujin ring) multiplies its effect by this. */
@@ -174,7 +182,14 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   bossBaseHp: 900,
   scout: { hp: 60, damage: 18, telegraphMs: [8000, 12000], recoveryMs: [4000, 7000] },
   siege: { hp: 140, damage: 36, telegraphMs: [12000, 18000], recoveryMs: [6000, 9000] },
-  saboteur: { hp: 90, damage: 6, telegraphMs: [10000, 12000], recoveryMs: [6000, 9000], energyDrain: 25, jamSeconds: 15 },
+  saboteur: {
+    hp: 90,
+    damage: 6,
+    telegraphMs: [10000, 12000],
+    recoveryMs: [6000, 9000],
+    energyDrain: 25,
+    jamSeconds: 15,
+  },
   boss: {
     damage: 32,
     telegraphMs: [12000, 15000],
@@ -208,14 +223,28 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   normalActionCooldownSeconds: 10,
   activeWindowSeconds: 30,
   roleFairShare: 0.3,
-  gunner: { damage: { CORE: 36, ARM: 18, LEG: 18 }, armWeaken: 0.1, armWeakenMax: 0.3, legDelaySeconds: 3, energyPerHit: 8 },
+  gunner: {
+    damage: { CORE: 36, ARM: 18, LEG: 18 },
+    armWeaken: 0.1,
+    armWeakenMax: 0.3,
+    legDelaySeconds: 3,
+    energyPerHit: 8,
+  },
   guardian: { shield: 45, standbyRatio: 0.5 },
   router: { energy: 18 },
   engineer: { repairCity: 15, repairRobot: 25 },
   energyBoostMax: 0.5,
   damagedComponentFactor: 0.6,
 
-  sync: { windowSeconds: 20, gainTwoRoles: 8, gainThreeRoles: 7, gainFourRoles: 10, decayEverySeconds: 10, decayAmount: 3, max: 100 },
+  sync: {
+    windowSeconds: 20,
+    gainTwoRoles: 8,
+    gainThreeRoles: 7,
+    gainFourRoles: 10,
+    decayEverySeconds: 10,
+    decayAmount: 3,
+    max: 100,
+  },
 
   special: {
     availableAfterSeconds: 390,
@@ -248,7 +277,10 @@ export function parseGameConfig(input: unknown): GameConfig {
 
 /** Deep-merge partial overrides onto the defaults and validate. */
 export function makeGameConfig(overrides: Partial<GameConfig> = {}): GameConfig {
-  return gameConfigSchema.parse({ ...structuredClone(DEFAULT_GAME_CONFIG), ...structuredClone(overrides) });
+  return gameConfigSchema.parse({
+    ...structuredClone(DEFAULT_GAME_CONFIG),
+    ...structuredClone(overrides),
+  });
 }
 
 /**
@@ -260,7 +292,11 @@ export function configHash(c: GameConfig): string {
     Array.isArray(v)
       ? v.map(canon)
       : v && typeof v === 'object'
-        ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])]))
+        ? Object.fromEntries(
+            Object.keys(v as object)
+              .sort()
+              .map((k) => [k, canon((v as Record<string, unknown>)[k])]),
+          )
         : v;
   const text = JSON.stringify(canon(c));
   let h = 0x811c9dc5;

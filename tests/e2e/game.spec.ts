@@ -1,21 +1,45 @@
-import { type APIRequestContext, type BrowserContext, type Page, expect, test } from '@playwright/test';
+import {
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+  expect,
+  test,
+} from '@playwright/test';
 import { E2E_ADMIN_PASSWORD } from './playwright.config';
 
 const SERVER = 'http://localhost:4000';
 
 async function adminToken(request: APIRequestContext): Promise<string> {
-  const r = await request.post(`${SERVER}/api/admin/login`, { data: { password: E2E_ADMIN_PASSWORD } });
+  const r = await request.post(`${SERVER}/api/admin/login`, {
+    data: { password: E2E_ADMIN_PASSWORD },
+  });
   return (await r.json()).token;
 }
-async function admin(request: APIRequestContext, token: string, body: Record<string, unknown>, mustSucceed = true) {
-  const r = await request.post(`${SERVER}/api/admin/command`, { data: body, headers: { authorization: `Bearer ${token}` } });
+async function admin(
+  request: APIRequestContext,
+  token: string,
+  body: Record<string, unknown>,
+  mustSucceed = true,
+) {
+  const r = await request.post(`${SERVER}/api/admin/command`, {
+    data: body,
+    headers: { authorization: `Bearer ${token}` },
+  });
   if (mustSucceed) expect(r.ok(), await r.text()).toBeTruthy();
   return r;
 }
 async function snapshot(request: APIRequestContext) {
-  return (await (await request.get(`${SERVER}/api/public/current-raid`)).json()).snapshot as { raidId: string; status: string };
+  return (await (await request.get(`${SERVER}/api/public/current-raid`)).json()).snapshot as {
+    raidId: string;
+    status: string;
+  };
 }
-const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true };
+const mobile = {
+  viewport: { width: 390, height: 844 },
+  deviceScaleFactor: 2,
+  hasTouch: true,
+  isMobile: true,
+};
 
 /** A phone that becomes a guest pilot. */
 async function guestPhone(ctx: BrowserContext, callsign: string): Promise<Page> {
@@ -37,9 +61,13 @@ async function playGuardian(p: Page) {
 
 test.describe.configure({ mode: 'serial' });
 
-test('venue raid: paid + sponsored pass, two seats, mission result, name on the big screen, results', async ({ browser, request }) => {
+test('venue raid: paid + sponsored pass, two seats, mission result, name on the big screen, results', async ({
+  browser,
+  request,
+}) => {
   const token = await adminToken(request);
-  if ((await snapshot(request)).status === 'CREATED') await admin(request, token, { command: 'OPEN_LOBBY' });
+  if ((await snapshot(request)).status === 'CREATED')
+    await admin(request, token, { command: 'OPEN_LOBBY' });
 
   const arenaCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const arena = await arenaCtx.newPage();
@@ -61,7 +89,14 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   await a.getByTestId('show-name').check();
 
   // Pilot B uses a sponsored pass code from the staff.
-  const codes = (await (await request.post(`${SERVER}/api/admin/sponsored-passes`, { data: { count: 1 }, headers: { authorization: `Bearer ${token}` } })).json()).codes as string[];
+  const codes = (
+    await (
+      await request.post(`${SERVER}/api/admin/sponsored-passes`, {
+        data: { count: 1 },
+        headers: { authorization: `Bearer ${token}` },
+      })
+    ).json()
+  ).codes as string[];
   const ctxB = await browser.newContext(mobile);
   const b = await guestPhone(ctxB, 'ハナコ');
   await b.getByText('スポンサーパスのコードを持っている').click();
@@ -101,7 +136,9 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   await Promise.all([ctxA.close(), ctxB.close(), arenaCtx.close()]);
 });
 
-test('Lightning login (LNURL-auth, mock wallet) brings a guest history along and opens the passport', async ({ browser }) => {
+test('Lightning login (LNURL-auth, mock wallet) brings a guest history along and opens the passport', async ({
+  browser,
+}) => {
   const ctx = await browser.newContext(mobile);
   const p = await guestPhone(ctx, 'ゲスト三郎');
   await p.goto('/auth/lightning?next=/passport');
@@ -118,7 +155,8 @@ test('phone UI: 320px wide without horizontal scroll, English toggle', async ({ 
   const p = await ctx.newPage();
   await p.goto('/play');
   await expect(p.getByTestId('onboarding')).toBeVisible();
-  const overflow = () => p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  const overflow = () =>
+    p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(await overflow()).toBeLessThanOrEqual(0);
   await p.getByRole('button', { name: 'Switch to English' }).click();
   await expect(p.getByTestId('guest-login')).toContainText('Board as guest');
@@ -137,7 +175,8 @@ test('arena 3D renderer starts, landing loads, admin kill switches work', async 
   const p = await ctx.newPage();
   await p.goto('/arena?mode=3d');
   await expect(p.getByTestId('arena-root')).toBeVisible();
-  if ((await p.getByTestId('arena-root').getAttribute('data-renderer')) === 'webgl') await expect(p.locator('canvas')).toBeVisible({ timeout: 30_000 });
+  if ((await p.getByTestId('arena-root').getAttribute('data-renderer')) === 'webgl')
+    await expect(p.locator('canvas')).toBeVisible({ timeout: 30_000 });
   await expect(p.getByTestId('join-card')).toBeVisible();
   await p.goto('/');
   await expect(p.getByTestId('cta-play')).toBeVisible();

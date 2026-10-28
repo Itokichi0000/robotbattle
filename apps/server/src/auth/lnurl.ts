@@ -73,14 +73,20 @@ const HEX = /^[0-9a-f]+$/;
 export function verifyLnurlSignature(k1Hex: string, sigHex: string, keyHex: string): boolean {
   if (k1Hex.length !== 64 || !HEX.test(k1Hex)) return false;
   if (keyHex.length !== 66 || !HEX.test(keyHex) || !/^0[23]/.test(keyHex)) return false;
-  if (sigHex.length < 16 || sigHex.length > 146 || sigHex.length % 2 || !HEX.test(sigHex)) return false;
+  if (sigHex.length < 16 || sigHex.length > 146 || sigHex.length % 2 || !HEX.test(sigHex))
+    return false;
   try {
-    return secp256k1.verify(Buffer.from(sigHex, 'hex'), Buffer.from(k1Hex, 'hex'), Buffer.from(keyHex, 'hex'), {
-      prehash: false,
-      format: 'der',
-      // Some wallets emit high-S signatures (openssl default); both are valid ECDSA.
-      lowS: false,
-    });
+    return secp256k1.verify(
+      Buffer.from(sigHex, 'hex'),
+      Buffer.from(k1Hex, 'hex'),
+      Buffer.from(keyHex, 'hex'),
+      {
+        prehash: false,
+        format: 'der',
+        // Some wallets emit high-S signatures (openssl default); both are valid ECDSA.
+        lowS: false,
+      },
+    );
   } catch {
     return false;
   }
@@ -90,7 +96,9 @@ export function verifyLnurlSignature(k1Hex: string, sigHex: string, keyHex: stri
 export function mockWalletSign(seed: string, k1Hex: string): { key: string; sig: string } {
   const priv = Buffer.from(sha256(`sats-wars-mock-wallet:${seed}`), 'hex');
   const key = Buffer.from(secp256k1.getPublicKey(priv, true)).toString('hex');
-  const sig = Buffer.from(secp256k1.sign(Buffer.from(k1Hex, 'hex'), priv, { prehash: false, format: 'der' })).toString('hex');
+  const sig = Buffer.from(
+    secp256k1.sign(Buffer.from(k1Hex, 'hex'), priv, { prehash: false, format: 'der' }),
+  ).toString('hex');
   return { key, sig };
 }
 
@@ -142,7 +150,10 @@ export class LnurlAuthService {
     return this.create(purpose, pilotId).start;
   }
 
-  private create(purpose: 'LOGIN' | 'LINK', pilotId: string | null): { start: LnurlStart; k1: string } {
+  private create(
+    purpose: 'LOGIN' | 'LINK',
+    pilotId: string | null,
+  ): { start: LnurlStart; k1: string } {
     if (purpose === 'LINK' && !pilotId) throw new AppError('UNAUTHORIZED', 'login required');
     const now = this.wall.now();
     const k1 = randomBytes(32).toString('hex');
@@ -165,11 +176,24 @@ export class LnurlAuthService {
     const url = `${base}/api/auth/lightning/callback?tag=login&k1=${k1}&action=${purpose === 'LINK' ? 'link' : 'login'}`;
     const lnurl = encodeLnurl(url);
     this.repo.purgeChallenges(now - 24 * 60 * 60_000);
-    return { start: { challengeId: id, lnurl, deepLink: `lightning:${lnurl}`, expiresAt: now + CHALLENGE_TTL_MS, binding }, k1 };
+    return {
+      start: {
+        challengeId: id,
+        lnurl,
+        deepLink: `lightning:${lnurl}`,
+        expiresAt: now + CHALLENGE_TTL_MS,
+        binding,
+      },
+      k1,
+    };
   }
 
   /** Wallet callback (LUD-04). Returns the JSON the wallet expects. */
-  callback(q: { k1?: string; sig?: string; key?: string }): { status: 'OK' } | { status: 'ERROR'; reason: string } {
+  callback(q: {
+    k1?: string;
+    sig?: string;
+    key?: string;
+  }): { status: 'OK' } | { status: 'ERROR'; reason: string } {
     const err = (reason: string) => ({ status: 'ERROR' as const, reason });
     const k1 = (q.k1 ?? '').toLowerCase();
     const sig = (q.sig ?? '').toLowerCase();
@@ -192,9 +216,11 @@ export class LnurlAuthService {
         const linked = this.repo.getAuthKey(fingerprint);
         let pilotId: string;
         if (ch.purpose === 'LINK') {
-          if (linked && linked.revoked_at === null && linked.pilot_id !== ch.pilot_id) throw new AppError('BAD_REQUEST', 'this wallet is linked to another pilot');
+          if (linked && linked.revoked_at === null && linked.pilot_id !== ch.pilot_id)
+            throw new AppError('BAD_REQUEST', 'this wallet is linked to another pilot');
           pilotId = ch.pilot_id!;
-          if (!linked) this.repo.insertAuthKey(newId('key'), pilotId, 'LNURL_AUTH', fingerprint, now);
+          if (!linked)
+            this.repo.insertAuthKey(newId('key'), pilotId, 'LNURL_AUTH', fingerprint, now);
           this.repo.updatePilot(pilotId, { auth_type: 'LIGHTNING' });
         } else if (linked && linked.revoked_at === null) {
           pilotId = linked.pilot_id;
@@ -203,7 +229,8 @@ export class LnurlAuthService {
           this.repo.insertAuthKey(newId('key'), pilotId, 'LNURL_AUTH', fingerprint, now);
         }
         // Exactly one callback can win this flip (replays and races lose).
-        if (!this.repo.verifyChallenge(ch.id, pilotId, now)) throw new AppError('BAD_REQUEST', 'k1 already used');
+        if (!this.repo.verifyChallenge(ch.id, pilotId, now))
+          throw new AppError('BAD_REQUEST', 'k1 already used');
         return { status: 'OK' as const };
       });
     } catch (e) {
@@ -217,7 +244,8 @@ export class LnurlAuthService {
    */
   status(challengeId: string, binding: string | null): LnurlStatus {
     const ch = this.repo.getChallenge(challengeId);
-    if (!ch || !binding || sha256(binding) !== ch.session_binding_hash) throw new AppError('NOT_FOUND', 'challenge not found');
+    if (!ch || !binding || sha256(binding) !== ch.session_binding_hash)
+      throw new AppError('NOT_FOUND', 'challenge not found');
     const now = this.wall.now();
     if (ch.status === 'PENDING' && ch.expires_at <= now) {
       this.repo.setChallengeStatus(ch.id, 'EXPIRED');
@@ -230,7 +258,10 @@ export class LnurlAuthService {
       return { status: 'VERIFIED', pilot, purpose: ch.purpose };
     }
     if (ch.status === 'CONSUMED') return { status: 'FAILED', expiresAt: ch.expires_at };
-    return { status: ch.status as Exclude<ChallengeRow['status'], 'VERIFIED' | 'CONSUMED'>, expiresAt: ch.expires_at };
+    return {
+      status: ch.status as Exclude<ChallengeRow['status'], 'VERIFIED' | 'CONSUMED'>,
+      expiresAt: ch.expires_at,
+    };
   }
 
   /** k1 values kept in memory only for mock approval (dev/test; real challenges store only a hash). */
@@ -245,9 +276,14 @@ export class LnurlAuthService {
   }
 
   /** Dev only: sign with a mock wallet key and run the real callback verification. */
-  mockApprove(challengeId: string, binding: string | null, walletSeed: string): { status: 'OK' } | { status: 'ERROR'; reason: string } {
+  mockApprove(
+    challengeId: string,
+    binding: string | null,
+    walletSeed: string,
+  ): { status: 'OK' } | { status: 'ERROR'; reason: string } {
     const ch = this.repo.getChallenge(challengeId);
-    if (!ch || !binding || sha256(binding) !== ch.session_binding_hash) throw new AppError('NOT_FOUND', 'challenge not found');
+    if (!ch || !binding || sha256(binding) !== ch.session_binding_hash)
+      throw new AppError('NOT_FOUND', 'challenge not found');
     const k1 = this.mockK1.get(challengeId);
     if (!k1) return { status: 'ERROR', reason: 'mock challenge unavailable' };
     this.mockK1.delete(challengeId);

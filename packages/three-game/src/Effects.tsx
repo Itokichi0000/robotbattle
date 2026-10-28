@@ -3,7 +3,14 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect, FxTarget } from './director';
-import { ALIEN_COLOR, CORRUPT_RED, ROBOT_HOME, TEAM_COLORS, type TargetContext, resolveFxTarget } from './layout';
+import {
+  ALIEN_COLOR,
+  CORRUPT_RED,
+  ROBOT_HOME,
+  TEAM_COLORS,
+  type TargetContext,
+  resolveFxTarget,
+} from './layout';
 
 export interface EffectsProps {
   director: ArenaDirector;
@@ -135,7 +142,12 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
       Array.from({ length: 10 }, () => {
         const line = new THREE.Line(
           new THREE.BufferGeometry(),
-          new THREE.LineBasicMaterial({ color: CORRUPT_RED, transparent: true, opacity: 0, blending: THREE.AdditiveBlending }),
+          new THREE.LineBasicMaterial({
+            color: CORRUPT_RED,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+          }),
         );
         line.visible = false;
         line.frustumCulled = false;
@@ -162,7 +174,13 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
     color: string,
     speed: number,
     life: number,
-    opts: { gravity?: number; swirl?: number; spread?: number; up?: number; toward?: THREE.Vector3 } = {},
+    opts: {
+      gravity?: number;
+      swirl?: number;
+      spread?: number;
+      up?: number;
+      toward?: THREE.Vector3;
+    } = {},
   ) => {
     const c = new THREE.Color(color);
     const n = reducedMotion ? Math.ceil(count / 3) : count;
@@ -180,7 +198,13 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
         )
         .normalize()
         .multiplyScalar(speed * (0.4 + Math.random() * 0.8));
-      if (opts.toward) pt.v.add(opts.toward.clone().sub(origin).multiplyScalar(0.9 + Math.random() * 0.3));
+      if (opts.toward)
+        pt.v.add(
+          opts.toward
+            .clone()
+            .sub(origin)
+            .multiplyScalar(0.9 + Math.random() * 0.3),
+        );
       pt.life = 0;
       pt.maxLife = life * (0.6 + Math.random() * 0.6);
       pt.color.copy(c).offsetHSL(0, 0, (Math.random() - 0.3) * 0.25);
@@ -210,7 +234,14 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
           case 'impact':
             if (to) {
               spawn(Math.round(14 * e.intensity), to, '#FFFFFF', 7, 0.45, { gravity: -8 });
-              spawn(Math.round(18 * e.intensity), to, e.teamId ? TEAM_COLORS[e.teamId] : CORRUPT_RED, 6, 0.6, { gravity: -6 });
+              spawn(
+                Math.round(18 * e.intensity),
+                to,
+                e.teamId ? TEAM_COLORS[e.teamId] : CORRUPT_RED,
+                6,
+                0.6,
+                { gravity: -6 },
+              );
             }
             break;
           case 'sparks':
@@ -219,7 +250,9 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
               const k = e.kind === 'explosion' ? 1.4 : 1;
               spawn(Math.round(90 * e.intensity * k), to, '#FFFFFF', 9, 0.9, { gravity: -9 });
               spawn(Math.round(60 * e.intensity * k), to, ALIEN_COLOR, 7, 1.0, { gravity: -7 });
-              spawn(Math.round(40 * e.intensity * k), to, TEAM_COLORS.RAIJIN, 7, 1.0, { gravity: -7 });
+              spawn(Math.round(40 * e.intensity * k), to, TEAM_COLORS.RAIJIN, 7, 1.0, {
+                gravity: -7,
+              });
               add(0.9);
             }
             break;
@@ -232,17 +265,38 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
             break;
           case 'beam':
             add(0.7);
-            if (to) spawn(Math.round(40 * e.intensity), to, CORRUPT_RED, 5, 0.8, { gravity: -3, up: 1.5 });
+            if (to)
+              spawn(Math.round(40 * e.intensity), to, CORRUPT_RED, 5, 0.8, {
+                gravity: -3,
+                up: 1.5,
+              });
             break;
           case 'shield':
             add(0.9);
-            if (to) spawn(Math.round(24 * e.intensity), to, TEAM_COLORS.FUJIN, 3, 0.9, { gravity: 0.5, swirl: 5 });
+            if (to)
+              spawn(Math.round(24 * e.intensity), to, TEAM_COLORS.FUJIN, 3, 0.9, {
+                gravity: 0.5,
+                swirl: 5,
+              });
             break;
           case 'energy':
-            if (from && to) spawn(Math.round(36 * e.intensity), from, e.teamId ? TEAM_COLORS[e.teamId] : '#FFE27A', 0.8, 1.1, { gravity: 0, toward: to, spread: 0.3 });
+            if (from && to)
+              spawn(
+                Math.round(36 * e.intensity),
+                from,
+                e.teamId ? TEAM_COLORS[e.teamId] : '#FFE27A',
+                0.8,
+                1.1,
+                { gravity: 0, toward: to, spread: 0.3 },
+              );
             break;
           case 'repair':
-            if (to) spawn(Math.round(30 * e.intensity), to, '#7DFFB2', 2, 1.2, { gravity: 1.5, spread: 0.6, up: 2 });
+            if (to)
+              spawn(Math.round(30 * e.intensity), to, '#7DFFB2', 2, 1.2, {
+                gravity: 1.5,
+                spread: 0.6,
+                up: 2,
+              });
             break;
           case 'shockwave':
           case 'syncPulse':
@@ -258,12 +312,21 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
             break;
           case 'chargeAura':
             add(1.2);
-            if (e.teamId) spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, { gravity: 2.5, spread: 0.4, up: 3 });
+            if (e.teamId)
+              spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, {
+                gravity: 2.5,
+                spread: 0.4,
+                up: 3,
+              });
             break;
           case 'specialStorm':
             add(2.8 * Math.max(0.5, e.intensity));
             if (e.teamId === 'FUJIN') {
-              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, { gravity: 3, swirl: 9, spread: 0.6 });
+              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, {
+                gravity: 3,
+                swirl: 9,
+                spread: 0.6,
+              });
             } else if (e.teamId === 'RAIJIN') {
               spawn(160, robotPos('RAIJIN').setY(3.5), TEAM_COLORS.RAIJIN, 7, 1.8, { gravity: -5 });
             }
@@ -310,7 +373,13 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
 
     const t = director.time;
     transients.current = transients.current.filter((x) => t - x.start < x.duration);
-    const rings = transients.current.filter((x) => x.kind === 'shockwave' || x.kind === 'chargeAura' || x.kind === 'syncPulse' || x.kind === 'cityBlast');
+    const rings = transients.current.filter(
+      (x) =>
+        x.kind === 'shockwave' ||
+        x.kind === 'chargeAura' ||
+        x.kind === 'syncPulse' ||
+        x.kind === 'cityBlast',
+    );
     ringRefs.current.forEach((m, i) => {
       if (!m) return;
       const x = rings[i];
@@ -379,7 +448,9 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
       const origin = x.kind === 'lightning' ? where(x.from) : null;
       const from = origin
         ? origin.clone().add(new THREE.Vector3(0, 2.5, 0))
-        : target.clone().add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
+        : target
+            .clone()
+            .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
       const pts = boltPoints(from, target, rng, 16, 0.7);
       line.geometry.setFromPoints(pts);
       const mat = line.material as THREE.LineBasicMaterial;
@@ -443,7 +514,14 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
       {Array.from({ length: 6 }, (_, i) => (
         <mesh key={`dome-${i}`} ref={(m) => void (domeRefs.current[i] = m)} visible={false}>
           <sphereGeometry args={[1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshBasicMaterial color={TEAM_COLORS.FUJIN} transparent opacity={0} wireframe depthWrite={false} blending={THREE.AdditiveBlending} />
+          <meshBasicMaterial
+            color={TEAM_COLORS.FUJIN}
+            transparent
+            opacity={0}
+            wireframe
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
         </mesh>
       ))}
       {Array.from({ length: 6 }, (_, i) => (

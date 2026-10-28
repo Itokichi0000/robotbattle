@@ -29,14 +29,29 @@ export function GunnerGame({ params, locale, onSubmit, disabled, offsetMs }: Min
   const inRing = Math.abs(x - params.ringCenter) <= params.ringWidth / 2;
   return (
     <div className="swc-game swc-gunner">
-      <p className="swc-game-help">{L('照準が光る輪に重なった瞬間にタップ！', 'Tap when the reticle is inside the ring!')}</p>
+      <p className="swc-game-help">
+        {L('照準が光る輪に重なった瞬間にタップ！', 'Tap when the reticle is inside the ring!')}
+      </p>
       <div className="swc-gunner-track" aria-hidden="true">
-        <div className="swc-gunner-ring" style={{ left: `${lo * 100}%`, width: `${params.ringWidth * 100}%` }} />
-        <div className={`swc-gunner-reticle${inRing ? ' is-in' : ''}`} style={{ left: `${x * 100}%` }}>
+        <div
+          className="swc-gunner-ring"
+          style={{ left: `${lo * 100}%`, width: `${params.ringWidth * 100}%` }}
+        />
+        <div
+          className={`swc-gunner-reticle${inRing ? ' is-in' : ''}`}
+          style={{ left: `${x * 100}%` }}
+        >
           ⌖
         </div>
       </div>
-      <button type="button" className="swc-big-btn swc-fire" onPointerDown={fire} onClick={fire} disabled={stoppedAt !== null || disabled} data-testid="gunner-fire">
+      <button
+        type="button"
+        className="swc-big-btn swc-fire"
+        onPointerDown={fire}
+        onClick={fire}
+        disabled={stoppedAt !== null || disabled}
+        data-testid="gunner-fire"
+      >
         ⚡ {L('撃つ！', 'FIRE!')} <small>Space</small>
       </button>
     </div>

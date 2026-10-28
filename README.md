@@ -42,16 +42,16 @@ Lightning ログインの体験：`AUTH_MODE=both` → `/auth/lightning` →「�
 
 ## コマンド
 
-| コマンド | 内容 |
-|---|---|
-| `pnpm dev` | 開発起動（ホットリロード、`.env` を読む） |
-| `pnpm build` / `pnpm start` | 本番ビルド / 本番起動 |
-| `pnpm test` | ユニット・統合テスト（vitest、78件） |
-| `pnpm lint` / `pnpm typecheck` | ESLint / TypeScript |
-| `pnpm e2e` | Playwright E2E（サーバーとwebを自分で起動。既存の dev は止めてから） |
-| `pnpm solo` | オフライン体験版（単一HTML） |
-| `pnpm simulate` | バランスシミュレーション → `docs/BALANCE_REPORT.md` |
-| `pnpm --filter @sats-wars/simulations exec tsx src/loadtest.ts --url http://localhost:4000 --password <ADMIN_PASSWORD> --pilots 50 --spectators 100` | 負荷試験（mock のサーバーのみ） |
+| コマンド                                                                                                                                             | 内容                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `pnpm dev`                                                                                                                                           | 開発起動（ホットリロード、`.env` を読む）                            |
+| `pnpm build` / `pnpm start`                                                                                                                          | 本番ビルド / 本番起動                                                |
+| `pnpm test`                                                                                                                                          | ユニット・統合テスト（vitest、78件）                                 |
+| `pnpm lint` / `pnpm typecheck`                                                                                                                       | ESLint / TypeScript                                                  |
+| `pnpm e2e`                                                                                                                                           | Playwright E2E（サーバーとwebを自分で起動。既存の dev は止めてから） |
+| `pnpm solo`                                                                                                                                          | オフライン体験版（単一HTML）                                         |
+| `pnpm simulate`                                                                                                                                      | バランスシミュレーション → `docs/BALANCE_REPORT.md`                  |
+| `pnpm --filter @sats-wars/simulations exec tsx src/loadtest.ts --url http://localhost:4000 --password <ADMIN_PASSWORD> --pilots 50 --spectators 100` | 負荷試験（mock のサーバーのみ）                                      |
 
 `/arena` のURLオプション：`?mode=2d|3d`、`?quality=low|medium|high`、`?reduced=1`（点滅・動き抑制）、`?stats=1`（FPS）、`?models=procedural`、
 `?preview=1`（演出リハーサル。1〜9キー、サーバーに送らない）。キー：F 全画面、S 設定、M ミュート。

@@ -82,7 +82,8 @@ export class RaidStore {
       serverTime: serverNow,
       recentEvents: [...cur.recentEvents, e].slice(-MAX_RECENT),
     };
-    if (e.type === 'RAID_STATUS_CHANGED' && e.data.to === 'PAUSED') next.pauseReason = e.data.reason;
+    if (e.type === 'RAID_STATUS_CHANGED' && e.data.to === 'PAUSED')
+      next.pauseReason = e.data.reason;
     this.snap = next;
     this.notify();
     for (const l of this.eventListeners) l(e);

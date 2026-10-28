@@ -24,10 +24,13 @@ export function EngineerGame({ params, locale, onSubmit, disabled }: MinigamePro
   }, !done);
   return (
     <div className="swc-game swc-engineer">
-      <p className="swc-game-help">{L('光った順番にスイッチを押そう', 'Press the switches in this order')}</p>
+      <p className="swc-game-help">
+        {L('光った順番にスイッチを押そう', 'Press the switches in this order')}
+      </p>
       <ol className="swc-order" aria-label={L('押す順番', 'Order')}>
         {params.order.map((s, k) => {
-          const state = k < seq.length ? (seq[k] === s ? 'is-ok' : 'is-bad') : k === seq.length ? 'is-now' : '';
+          const state =
+            k < seq.length ? (seq[k] === s ? 'is-ok' : 'is-bad') : k === seq.length ? 'is-now' : '';
           return (
             <li key={k} className={state}>
               {NAMES[s]}
@@ -37,7 +40,14 @@ export function EngineerGame({ params, locale, onSubmit, disabled }: MinigamePro
       </ol>
       <div className="swc-switches">
         {Array.from({ length: params.switchCount }, (_, i) => (
-          <button key={i} type="button" className="swc-big-btn swc-switch" onClick={() => press(i)} disabled={done || disabled} data-testid={`engineer-switch-${i}`}>
+          <button
+            key={i}
+            type="button"
+            className="swc-big-btn swc-switch"
+            onClick={() => press(i)}
+            disabled={done || disabled}
+            data-testid={`engineer-switch-${i}`}
+          >
             {NAMES[i]}
           </button>
         ))}

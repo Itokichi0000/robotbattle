@@ -1,6 +1,12 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
-import type { ArenaStatus, ClientToServerEvents, ClockTick, ServerNotice, ServerToClientEvents } from '@sats-wars/shared';
+import type {
+  ArenaStatus,
+  ClientToServerEvents,
+  ClockTick,
+  ServerNotice,
+  ServerToClientEvents,
+} from '@sats-wars/shared';
 import { arenaStatusSchema, subscribeSchema } from '@sats-wars/shared';
 import { SESSION_COOKIE, readCookie } from '../auth/sessions';
 import type { Services } from '../services';
@@ -21,8 +27,17 @@ export interface RealtimeStats {
  * 'public' room with the same seq numbers the DB has, so clients detect gaps
  * and re-request a snapshot. Pilots also join a private room for pass grants.
  */
-export function createRealtime(httpServer: HttpServer, services: Services, isAllowedOrigin: (origin: string | undefined) => boolean) {
-  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(httpServer, {
+export function createRealtime(
+  httpServer: HttpServer,
+  services: Services,
+  isAllowedOrigin: (origin: string | undefined) => boolean,
+) {
+  const io = new Server<
+    ClientToServerEvents,
+    ServerToClientEvents,
+    Record<string, never>,
+    SocketData
+  >(httpServer, {
     cors: { origin: (origin, cb) => cb(null, isAllowedOrigin(origin)), credentials: true },
     allowRequest: (req, cb) => cb(null, isAllowedOrigin(req.headers.origin)),
     pingInterval: 10_000,
@@ -46,7 +61,9 @@ export function createRealtime(httpServer: HttpServer, services: Services, isAll
         void socket.join('admin');
       }
       if (role === 'pilot') {
-        const auth = sessions.authenticateToken(token ?? readCookie(socket.request.headers.cookie, SESSION_COOKIE));
+        const auth = sessions.authenticateToken(
+          token ?? readCookie(socket.request.headers.cookie, SESSION_COOKIE),
+        );
         if (!auth) return ack?.({ ok: false, error: 'UNAUTHORIZED' });
         socket.data.pilotId = auth.pilot.id;
         void socket.join(`p:${auth.pilot.id}`);
@@ -125,7 +142,11 @@ export function createRealtime(httpServer: HttpServer, services: Services, isAll
       byRole[role] = (byRole[role] ?? 0) + 1;
     }
     const cutoff = wall.now() - 15_000;
-    return { connections: io.engine.clientsCount, byRole, arenas: [...arenaStatus.values()].filter((a) => a.updatedAt > cutoff) };
+    return {
+      connections: io.engine.clientsCount,
+      byRole,
+      arenas: [...arenaStatus.values()].filter((a) => a.updatedAt > cutoff),
+    };
   };
 
   const notice = (n: ServerNotice) => {

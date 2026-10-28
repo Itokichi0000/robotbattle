@@ -79,12 +79,18 @@ export class PilotService {
    * (with its history) under a fresh session; this is a convenience, not a
    * guarantee — Lightning login is the reliable way back.
    */
-  guest(input: { callsign?: string; deviceId?: string }): { pilot: PilotRow; token: string; expiresAt: number } {
+  guest(input: { callsign?: string; deviceId?: string }): {
+    pilot: PilotRow;
+    token: string;
+    expiresAt: number;
+  } {
     return this.repo.tx(() => {
       const deviceHash = input.deviceId ? sha256(`device:${input.deviceId}`) : null;
       let pilot = deviceHash ? this.repo.getGuestByDevice(deviceHash) : undefined;
       if (pilot && input.callsign?.trim()) {
-        this.repo.updatePilot(pilot.id, { callsign: sanitizeNickname(input.callsign, pilot.code).nickname });
+        this.repo.updatePilot(pilot.id, {
+          callsign: sanitizeNickname(input.callsign, pilot.code).nickname,
+        });
         pilot = this.repo.getPilot(pilot.id)!;
       }
       pilot ??= this.create('GUEST', input.callsign, input.deviceId);
@@ -98,7 +104,9 @@ export class PilotService {
     return {
       pilotId: p.id,
       callsign: p.callsign,
-      avatar: (AVATAR_PRESETS as readonly string[]).includes(p.avatar) ? (p.avatar as AvatarPreset) : 'standard',
+      avatar: (AVATAR_PRESETS as readonly string[]).includes(p.avatar)
+        ? (p.avatar as AvatarPreset)
+        : 'standard',
       authType: p.auth_type,
       lightningLinked: this.repo.activeAuthKeys(p.id) > 0,
       rank: rankFor(p.rank_points).index,
@@ -115,7 +123,9 @@ export class PilotService {
 
   patch(p: PilotRow, patch: ProfilePatch): PilotProfile {
     this.repo.updatePilot(p.id, {
-      ...(patch.callsign !== undefined ? { callsign: sanitizeNickname(patch.callsign, p.code).nickname } : {}),
+      ...(patch.callsign !== undefined
+        ? { callsign: sanitizeNickname(patch.callsign, p.code).nickname }
+        : {}),
       ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
       ...(patch.locale !== undefined ? { locale: patch.locale } : {}),
       ...(patch.showNameOnArena !== undefined ? { show_name: patch.showNameOnArena ? 1 : 0 } : {}),
@@ -129,7 +139,11 @@ export class PilotService {
 
   /** Tell the running raid how this pilot may be named on public screens. */
   applyNamePolicy(p: PilotRow): void {
-    this.opts.manager.current().setNamePolicy(p.id, { show: p.show_name === 1, hidden: p.callsign_hidden === 1, pseudonym: pseudonym(p.code) });
+    this.opts.manager.current().setNamePolicy(p.id, {
+      show: p.show_name === 1,
+      hidden: p.callsign_hidden === 1,
+      pseudonym: pseudonym(p.code),
+    });
   }
 
   me(p: PilotRow, pendingInvoice: MeResponse['pendingInvoice']): MeResponse {
@@ -150,7 +164,9 @@ export class PilotService {
         robot: pilot?.robot ?? null,
         task,
         cooldownUntil: pilot?.cooldownUntil ?? 0,
-        roleChangeReadyAt: pilot ? pilot.roleChangedAt + s.config.roleChangeCooldownSeconds * 1000 : 0,
+        roleChangeReadyAt: pilot
+          ? pilot.roleChangedAt + s.config.roleChangeCooldownSeconds * 1000
+          : 0,
         stats: pilot?.stats ?? null,
       },
       pendingInvoice,
@@ -183,13 +199,33 @@ export class PilotService {
    * wallet key; the route asks for explicit confirmation first.
    */
   mergeGuest(guest: PilotRow, target: PilotRow): PilotProfile {
-    if (guest.id === target.id || guest.auth_type !== 'GUEST' || guest.merged_into) throw new AppError('BAD_REQUEST', 'nothing to merge');
-    const titles = [...new Set([...(JSON.parse(target.titles_json) as string[]), ...(JSON.parse(guest.titles_json) as string[])])];
-    const roles = [...new Set([...target.roles_done.split(','), ...guest.roles_done.split(',')].filter(Boolean))];
+    if (guest.id === target.id || guest.auth_type !== 'GUEST' || guest.merged_into)
+      throw new AppError('BAD_REQUEST', 'nothing to merge');
+    const titles = [
+      ...new Set([
+        ...(JSON.parse(target.titles_json) as string[]),
+        ...(JSON.parse(guest.titles_json) as string[]),
+      ]),
+    ];
+    const roles = [
+      ...new Set([...target.roles_done.split(','), ...guest.roles_done.split(',')].filter(Boolean)),
+    ];
     this.repo.tx(() => {
       this.repo.moveHistory(guest.id, target.id);
-      this.repo.mergePilotInto(guest.id, target.id, JSON.stringify(titles), roles.join(','), this.now());
-      this.repo.audit(`pilot:${target.id}`, 'MERGE_GUEST', guest.id, { into: target.id }, this.now());
+      this.repo.mergePilotInto(
+        guest.id,
+        target.id,
+        JSON.stringify(titles),
+        roles.join(','),
+        this.now(),
+      );
+      this.repo.audit(
+        `pilot:${target.id}`,
+        'MERGE_GUEST',
+        guest.id,
+        { into: target.id },
+        this.now(),
+      );
     });
     return this.profile(this.repo.getPilot(target.id)!);
   }
@@ -211,7 +247,9 @@ export class PilotService {
       this.repo.deletePilot(p.id, this.now());
       this.repo.audit(`pilot:${p.id}`, 'DELETE_ACCOUNT', p.id, null, this.now());
     });
-    this.opts.manager.current().setNamePolicy(p.id, { show: false, hidden: true, pseudonym: 'PILOT' });
+    this.opts.manager
+      .current()
+      .setNamePolicy(p.id, { show: false, hidden: true, pseudonym: 'PILOT' });
   }
 
   /**
@@ -223,7 +261,9 @@ export class PilotService {
     if (!result || result.outcome === 'CANCELLED') return;
     const now = this.now();
     const won = result.outcome === 'SUCCEEDED';
-    const specialPilots = new Set(state.special.status === 'ACTIVATED' ? Object.values(state.special.contributors) : []);
+    const specialPilots = new Set(
+      state.special.status === 'ACTIVATED' ? Object.values(state.special.contributors) : [],
+    );
     this.repo.tx(() => {
       for (const pilot of Object.values(state.pilots)) {
         if (pilot.isBot) continue;
@@ -242,10 +282,12 @@ export class PilotService {
         earn('FIRST_SORTIE');
         if (won) earn('EARTH_DEFENDER');
         if (specialPilots.has(pilot.pilotId)) earn('SHINRAI_FUJIN');
-        for (const [k, v] of Object.entries(result.mvps)) if (v?.pilotId === pilot.pilotId) earn(`MVP_${k}`);
+        for (const [k, v] of Object.entries(result.mvps))
+          if (v?.pilotId === pilot.pilotId) earn(`MVP_${k}`);
         if (ROLES.every((r) => roles.has(r))) earn('ALL_ROUNDER');
         if (row.sorties + 1 >= 10) earn('VETERAN');
-        const points = row.rank_points + 1 + (won ? 2 : 0) + (specialPilots.has(pilot.pilotId) ? 1 : 0);
+        const points =
+          row.rank_points + 1 + (won ? 2 : 0) + (specialPilots.has(pilot.pilotId) ? 1 : 0);
         this.repo.recordSortie(pilot.pilotId, won, [...roles].join(','), [...titles], points);
         this.repo.insertPassport({
           pilot_id: pilot.pilotId,

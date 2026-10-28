@@ -21,13 +21,19 @@ export function ResultsView({ raidId }: { raidId: string }) {
   if (error) return <p className="p-6 text-danger">{error}</p>;
   if (!snap) return <p className="p-6">{L('読み込み中…', 'Loading…')}</p>;
   const view = raidView(snap, snap.gameMs);
-  const highlights = snap.recentEvents.map((e) => highlight(e, L)).filter((x): x is { t: number; text: string } => !!x);
+  const highlights = snap.recentEvents
+    .map((e) => highlight(e, L))
+    .filter((x): x is { t: number; text: string } => !!x);
   return (
     <main className="swc-root mx-auto flex max-w-3xl flex-col gap-4 p-4" data-testid="results">
       <Link href="/" className="sw-focus self-start rounded">
         <Logo size="sm" />
       </Link>
-      {snap.result ? <ResultCard result={snap.result} locale={locale} bestScore={snap.bestScore} /> : <p className="sw-panel p-4">{L('作戦はまだ続いています', 'The raid is still going')}</p>}
+      {snap.result ? (
+        <ResultCard result={snap.result} locale={locale} bestScore={snap.bestScore} />
+      ) : (
+        <p className="sw-panel p-4">{L('作戦はまだ続いています', 'The raid is still going')}</p>
+      )}
       <section className="sw-panel p-4">
         <h2 className="font-black">{L('最後の日本', 'Japan at the end')}</h2>
         <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
@@ -59,17 +65,29 @@ export function ResultsView({ raidId }: { raidId: string }) {
   );
 }
 
-function highlight(e: GameEvent, L: (ja: string, en: string) => string): { t: number; text: string } | null {
+function highlight(
+  e: GameEvent,
+  L: (ja: string, en: string) => string,
+): { t: number; text: string } | null {
   const t = e.gameMs;
   switch (e.type) {
     case 'ENEMY_DEFEATED':
-      return { t, text: `💥 ${L(ENEMY_LABELS[e.data.kind].ja, ENEMY_LABELS[e.data.kind].en)} ${L('撃破', 'destroyed')}${e.data.callsign ? ` — ${e.data.callsign}` : ''}` };
+      return {
+        t,
+        text: `💥 ${L(ENEMY_LABELS[e.data.kind].ja, ENEMY_LABELS[e.data.kind].en)} ${L('撃破', 'destroyed')}${e.data.callsign ? ` — ${e.data.callsign}` : ''}`,
+      };
     case 'CITY_DESTROYED':
       return { t, text: `🔥 ${cityName(e.data.cityId, L)} ${L('陥落', 'fell')}` };
     case 'CITY_REBUILT':
-      return { t, text: `🏗 ${cityName(e.data.cityId, L)} ${L('再建', 'rebuilt')} — ${e.data.callsign}` };
+      return {
+        t,
+        text: `🏗 ${cityName(e.data.cityId, L)} ${L('再建', 'rebuilt')} — ${e.data.callsign}`,
+      };
     case 'SPECIAL_RESOLVED':
-      return { t, text: `⚡🌀 ${L(SPECIAL_LABELS[e.data.outcome].ja, SPECIAL_LABELS[e.data.outcome].en)}` };
+      return {
+        t,
+        text: `⚡🌀 ${L(SPECIAL_LABELS[e.data.outcome].ja, SPECIAL_LABELS[e.data.outcome].en)}`,
+      };
     case 'PHASE_CHANGED':
       return null;
     default:

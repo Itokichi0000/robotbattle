@@ -9,7 +9,13 @@ type P = Extract<TaskParams, { role: 'GUARDIAN' }>;
 type I = Extract<TaskInput, { role: 'GUARDIAN' }>;
 
 /** 🛡 Raise the shield toward the attack, while the gauge is in the green band. */
-export function GuardianGame({ params, locale, onSubmit, disabled, offsetMs }: MinigameProps<P, I>) {
+export function GuardianGame({
+  params,
+  locale,
+  onSubmit,
+  disabled,
+  offsetMs,
+}: MinigameProps<P, I>) {
   const L = (ja: string, en: string) => (locale === 'ja' ? ja : en);
   const [released, setReleased] = useState<{ at: number; dir: Direction } | null>(null);
   const once = useOnce();
@@ -36,11 +42,23 @@ export function GuardianGame({ params, locale, onSubmit, disabled, offsetMs }: M
         <span className="swc-threat-arrow" aria-hidden="true">
           {threat.icon}
         </span>{' '}
-        {L(`攻撃は「${threat.ja}」から！ ゲージが緑のときに${threat.ja}の盾を押す`, `Attack from the ${threat.en.toLowerCase()}! Press ${threat.en} while the gauge is green`)}
+        {L(
+          `攻撃は「${threat.ja}」から！ ゲージが緑のときに${threat.ja}の盾を押す`,
+          `Attack from the ${threat.en.toLowerCase()}! Press ${threat.en} while the gauge is green`,
+        )}
       </p>
       <div className="swc-gauge" aria-hidden="true">
-        <div className="swc-gauge-green" style={{ left: `${params.greenFrom * 100}%`, width: `${(params.greenTo - params.greenFrom) * 100}%` }} />
-        <div className={`swc-gauge-fill${inGreen ? ' is-green' : ''}`} style={{ width: `${g * 100}%` }} />
+        <div
+          className="swc-gauge-green"
+          style={{
+            left: `${params.greenFrom * 100}%`,
+            width: `${(params.greenTo - params.greenFrom) * 100}%`,
+          }}
+        />
+        <div
+          className={`swc-gauge-fill${inGreen ? ' is-green' : ''}`}
+          style={{ width: `${g * 100}%` }}
+        />
       </div>
       <div className="swc-dir-row">
         {DIRECTIONS.map((d) => (

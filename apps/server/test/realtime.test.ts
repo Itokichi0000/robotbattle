@@ -1,10 +1,28 @@
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Socket, io as connect } from 'socket.io-client';
-import type { CheerPush, ClientToServerEvents, EntitlementPush, GameEvent, PublicRaidSnapshot, ServerToClientEvents, Task } from '@sats-wars/shared';
+import type {
+  CheerPush,
+  ClientToServerEvents,
+  EntitlementPush,
+  GameEvent,
+  PublicRaidSnapshot,
+  ServerToClientEvents,
+  Task,
+} from '@sats-wars/shared';
 import { RaidStore } from '@sats-wars/shared';
 import { mulberry32, solveTask } from '@sats-wars/game-engine';
-import { type PilotHandle, type TestServer, auth, board, guest, makeServer, requestTask, startRaid, submitTask } from './helpers';
+import {
+  type PilotHandle,
+  type TestServer,
+  auth,
+  board,
+  guest,
+  makeServer,
+  requestTask,
+  startRaid,
+  submitTask,
+} from './helpers';
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -39,14 +57,22 @@ function onEvent(c: Client) {
   };
 }
 
-async function client(url: string, role: 'arena' | 'pilot' | 'spectator' = 'spectator', token?: string) {
+async function client(
+  url: string,
+  role: 'arena' | 'pilot' | 'spectator' = 'spectator',
+  token?: string,
+) {
   const socket: ClientSocket = connect(url, { transports: ['websocket'], forceNew: true });
   sockets.push(socket);
   const c: Client = { socket, store: new RaidStore(), events: [], gaps: 0 };
   socket.on('raid:snapshot', (snap) => c.store.applySnapshot(snap));
   socket.on('raid:event', onEvent(c));
   await new Promise<void>((resolve, reject) => {
-    socket.on('connect', () => socket.emit('raid:subscribe', { role, token }, (res) => (res.ok ? resolve() : reject(new Error(res.error)))));
+    socket.on('connect', () =>
+      socket.emit('raid:subscribe', { role, token }, (res) =>
+        res.ok ? resolve() : reject(new Error(res.error)),
+      ),
+    );
     socket.on('connect_error', reject);
   });
   await waitFor(() => c.store.snapshot !== null);
@@ -63,15 +89,42 @@ async function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
 
 function comparable(snap: PublicRaidSnapshot | null) {
   if (!snap) return null;
-  const { cities, robots, enemies, telegraphs, sync, special, status, phase, lastSeq, reserveEnergy, crew } = snap;
-  return { cities, robots, enemies, telegraphs, sync, special, status, phase, lastSeq, reserveEnergy, crew };
+  const {
+    cities,
+    robots,
+    enemies,
+    telegraphs,
+    sync,
+    special,
+    status,
+    phase,
+    lastSeq,
+    reserveEnergy,
+    crew,
+  } = snap;
+  return {
+    cities,
+    robots,
+    enemies,
+    telegraphs,
+    sync,
+    special,
+    status,
+    phase,
+    lastSeq,
+    reserveEnergy,
+    crew,
+  };
 }
 
 async function play(srv: TestServer, p: PilotHandle) {
   const r = (await requestTask(srv, p)).json() as { task: Task | null };
   if (!r.task) return;
   const input = solveTask(r.task.params, 1, mulberry32(3), 700);
-  await srv.advance(('stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 1200) + 100);
+  await srv.advance(
+    ('stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 1200) +
+      100,
+  );
   await submitTask(srv, p, r.task.taskId, input);
 }
 
@@ -149,11 +202,27 @@ describe('realtime sync', () => {
     ca.socket.on('pilot:entitlement', (m) => ent1.push(m));
     cb.socket.on('pilot:entitlement', (m) => ent2.push(m));
     screen.socket.on('raid:cheer', (m) => cheers.push(m));
-    const inv = (await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(a.token) })).json();
-    await s.inject({ method: 'POST', url: '/api/dev/mock-pay', headers: auth(a.token), payload: { invoiceId: inv.invoiceId } });
+    const inv = (
+      await s.inject({
+        method: 'POST',
+        url: '/api/raids/current/pass/invoice',
+        headers: auth(a.token),
+      })
+    ).json();
+    await s.inject({
+      method: 'POST',
+      url: '/api/dev/mock-pay',
+      headers: auth(a.token),
+      payload: { invoiceId: inv.invoiceId },
+    });
     await waitFor(() => ent1.length === 1);
     expect(ent1[0]).toMatchObject({ source: 'LIGHTNING', invoiceId: inv.invoiceId });
-    await s.inject({ method: 'POST', url: '/api/cheer', headers: auth(b.token), payload: { emoji: '👏' } });
+    await s.inject({
+      method: 'POST',
+      url: '/api/cheer',
+      headers: auth(b.token),
+      payload: { emoji: '👏' },
+    });
     await waitFor(() => cheers.length === 1);
     expect(cheers[0]!.emoji).toBe('👏');
     expect(cheers[0]!.callsign).toMatch(/^PILOT-/);
@@ -166,9 +235,15 @@ describe('realtime sync', () => {
     const url = await listen(s);
     await expect(client(url, 'pilot', 'x'.repeat(40))).rejects.toThrow('UNAUTHORIZED');
     const a = await guest(s);
-    const socket: ClientSocket = connect(url, { transports: ['websocket'], forceNew: true, extraHeaders: { cookie: `sw_session=${a.token}` } });
+    const socket: ClientSocket = connect(url, {
+      transports: ['websocket'],
+      forceNew: true,
+      extraHeaders: { cookie: `sw_session=${a.token}` },
+    });
     sockets.push(socket);
-    const res = await new Promise<{ ok: boolean }>((resolve) => socket.on('connect', () => socket.emit('raid:subscribe', { role: 'pilot' }, resolve)));
+    const res = await new Promise<{ ok: boolean }>((resolve) =>
+      socket.on('connect', () => socket.emit('raid:subscribe', { role: 'pilot' }, resolve)),
+    );
     expect(res.ok).toBe(true);
   });
 
@@ -176,7 +251,9 @@ describe('realtime sync', () => {
     s = await makeServer(DEMO);
     const url = await listen(s);
     const c = await client(url);
-    const t = await new Promise<number>((resolve) => c.socket.emit('time:sync', Date.now(), resolve));
+    const t = await new Promise<number>((resolve) =>
+      c.socket.emit('time:sync', Date.now(), resolve),
+    );
     expect(t).toBe(s.clock.now());
   });
 });

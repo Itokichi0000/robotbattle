@@ -23,7 +23,11 @@ export function httpRaidClient(conn: RaidConnection): RaidClient {
     },
     requestTask: (choice: TaskChoice) => call<TaskResponse>('/api/raids/current/tasks', choice),
     submitTask: (taskId: string, input: TaskInput, clientSubmissionId: string) =>
-      call<SubmitResponse>('/api/raids/current/tasks/submit', { taskId, clientSubmissionId, input }),
+      call<SubmitResponse>('/api/raids/current/tasks/submit', {
+        taskId,
+        clientSubmissionId,
+        input,
+      }),
     gameNow: conn.gameNow,
   };
 }

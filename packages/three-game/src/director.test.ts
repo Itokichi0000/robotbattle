@@ -17,7 +17,15 @@ const gunnerHit = (over: Partial<{ defeated: boolean; enemyId: number }> = {}): 
   success: 1,
   callsign: 'PILOT-00821',
   assist: false,
-  effect: { kind: 'DAMAGE', enemyId: over.enemyId ?? 7, enemyKind: 'BOSS', weakpoint: 'CORE', amount: 40, defeated: over.defeated ?? false, note: null },
+  effect: {
+    kind: 'DAMAGE',
+    enemyId: over.enemyId ?? 7,
+    enemyKind: 'BOSS',
+    weakpoint: 'CORE',
+    amount: 40,
+    defeated: over.defeated ?? false,
+    note: null,
+  },
 });
 
 function result(outcome: RaidResult['outcome']): RaidResult {
@@ -37,7 +45,20 @@ function result(outcome: RaidResult['outcome']): RaidResult {
     bots: 0,
     assisted: false,
     configHash: 'h',
-    stats: { tasks: 1, successes: 1, enemiesDefeated: 1, cityDamageTaken: 0, shieldAbsorbed: 0, energyRouted: 0, repairs: 0, syncSum: 0, syncSamples: 0, syncPeak: 0, assistActions: 0, peakPilots: 5 },
+    stats: {
+      tasks: 1,
+      successes: 1,
+      enemiesDefeated: 1,
+      cityDamageTaken: 0,
+      shieldAbsorbed: 0,
+      energyRouted: 0,
+      repairs: 0,
+      syncSum: 0,
+      syncSamples: 0,
+      syncPeak: 0,
+      assistActions: 0,
+      peakPilots: 5,
+    },
   };
 }
 
@@ -50,7 +71,10 @@ describe('ArenaDirector', () => {
     d.onSound((s) => sounds.push(s));
     d.play(gunnerHit());
     expect(d.robots.RAIJIN.clip).toBe('AttackHeavy');
-    expect(fx.find((e) => e.kind === 'lightning')).toMatchObject({ from: { kind: 'robot', id: 'RAIJIN' }, to: { kind: 'enemy', id: 7 } });
+    expect(fx.find((e) => e.kind === 'lightning')).toMatchObject({
+      from: { kind: 'robot', id: 'RAIJIN' },
+      to: { kind: 'enemy', id: 7 },
+    });
     expect(sounds).toContain('thunder');
     run(d, 2);
     expect(d.robots.RAIJIN.clip).toBe('Idle');
@@ -60,16 +84,48 @@ describe('ArenaDirector', () => {
     const d = new ArenaDirector();
     const fx: DirectorEffect[] = [];
     d.onEffect((e) => fx.push(e));
-    d.play({ kind: 'task', role: 'GUARDIAN', robot: 'FUJIN', success: 1, callsign: 'a', assist: false, effect: { kind: 'SHIELD', cityId: 'kanto', amount: 40 } });
-    d.play({ kind: 'task', role: 'ROUTER', robot: 'RAIJIN', success: 1, callsign: 'b', assist: false, effect: { kind: 'ENERGY', sink: 'RESERVE', amount: 18 } });
-    d.play({ kind: 'task', role: 'ENGINEER', robot: 'FUJIN', success: 1, callsign: 'c', assist: false, effect: { kind: 'REPAIR', repair: { type: 'CITY', cityId: 'kinki' }, amount: 15 } });
+    d.play({
+      kind: 'task',
+      role: 'GUARDIAN',
+      robot: 'FUJIN',
+      success: 1,
+      callsign: 'a',
+      assist: false,
+      effect: { kind: 'SHIELD', cityId: 'kanto', amount: 40 },
+    });
+    d.play({
+      kind: 'task',
+      role: 'ROUTER',
+      robot: 'RAIJIN',
+      success: 1,
+      callsign: 'b',
+      assist: false,
+      effect: { kind: 'ENERGY', sink: 'RESERVE', amount: 18 },
+    });
+    d.play({
+      kind: 'task',
+      role: 'ENGINEER',
+      robot: 'FUJIN',
+      success: 1,
+      callsign: 'c',
+      assist: false,
+      effect: { kind: 'REPAIR', repair: { type: 'CITY', cityId: 'kinki' }, amount: 15 },
+    });
     expect(fx.find((e) => e.kind === 'shield')!.to).toEqual({ kind: 'city', id: 'kanto' });
     expect(fx.find((e) => e.kind === 'energy')!.to).toEqual({ kind: 'reserve' });
     expect(fx.find((e) => e.kind === 'repair')!.to).toEqual({ kind: 'city', id: 'kinki' });
     expect(d.robots.FUJIN.clip).toBe('Guard');
     // A failed minigame shows nothing on the big screen.
     const n = fx.length;
-    d.play({ kind: 'task', role: 'GUNNER', robot: 'RAIJIN', success: 0, callsign: 'x', assist: false, effect: null });
+    d.play({
+      kind: 'task',
+      role: 'GUNNER',
+      robot: 'RAIJIN',
+      success: 0,
+      callsign: 'x',
+      assist: false,
+      effect: null,
+    });
     expect(fx).toHaveLength(n);
   });
 
@@ -107,7 +163,9 @@ describe('ArenaDirector', () => {
       { kind: 'city', id: 'kanto' },
       { kind: 'city', id: 'kyushu' },
     ]);
-    expect(fx.some((e) => e.kind === 'shield' && e.to?.kind === 'city' && e.to.id === 'kyushu')).toBe(true);
+    expect(
+      fx.some((e) => e.kind === 'shield' && e.to?.kind === 'city' && e.to.id === 'kyushu'),
+    ).toBe(true);
     expect(d.robots.RAIJIN.clip).toBe('HitReact');
   });
 
@@ -133,7 +191,13 @@ describe('ArenaDirector', () => {
     const f = new ArenaDirector();
     const fb: string[] = [];
     f.onBanner((b) => b && fb.push(b.textJa));
-    f.play({ kind: 'specialResolved', outcome: 'FAILED', damage: 0, bossId: 9, cityHits: [{ cityId: 'kanto', damage: 25, absorbed: 0, hpAfter: 75, destroyed: false }] });
+    f.play({
+      kind: 'specialResolved',
+      outcome: 'FAILED',
+      damage: 0,
+      bossId: 9,
+      cityHits: [{ cityId: 'kanto', damage: 25, absorbed: 0, hpAfter: 75, destroyed: false }],
+    });
     run(f, 0.1);
     expect(fb[0]).toBe('神雷風陣 発動失敗…');
     const r = new ArenaDirector();
@@ -164,10 +228,46 @@ describe('ArenaDirector', () => {
   it('effect targets resolve to world positions (boss, escorts over their target city)', () => {
     const ctx = {
       enemies: [
-        { id: 1, kind: 'BOSS' as const, hp: 1, hpMax: 1, ai: 'IDLE' as const, aiUntil: 0, weaken: 0, lastTargets: [], partHits: { CORE: 0, ARM: 0, LEG: 0 }, attacks: 0, training: false },
-        { id: 2, kind: 'SCOUT' as const, hp: 1, hpMax: 1, ai: 'TELEGRAPH' as const, aiUntil: 0, weaken: 0, lastTargets: [], partHits: { CORE: 0, ARM: 0, LEG: 0 }, attacks: 0, training: false },
+        {
+          id: 1,
+          kind: 'BOSS' as const,
+          hp: 1,
+          hpMax: 1,
+          ai: 'IDLE' as const,
+          aiUntil: 0,
+          weaken: 0,
+          lastTargets: [],
+          partHits: { CORE: 0, ARM: 0, LEG: 0 },
+          attacks: 0,
+          training: false,
+        },
+        {
+          id: 2,
+          kind: 'SCOUT' as const,
+          hp: 1,
+          hpMax: 1,
+          ai: 'TELEGRAPH' as const,
+          aiUntil: 0,
+          weaken: 0,
+          lastTargets: [],
+          partHits: { CORE: 0, ARM: 0, LEG: 0 },
+          attacks: 0,
+          training: false,
+        },
       ],
-      telegraphs: [{ id: 5, enemyId: 2, kind: 'BEAM' as const, targets: ['kanto' as const], direction: 'UP' as const, startsAt: 0, resolvesAt: 9000, damage: 10, delayed: false }],
+      telegraphs: [
+        {
+          id: 5,
+          enemyId: 2,
+          kind: 'BEAM' as const,
+          targets: ['kanto' as const],
+          direction: 'UP' as const,
+          startsAt: 0,
+          resolvesAt: 9000,
+          damage: 10,
+          delayed: false,
+        },
+      ],
     };
     expect(resolveFxTarget({ kind: 'enemy', id: 1 }, ctx)!.equals(BOSS_POSITION)).toBe(true);
     const escort = resolveFxTarget({ kind: 'enemy', id: 2 }, ctx)!;

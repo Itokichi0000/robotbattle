@@ -1,8 +1,27 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Role } from '@sats-wars/shared';
 import { CHEER_EMOJIS, ONE_LINE_RULES, ROLE_LABELS } from '@sats-wars/shared';
-import { ArenaDirector, ArenaScene, type Banner, type BannerTone, SfxEngine, type SfxName, cueFromEvent } from '@sats-wars/three-game';
-import { Cockpit, JapanMapMini, RaidHeader, ResultCard, RobotBars, type SeatState, ThreatLine, TrainingPanel, effectSentence, raidView } from '@sats-wars/ui';
+import {
+  ArenaDirector,
+  ArenaScene,
+  type Banner,
+  type BannerTone,
+  SfxEngine,
+  type SfxName,
+  cueFromEvent,
+} from '@sats-wars/three-game';
+import {
+  Cockpit,
+  JapanMapMini,
+  RaidHeader,
+  ResultCard,
+  RobotBars,
+  type SeatState,
+  ThreatLine,
+  TrainingPanel,
+  effectSentence,
+  raidView,
+} from '@sats-wars/ui';
 import { LocalRaid, PLAYER_ID, type SoloOptions } from './localRaid';
 
 const TONE: Record<BannerTone, string> = {
@@ -52,11 +71,15 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
           <li>
             <span className="n">3</span>
             <span>
-              <b>8分間</b>、⚠の予告を見て街を守り、NULL CORE を倒そう。最後は3つの席がそろうと合体技「神雷風陣」！
+              <b>8分間</b>、⚠の予告を見て街を守り、NULL CORE
+              を倒そう。最後は3つの席がそろうと合体技「神雷風陣」！
             </span>
           </li>
         </ol>
-        <p className="fine">オフライン体験版：会場では大画面とスマホに分かれます。支払いは発生しません（会場では1作戦 21 sats の出撃パス、または無料イベント）。</p>
+        <p className="fine">
+          オフライン体験版：会場では大画面とスマホに分かれます。支払いは発生しません（会場では1作戦
+          21 sats の出撃パス、または無料イベント）。
+        </p>
       </div>
       <form
         className="form"
@@ -67,18 +90,31 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
       >
         <label className="field">
           <span className="label">コールサイン（任意）</span>
-          <input value={callsign} onChange={(e) => setCallsign(e.target.value)} maxLength={20} placeholder="例：サトシ" />
+          <input
+            value={callsign}
+            onChange={(e) => setCallsign(e.target.value)}
+            maxLength={20}
+            placeholder="例：サトシ"
+          />
         </label>
         <div className="field">
           <span className="label">いっしょに乗る仲間（デモBOT）</span>
           <div className="seg" role="group" aria-label="仲間の数">
             {[0, 3, 5, 8, 12].map((n) => (
-              <button key={n} type="button" className={crew === n ? 'on' : ''} aria-pressed={crew === n} onClick={() => setCrew(n)}>
+              <button
+                key={n}
+                type="button"
+                className={crew === n ? 'on' : ''}
+                aria-pressed={crew === n}
+                onClick={() => setCrew(n)}
+              >
                 {n === 0 ? 'ひとり' : `${n}人`}
               </button>
             ))}
           </div>
-          <span className="hint">少人数のときは補佐AIが空いた席を手伝います（記録は「AI支援あり」）。</span>
+          <span className="hint">
+            少人数のときは補佐AIが空いた席を手伝います（記録は「AI支援あり」）。
+          </span>
         </div>
         <button type="submit" className="go" data-testid="solo-start">
           搭乗する
@@ -125,7 +161,10 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
   const [contextLost, setContextLost] = useState(false);
   const [seatPatch, setSeatPatch] = useState<Partial<SeatState>>({});
   const ids = useRef(0);
-  const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
+  const reducedMotion = useMemo(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    [],
+  );
 
   useEffect(() => {
     director.settings = { reducedMotion, shakeScale: 0.7, shortSpecials: false };
@@ -145,9 +184,13 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
         if (e.type === 'TASK_RESOLVED') {
           const d = e.data;
           const who = d.assist ? '補佐AI' : d.callsign;
-          pop(`${who} ${ROLE_LABELS[d.role].icon} ${d.success > 0 ? effectSentence(d.effect, L) : 'ミス'}`, d.pilotId === PLAYER_ID ? 'mine' : d.success > 0 ? 'good' : 'miss');
+          pop(
+            `${who} ${ROLE_LABELS[d.role].icon} ${d.success > 0 ? effectSentence(d.effect, L) : 'ミス'}`,
+            d.pilotId === PLAYER_ID ? 'mine' : d.success > 0 ? 'good' : 'miss',
+          );
         }
-        if (e.type === 'ENEMY_DEFEATED' && e.data.callsign) pop(`💥 ${e.data.callsign} が撃破！`, 'big');
+        if (e.type === 'ENEMY_DEFEATED' && e.data.callsign)
+          pop(`💥 ${e.data.callsign} が撃破！`, 'big');
         if (e.type === 'CITY_REBUILT') pop(`🏗 ${e.data.callsign} が再建！`, 'big');
         if (e.type === 'RAID_STATUS_CHANGED' && e.data.to === 'LOBBY_OPEN') setSeatPatch({});
       }),
@@ -199,9 +242,13 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
     task: null,
     ...seatPatch,
   };
-  const threats = Object.fromEntries(Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]));
+  const threats = Object.fromEntries(
+    Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]),
+  );
   const lobby = snap.status === 'LOBBY_OPEN';
-  const lobbyLeft = snap.lobbyEndsAt ? Math.max(0, Math.ceil((snap.lobbyEndsAt - Date.now()) / 1000)) : 0;
+  const lobbyLeft = snap.lobbyEndsAt
+    ? Math.max(0, Math.ceil((snap.lobbyEndsAt - Date.now()) / 1000))
+    : 0;
 
   return (
     <main className="game">
@@ -214,7 +261,10 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
             telegraphs={snap.telegraphs}
             threats={threats}
             cityMaxHp={snap.config.cityMaxHp}
-            glow={{ RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100), FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100) }}
+            glow={{
+              RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100),
+              FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
+            }}
             reserve={snap.reserveEnergy / 100}
             quality="medium"
             reducedMotion={reducedMotion}
@@ -232,7 +282,11 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
           </div>
           {banner && (
             <div className="hud-mid">
-              <div key={banner.textJa + banner.until} className="banner" style={{ borderColor: TONE[banner.tone] }}>
+              <div
+                key={banner.textJa + banner.until}
+                className="banner"
+                style={{ borderColor: TONE[banner.tone] }}
+              >
                 <div className="b1" style={{ color: TONE[banner.tone] }}>
                   {banner.textJa}
                 </div>
@@ -298,19 +352,36 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
         </div>
         <div className="phone-body swc-root">
           {snap.status === 'ENDED' && snap.result ? (
-            <p className="swc-wait">作戦終了。大画面の結果を見てね。まもなく次の作戦が始まります。</p>
+            <p className="swc-wait">
+              作戦終了。大画面の結果を見てね。まもなく次の作戦が始まります。
+            </p>
           ) : (
-            <Cockpit client={raid} raid={snap} seat={seat} onSeat={(p) => setSeatPatch((s) => ({ ...s, ...p }))} locale="ja" />
+            <Cockpit
+              client={raid}
+              raid={snap}
+              seat={seat}
+              onSeat={(p) => setSeatPatch((s) => ({ ...s, ...p }))}
+              locale="ja"
+            />
           )}
-          {(lobby || !seat.boarded) && <TrainingPanel locale="ja" initialRole={(seat.role ?? 'GUNNER') as Role} />}
+          {(lobby || !seat.boarded) && (
+            <TrainingPanel locale="ja" initialRole={(seat.role ?? 'GUNNER') as Role} />
+          )}
           <div className="cheers">
             {CHEER_EMOJIS.map((e) => (
-              <button key={e} type="button" onClick={() => raid.cheerAsPlayer(e)} aria-label={`応援 ${e}`}>
+              <button
+                key={e}
+                type="button"
+                onClick={() => raid.cheerAsPlayer(e)}
+                aria-label={`応援 ${e}`}
+              >
                 {e}
               </button>
             ))}
           </div>
-          <p className="fine">作戦 {raid.raids}回目 ・ 仲間 {options.crew}人</p>
+          <p className="fine">
+            作戦 {raid.raids}回目 ・ 仲間 {options.crew}人
+          </p>
         </div>
       </aside>
     </main>

@@ -68,11 +68,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     parsed.ADMIN_PASSWORD = randomBytes(9).toString('base64url');
     adminPasswordGenerated = true;
   }
-  if (prod && parsed.ADMIN_PASSWORD.length < 12) throw new Error('ADMIN_PASSWORD must be at least 12 characters in production');
+  if (prod && parsed.ADMIN_PASSWORD.length < 12)
+    throw new Error('ADMIN_PASSWORD must be at least 12 characters in production');
   const allowedOrigins = parsed.ALLOWED_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  if (prod && allowedOrigins.length === 0) throw new Error('ALLOWED_ORIGINS must be set in production');
+  if (prod && allowedOrigins.length === 0)
+    throw new Error('ALLOWED_ORIGINS must be set in production');
   // Mock login would let anyone mint pilots: never in production unless it is an explicit demo.
   if (prod && parsed.AUTH_MODE !== 'lnurl' && !parsed.DEMO_MODE) {
     throw new Error('AUTH_MODE must be lnurl in production (mock login is for DEMO_MODE only)');
@@ -82,12 +84,17 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error('LNURL-auth needs SERVER_PUBLIC_URL with https:// (wallets call it)');
   }
   if (parsed.PAYMENT_MODE === 'lnbits') {
-    const missing = ['LNBITS_URL', 'LNBITS_INVOICE_KEY', 'LNBITS_WEBHOOK_SECRET'].filter((k) => !(parsed as Record<string, unknown>)[k]);
+    const missing = ['LNBITS_URL', 'LNBITS_INVOICE_KEY', 'LNBITS_WEBHOOK_SECRET'].filter(
+      (k) => !(parsed as Record<string, unknown>)[k],
+    );
     if (missing.length) throw new Error(`PAYMENT_MODE=lnbits requires ${missing.join(', ')}`);
     if (!parsed.ALLOW_REAL_PAYMENTS) {
-      throw new Error('PAYMENT_MODE=lnbits requires ALLOW_REAL_PAYMENTS=true (explicit owner approval). See docs/PAYMENT_FLOW.md');
+      throw new Error(
+        'PAYMENT_MODE=lnbits requires ALLOW_REAL_PAYMENTS=true (explicit owner approval). See docs/PAYMENT_FLOW.md',
+      );
     }
-    if (prod && !/^https:\/\//.test(parsed.SERVER_PUBLIC_URL)) throw new Error('Real payments require an https:// SERVER_PUBLIC_URL');
+    if (prod && !/^https:\/\//.test(parsed.SERVER_PUBLIC_URL))
+      throw new Error('Real payments require an https:// SERVER_PUBLIC_URL');
   }
   return {
     ...parsed,

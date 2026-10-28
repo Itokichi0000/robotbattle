@@ -78,7 +78,8 @@ export async function admin(s: TestServer, token: string, body: Record<string, u
     headers: auth(token),
     payload: body,
   });
-  if (res.statusCode !== 200) throw new Error(`admin ${JSON.stringify(body)} -> ${res.statusCode} ${res.body}`);
+  if (res.statusCode !== 200)
+    throw new Error(`admin ${JSON.stringify(body)} -> ${res.statusCode} ${res.body}`);
   return res.json();
 }
 
@@ -89,7 +90,10 @@ export interface PilotHandle {
 }
 
 /** Guest pilot (no wallet). */
-export async function guest(s: TestServer, extra: { callsign?: string; deviceId?: string } = {}): Promise<PilotHandle> {
+export async function guest(
+  s: TestServer,
+  extra: { callsign?: string; deviceId?: string } = {},
+): Promise<PilotHandle> {
   const res = await s.inject({ method: 'POST', url: '/api/auth/guest', payload: extra });
   if (res.statusCode !== 200) throw new Error(`guest failed ${res.statusCode} ${res.body}`);
   const j = res.json();
@@ -97,16 +101,41 @@ export async function guest(s: TestServer, extra: { callsign?: string; deviceId?
 }
 
 export async function board(s: TestServer, p: PilotHandle, role = 'GUNNER', robot?: string) {
-  return s.inject({ method: 'POST', url: '/api/raids/current/board', headers: auth(p.token), payload: { role, ...(robot ? { robot } : {}) } });
+  return s.inject({
+    method: 'POST',
+    url: '/api/raids/current/board',
+    headers: auth(p.token),
+    payload: { role, ...(robot ? { robot } : {}) },
+  });
 }
 
-export async function requestTask(s: TestServer, p: PilotHandle, choice: Record<string, unknown> = {}) {
-  return s.inject({ method: 'POST', url: '/api/raids/current/tasks', headers: auth(p.token), payload: choice });
+export async function requestTask(
+  s: TestServer,
+  p: PilotHandle,
+  choice: Record<string, unknown> = {},
+) {
+  return s.inject({
+    method: 'POST',
+    url: '/api/raids/current/tasks',
+    headers: auth(p.token),
+    payload: choice,
+  });
 }
 
 let submitCounter = 0;
-export async function submitTask(s: TestServer, p: PilotHandle, taskId: string, input: unknown, clientSubmissionId = `sub-${++submitCounter}-${Date.now()}`) {
-  return s.inject({ method: 'POST', url: '/api/raids/current/tasks/submit', headers: auth(p.token), payload: { taskId, clientSubmissionId, input } });
+export async function submitTask(
+  s: TestServer,
+  p: PilotHandle,
+  taskId: string,
+  input: unknown,
+  clientSubmissionId = `sub-${++submitCounter}-${Date.now()}`,
+) {
+  return s.inject({
+    method: 'POST',
+    url: '/api/raids/current/tasks/submit',
+    headers: auth(p.token),
+    payload: { taskId, clientSubmissionId, input },
+  });
 }
 
 /** Lobby → start the raid now (admin). */

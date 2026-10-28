@@ -12,7 +12,10 @@ const REASON: Record<RaidResult['reason'], { ja: string; en: string }> = {
   CANCELLED: { ja: '中止', en: 'Cancelled' },
 };
 
-const MVP_ICON: Record<string, string> = { ...Object.fromEntries(Object.entries(ROLE_LABELS).map(([k, v]) => [k, v.icon])), SYNC: '🤝' };
+const MVP_ICON: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(ROLE_LABELS).map(([k, v]) => [k, v.icon])),
+  SYNC: '🤝',
+};
 const MVP_NAME: Record<string, { ja: string; en: string }> = {
   GUNNER: { ja: '最優秀砲撃手', en: 'Top gunner' },
   GUARDIAN: { ja: '最優秀守護者', en: 'Top guardian' },
@@ -22,7 +25,15 @@ const MVP_NAME: Record<string, { ja: string; en: string }> = {
 };
 
 /** End-of-raid card: outcome, score breakdown and MVPs (names already moderated by the server). */
-export function ResultCard({ result, locale, bestScore }: { result: RaidResult; locale: 'ja' | 'en'; bestScore?: number | null }) {
+export function ResultCard({
+  result,
+  locale,
+  bestScore,
+}: {
+  result: RaidResult;
+  locale: 'ja' | 'en';
+  bestScore?: number | null;
+}) {
   const L: Lx = (ja, en) => (locale === 'ja' ? ja : en);
   const won = result.outcome === 'SUCCEEDED';
   const s = result.score;
@@ -34,10 +45,18 @@ export function ResultCard({ result, locale, bestScore }: { result: RaidResult; 
   ];
   return (
     <section className={`swc-resultcard ${won ? 'is-win' : 'is-lose'}`} data-testid="result-card">
-      <h2 className="swc-result-title">{won ? L('地球防衛 成功！', 'EARTH DEFENDED!') : result.outcome === 'CANCELLED' ? L('作戦中止', 'Raid cancelled') : L('防衛失敗…', 'Defence failed…')}</h2>
+      <h2 className="swc-result-title">
+        {won
+          ? L('地球防衛 成功！', 'EARTH DEFENDED!')
+          : result.outcome === 'CANCELLED'
+            ? L('作戦中止', 'Raid cancelled')
+            : L('防衛失敗…', 'Defence failed…')}
+      </h2>
       <p className="swc-muted">
         {L(REASON[result.reason].ja, REASON[result.reason].en)}
-        {result.clearTimeMs !== null ? L(`（${fmtClock(result.clearTimeMs)}で撃破）`, ` (at ${fmtClock(result.clearTimeMs)})`) : ''}
+        {result.clearTimeMs !== null
+          ? L(`（${fmtClock(result.clearTimeMs)}で撃破）`, ` (at ${fmtClock(result.clearTimeMs)})`)
+          : ''}
         {' ・ '}
         {L(`残った都市 ${result.survivingCities}/8`, `${result.survivingCities}/8 cities left`)}
         {' ・ '}
@@ -48,7 +67,14 @@ export function ResultCard({ result, locale, bestScore }: { result: RaidResult; 
           {Math.round(s.total)}
         </span>
         <span className="swc-muted">{L('チームスコア', 'Team score')}</span>
-        {bestScore != null && <span className="swc-muted">{L(`同じルールの最高 ${Math.round(bestScore)}`, `Best with same rules ${Math.round(bestScore)}`)}</span>}
+        {bestScore != null && (
+          <span className="swc-muted">
+            {L(
+              `同じルールの最高 ${Math.round(bestScore)}`,
+              `Best with same rules ${Math.round(bestScore)}`,
+            )}
+          </span>
+        )}
       </div>
       <dl className="swc-score-rows">
         {rows.map(([k, v]) => (
@@ -63,7 +89,8 @@ export function ResultCard({ result, locale, bestScore }: { result: RaidResult; 
           {Object.entries(result.mvps).map(([k, m]) =>
             m ? (
               <li key={k}>
-                <span aria-hidden="true">{MVP_ICON[k]}</span> {L(MVP_NAME[k]!.ja, MVP_NAME[k]!.en)}：<b>{m.callsign}</b>
+                <span aria-hidden="true">{MVP_ICON[k]}</span> {L(MVP_NAME[k]!.ja, MVP_NAME[k]!.en)}
+                ：<b>{m.callsign}</b>
               </li>
             ) : null,
           )}

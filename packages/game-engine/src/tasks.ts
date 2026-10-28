@@ -1,4 +1,11 @@
-import type { Direction, EnergySink, RouterNode, TaskDifficulty, TaskInput, TaskParams } from '@sats-wars/shared';
+import type {
+  Direction,
+  EnergySink,
+  RouterNode,
+  TaskDifficulty,
+  TaskInput,
+  TaskParams,
+} from '@sats-wars/shared';
 import { DIRECTIONS, ENERGY_SINKS } from '@sats-wars/shared';
 
 /**
@@ -44,11 +51,21 @@ export function gunnerParams(rand: Rand, difficulty: TaskDifficulty, assistWidth
   };
 }
 
-export function guardianParams(rand: Rand, difficulty: TaskDifficulty, direction: Direction): TaskParams {
+export function guardianParams(
+  rand: Rand,
+  difficulty: TaskDifficulty,
+  direction: Direction,
+): TaskParams {
   const easy = difficulty === 'EASY';
   const width = easy ? 0.3 : 0.18;
   const from = round2(0.45 + rand() * (0.5 - width));
-  return { role: 'GUARDIAN', direction, periodMs: Math.round((easy ? 2400 : 1700) + rand() * 500), greenFrom: from, greenTo: round2(from + width) };
+  return {
+    role: 'GUARDIAN',
+    direction,
+    periodMs: Math.round((easy ? 2400 : 1700) + rand() * 500),
+    greenFrom: from,
+    greenTo: round2(from + width),
+  };
 }
 
 /**
@@ -57,7 +74,12 @@ export function guardianParams(rand: Rand, difficulty: TaskDifficulty, direction
  * relays, avoiding blocked nodes, within `maxHops` links.
  * EASY: 3 nodes (source → relay → sink). NORMAL: 7 nodes (+1 blocked node when jammed).
  */
-export function routerParams(rand: Rand, difficulty: TaskDifficulty, suggested: EnergySink, jammed: boolean): TaskParams {
+export function routerParams(
+  rand: Rand,
+  difficulty: TaskDifficulty,
+  suggested: EnergySink,
+  jammed: boolean,
+): TaskParams {
   const nodes: RouterNode[] = [{ id: 0, x: 0.08, y: 0.5, kind: 'SOURCE' }];
   const edges: Array<[number, number]> = [];
   if (difficulty === 'EASY') {
@@ -70,12 +92,26 @@ export function routerParams(rand: Rand, difficulty: TaskDifficulty, suggested: 
   const sinkIds = {} as Record<EnergySink, number>;
   // Two relays (upper/lower) in one column, blocked decoys in a column nearer the
   // destinations: fixed lanes keep every node far enough apart to tap on a phone.
-  const relayA = nodes.push({ id: nodes.length, x: 0.36 + rand() * 0.08, y: 0.16 + rand() * 0.12, kind: 'RELAY' }) - 1;
-  const relayB = nodes.push({ id: nodes.length, x: 0.36 + rand() * 0.08, y: 0.72 + rand() * 0.12, kind: 'RELAY' }) - 1;
+  const relayA =
+    nodes.push({
+      id: nodes.length,
+      x: 0.36 + rand() * 0.08,
+      y: 0.16 + rand() * 0.12,
+      kind: 'RELAY',
+    }) - 1;
+  const relayB =
+    nodes.push({
+      id: nodes.length,
+      x: 0.36 + rand() * 0.08,
+      y: 0.72 + rand() * 0.12,
+      kind: 'RELAY',
+    }) - 1;
   const blocked: number[] = [];
   const blockedY = jammed ? [0.32, 0.68] : [0.4 + rand() * 0.2];
-  for (const y of blockedY) blocked.push(nodes.push({ id: nodes.length, x: 0.64 + rand() * 0.04, y, kind: 'BLOCKED' }) - 1);
-  for (const s of ENERGY_SINKS) sinkIds[s] = nodes.push({ id: nodes.length, x: 0.92, y: sinkY[s], kind: 'SINK', sink: s }) - 1;
+  for (const y of blockedY)
+    blocked.push(nodes.push({ id: nodes.length, x: 0.64 + rand() * 0.04, y, kind: 'BLOCKED' }) - 1);
+  for (const s of ENERGY_SINKS)
+    sinkIds[s] = nodes.push({ id: nodes.length, x: 0.92, y: sinkY[s], kind: 'SINK', sink: s }) - 1;
   edges.push([0, relayA], [0, relayB], [relayA, relayB]);
   // Upper relay reaches Raijin directly, lower reaches the reserve; Fujin needs a choice.
   edges.push([relayA, sinkIds.RAIJIN], [relayB, sinkIds.RESERVE]);
@@ -105,7 +141,8 @@ export function randomDirection(rand: Rand): Direction {
 // Scoring
 // ---------------------------------------------------------------------------
 
-export type Evaluation = { valid: true; success: number; sink?: EnergySink } | { valid: false; reason: string };
+export type Evaluation =
+  { valid: true; success: number; sink?: EnergySink } | { valid: false; reason: string };
 
 /** Shortest number of links from the source to `target`, avoiding blocked nodes (BFS). */
 export function shortestHops(p: Extract<TaskParams, { role: 'ROUTER' }>, target: number): number {
@@ -130,13 +167,23 @@ export function shortestHops(p: Extract<TaskParams, { role: 'ROUTER' }>, target:
  * was handed out: a client claiming to have stopped the reticle later than
  * that (plus latency slack) is rejected.
  */
-export function evaluateTask(params: TaskParams, input: TaskInput, elapsedMs: number, durationMs: number): Evaluation {
+export function evaluateTask(
+  params: TaskParams,
+  input: TaskInput,
+  elapsedMs: number,
+  durationMs: number,
+): Evaluation {
   if (params.role !== input.role) return { valid: false, reason: 'role mismatch' };
   const slack = 2500;
   switch (params.role) {
     case 'GUNNER': {
       const i = input as Extract<TaskInput, { role: 'GUNNER' }>;
-      if (!Number.isFinite(i.stopAtMs) || i.stopAtMs < 0 || i.stopAtMs > durationMs || i.stopAtMs > elapsedMs + slack) {
+      if (
+        !Number.isFinite(i.stopAtMs) ||
+        i.stopAtMs < 0 ||
+        i.stopAtMs > durationMs ||
+        i.stopAtMs > elapsedMs + slack
+      ) {
         return { valid: false, reason: 'stop time out of range' };
       }
       const d = Math.abs(reticleAt(params, i.stopAtMs) - params.ringCenter);
@@ -147,22 +194,34 @@ export function evaluateTask(params: TaskParams, input: TaskInput, elapsedMs: nu
     case 'GUARDIAN': {
       const i = input as Extract<TaskInput, { role: 'GUARDIAN' }>;
       if (!DIRECTIONS.includes(i.direction)) return { valid: false, reason: 'bad direction' };
-      if (!Number.isFinite(i.releaseAtMs) || i.releaseAtMs < 0 || i.releaseAtMs > durationMs || i.releaseAtMs > elapsedMs + slack) {
+      if (
+        !Number.isFinite(i.releaseAtMs) ||
+        i.releaseAtMs < 0 ||
+        i.releaseAtMs > durationMs ||
+        i.releaseAtMs > elapsedMs + slack
+      ) {
         return { valid: false, reason: 'release time out of range' };
       }
       if (i.direction !== params.direction) return { valid: true, success: 0 };
       const g = gaugeAt(params, i.releaseAtMs);
-      const success = g >= params.greenFrom && g <= params.greenTo ? 1 : g >= params.greenFrom - 0.12 && g <= params.greenTo + 0.12 ? 0.6 : 0.3;
+      const success =
+        g >= params.greenFrom && g <= params.greenTo
+          ? 1
+          : g >= params.greenFrom - 0.12 && g <= params.greenTo + 0.12
+            ? 0.6
+            : 0.3;
       return { valid: true, success };
     }
     case 'ROUTER': {
       const i = input as Extract<TaskInput, { role: 'ROUTER' }>;
       const path = i.path;
-      if (!Array.isArray(path) || path.length < 2 || path.length > params.nodes.length) return { valid: false, reason: 'bad path' };
+      if (!Array.isArray(path) || path.length < 2 || path.length > params.nodes.length)
+        return { valid: false, reason: 'bad path' };
       const byId = new Map(params.nodes.map((n) => [n.id, n]));
       if (path[0] !== 0) return { valid: false, reason: 'must start at the source' };
       const end = byId.get(path[path.length - 1]!);
-      if (!end || end.kind !== 'SINK' || !end.sink) return { valid: false, reason: 'must end at a robot or the reserve' };
+      if (!end || end.kind !== 'SINK' || !end.sink)
+        return { valid: false, reason: 'must end at a robot or the reserve' };
       const seen = new Set<number>();
       for (let k = 0; k < path.length; k++) {
         const id = path[k]!;
@@ -171,11 +230,13 @@ export function evaluateTask(params: TaskParams, input: TaskInput, elapsedMs: nu
         seen.add(id);
         if (k > 0) {
           const prev = path[k - 1]!;
-          if (!params.edges.some(([a, b]) => (a === prev && b === id) || (a === id && b === prev))) return { valid: false, reason: 'no link' };
+          if (!params.edges.some(([a, b]) => (a === prev && b === id) || (a === id && b === prev)))
+            return { valid: false, reason: 'no link' };
         }
         // Through a blocked node or too long: the energy does not arrive.
         if (node.kind === 'BLOCKED') return { valid: true, success: 0, sink: end.sink };
-        if (k > 0 && k < path.length - 1 && node.kind !== 'RELAY') return { valid: false, reason: 'only relays in between' };
+        if (k > 0 && k < path.length - 1 && node.kind !== 'RELAY')
+          return { valid: false, reason: 'only relays in between' };
       }
       const hops = path.length - 1;
       if (hops > params.maxHops) return { valid: true, success: 0, sink: end.sink };
@@ -185,7 +246,11 @@ export function evaluateTask(params: TaskParams, input: TaskInput, elapsedMs: nu
     case 'ENGINEER': {
       const i = input as Extract<TaskInput, { role: 'ENGINEER' }>;
       const seq = i.sequence;
-      if (!Array.isArray(seq) || seq.length > params.switchCount || seq.some((x) => !Number.isInteger(x) || x < 0 || x >= params.switchCount)) {
+      if (
+        !Array.isArray(seq) ||
+        seq.length > params.switchCount ||
+        seq.some((x) => !Number.isInteger(x) || x < 0 || x >= params.switchCount)
+      ) {
         return { valid: false, reason: 'bad sequence' };
       }
       let ok = 0;
@@ -213,7 +278,13 @@ function timeFor(u: number, phase: number, periodMs: number, minMs: number): num
  * skilled pilots hit the ring / pick the shortest route / press in order,
  * others miss by a little or a lot. Deterministic for a given `rand`.
  */
-export function solveTask(params: TaskParams, skill: number, rand: Rand, minMs = 700, preferSink?: EnergySink): TaskInput {
+export function solveTask(
+  params: TaskParams,
+  skill: number,
+  rand: Rand,
+  minMs = 700,
+  preferSink?: EnergySink,
+): TaskInput {
   const good = rand() < skill;
   switch (params.role) {
     case 'GUNNER': {
@@ -224,7 +295,8 @@ export function solveTask(params: TaskParams, skill: number, rand: Rand, minMs =
     }
     case 'GUARDIAN': {
       const mid = (params.greenFrom + params.greenTo) / 2;
-      const direction = good || rand() < 0.5 ? params.direction : DIRECTIONS.find((d) => d !== params.direction)!;
+      const direction =
+        good || rand() < 0.5 ? params.direction : DIRECTIONS.find((d) => d !== params.direction)!;
       let t = timeFor(mid, 0, params.periodMs, minMs);
       if (!good) t += Math.round((0.15 + rand() * 0.3) * params.periodMs);
       return { role: 'GUARDIAN', direction, releaseAtMs: t };
@@ -232,7 +304,8 @@ export function solveTask(params: TaskParams, skill: number, rand: Rand, minMs =
     case 'ROUTER': {
       const sinks = params.nodes.filter((n) => n.kind === 'SINK');
       const blocked = new Set(params.nodes.filter((n) => n.kind === 'BLOCKED').map((n) => n.id));
-      const target = sinks.find((n) => n.sink === preferSink) ?? sinks[Math.floor(rand() * sinks.length)]!;
+      const target =
+        sinks.find((n) => n.sink === preferSink) ?? sinks[Math.floor(rand() * sinks.length)]!;
       // BFS with parents for the shortest valid route.
       const parent = new Map<number, number>([[0, -1]]);
       const queue = [0];
@@ -267,4 +340,3 @@ export function solveTask(params: TaskParams, skill: number, rand: Rand, minMs =
     }
   }
 }
-

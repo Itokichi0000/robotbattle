@@ -220,9 +220,19 @@ export const taskRequestSchema = z.object({
 
 export const taskInputSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('GUNNER'), stopAtMs: z.number().min(0).max(600_000) }),
-  z.object({ role: z.literal('GUARDIAN'), direction: z.enum(DIRECTIONS), releaseAtMs: z.number().min(0).max(600_000) }),
-  z.object({ role: z.literal('ROUTER'), path: z.array(z.number().int().min(0).max(64)).min(1).max(16) }),
-  z.object({ role: z.literal('ENGINEER'), sequence: z.array(z.number().int().min(0).max(64)).max(16) }),
+  z.object({
+    role: z.literal('GUARDIAN'),
+    direction: z.enum(DIRECTIONS),
+    releaseAtMs: z.number().min(0).max(600_000),
+  }),
+  z.object({
+    role: z.literal('ROUTER'),
+    path: z.array(z.number().int().min(0).max(64)).min(1).max(16),
+  }),
+  z.object({
+    role: z.literal('ENGINEER'),
+    sequence: z.array(z.number().int().min(0).max(64)).max(16),
+  }),
 ]);
 
 export const taskSubmitSchema = z.object({
@@ -331,7 +341,10 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  'raid:subscribe': (req: SubscribeRequest, ack?: (res: { ok: boolean; error?: string }) => void) => void;
+  'raid:subscribe': (
+    req: SubscribeRequest,
+    ack?: (res: { ok: boolean; error?: string }) => void,
+  ) => void;
   'raid:request-snapshot': (ack?: (snapshot: PublicRaidSnapshot) => void) => void;
   'time:sync': (clientSentAt: number, ack: (serverTime: number) => void) => void;
   'arena:status': (status: ArenaStatus) => void;

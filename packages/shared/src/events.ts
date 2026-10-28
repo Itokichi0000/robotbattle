@@ -90,7 +90,10 @@ export type GameEvent =
         robotHit: RobotId | null;
       }
     >
-  | Base<'ENEMY_DEFEATED', { enemyId: number; kind: EnemyKind; pilotId: string | null; callsign: string | null }>
+  | Base<
+      'ENEMY_DEFEATED',
+      { enemyId: number; kind: EnemyKind; pilotId: string | null; callsign: string | null }
+    >
   | Base<
       'TASK_RESOLVED',
       {
@@ -112,7 +115,12 @@ export type GameEvent =
   | Base<'SPECIAL_PROGRESS', { role: Role; pilotId: string; callsign: string }>
   | Base<
       'SPECIAL_RESOLVED',
-      { outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED'; damage: number; cityHits: CityHit[]; contributors: string[] }
+      {
+        outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED';
+        damage: number;
+        cityHits: CityHit[];
+        contributors: string[];
+      }
     >
   | Base<'RAID_ENDED', { result: RaidResult }>;
 

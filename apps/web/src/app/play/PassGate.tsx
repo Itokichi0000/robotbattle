@@ -63,9 +63,22 @@ export function PassGate({
   if (!snap.paymentsEnabled) {
     return (
       <div className="sw-panel p-4 text-center" data-testid="payments-paused">
-        <p className="font-bold">{L('ただいま出撃パスの受付を一時停止しています', 'Raid passes are paused right now')}</p>
-        <p className="text-sm text-muted">{L('スタッフにスポンサーパスのコードをもらってください', 'Ask the staff for a sponsored pass code')}</p>
-        <SponsoredForm code={code} setCode={setCode} busy={busy} onSubmit={() => run(async () => redeem(code, onGranted))} L={L} />
+        <p className="font-bold">
+          {L('ただいま出撃パスの受付を一時停止しています', 'Raid passes are paused right now')}
+        </p>
+        <p className="text-sm text-muted">
+          {L(
+            'スタッフにスポンサーパスのコードをもらってください',
+            'Ask the staff for a sponsored pass code',
+          )}
+        </p>
+        <SponsoredForm
+          code={code}
+          setCode={setCode}
+          busy={busy}
+          onSubmit={() => run(async () => redeem(code, onGranted))}
+          L={L}
+        />
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       </div>
     );
@@ -73,32 +86,67 @@ export function PassGate({
 
   return (
     <div className="sw-panel flex flex-col gap-3 p-4" data-testid="pass-gate">
-      <h3 className="sw-display text-lg">{L(`出撃パス ${snap.ticketPriceSats} sats`, `Raid pass ${snap.ticketPriceSats} sats`)}</h3>
+      <h3 className="sw-display text-lg">
+        {L(`出撃パス ${snap.ticketPriceSats} sats`, `Raid pass ${snap.ticketPriceSats} sats`)}
+      </h3>
       <p className="text-sm text-muted">
-        {L('1回払うとこの作戦の間ずっと全部の席で遊べます。払った額で強くはなりません。', 'One payment covers this whole raid, any seat. Paying more never makes you stronger.')}
+        {L(
+          '1回払うとこの作戦の間ずっと全部の席で遊べます。払った額で強くはなりません。',
+          'One payment covers this whole raid, any seat. Paying more never makes you stronger.',
+        )}
       </p>
-      <p className="text-xs text-muted">{locale === 'ja' ? SATS_EXPLAINER.ja : SATS_EXPLAINER.en}</p>
-      {!invoice || invoice.status === 'EXPIRED' || invoice.status === 'FAILED' || invoice.status === 'CANCELLED' ? (
+      <p className="text-xs text-muted">
+        {locale === 'ja' ? SATS_EXPLAINER.ja : SATS_EXPLAINER.en}
+      </p>
+      {!invoice ||
+      invoice.status === 'EXPIRED' ||
+      invoice.status === 'FAILED' ||
+      invoice.status === 'CANCELLED' ? (
         <button
           type="button"
           className="sw-btn bg-amber px-4 text-lg text-navy"
           disabled={busy}
-          onClick={() => run(async () => setInvoice(await api<InvoiceResponse>('/api/raids/current/pass/invoice', { body: {} })))}
+          onClick={() =>
+            run(async () =>
+              setInvoice(
+                await api<InvoiceResponse>('/api/raids/current/pass/invoice', { body: {} }),
+              ),
+            )
+          }
           data-testid="buy-pass"
         >
-          ⚡ {L(`${snap.ticketPriceSats} sats で出撃パス`, `Get a pass for ${snap.ticketPriceSats} sats`)}
+          ⚡{' '}
+          {L(
+            `${snap.ticketPriceSats} sats で出撃パス`,
+            `Get a pass for ${snap.ticketPriceSats} sats`,
+          )}
         </button>
       ) : (
         <div className="flex flex-col items-center gap-2" data-testid="invoice">
           {isMock ? (
-            <p className="rounded bg-amber/20 px-2 py-1 text-sm font-bold text-amber-light">{L('テストモード：本物の支払いではありません', 'TEST MODE: not a real payment')}</p>
+            <p className="rounded bg-amber/20 px-2 py-1 text-sm font-bold text-amber-light">
+              {L('テストモード：本物の支払いではありません', 'TEST MODE: not a real payment')}
+            </p>
           ) : (
-            <QrCode url={`lightning:${invoice.bolt11}`} size={240} caption={false} label={L('Lightning請求書', 'Lightning invoice')} />
+            <QrCode
+              url={`lightning:${invoice.bolt11}`}
+              size={240}
+              caption={false}
+              label={L('Lightning請求書', 'Lightning invoice')}
+            />
           )}
-          <p className="text-sm">{L('ウォレットで支払うと自動で出撃できます', 'Pay with your wallet; boarding opens automatically')}</p>
+          <p className="text-sm">
+            {L(
+              'ウォレットで支払うと自動で出撃できます',
+              'Pay with your wallet; boarding opens automatically',
+            )}
+          </p>
           {!isMock && (
             <div className="flex gap-2">
-              <a className="sw-btn sw-focus bg-teal px-4 py-3 text-navy" href={`lightning:${invoice.bolt11}`}>
+              <a
+                className="sw-btn sw-focus bg-teal px-4 py-3 text-navy"
+                href={`lightning:${invoice.bolt11}`}
+              >
                 {L('ウォレットを開く', 'Open wallet')}
               </a>
               <button
@@ -119,7 +167,9 @@ export function PassGate({
               disabled={busy}
               onClick={() =>
                 run(async () => {
-                  const st = await api<InvoiceStatusResponse>('/api/dev/mock-pay', { body: { invoiceId: invoice.invoiceId } });
+                  const st = await api<InvoiceStatusResponse>('/api/dev/mock-pay', {
+                    body: { invoiceId: invoice.invoiceId },
+                  });
                   if (st.entitled) onGranted();
                 })
               }
@@ -128,12 +178,22 @@ export function PassGate({
               {L('テスト支払い（無料）', 'Test payment (free)')}
             </button>
           )}
-          <p className="text-xs text-muted">{L('支払いの確認には数秒かかることがあります', 'Confirmation can take a few seconds')}</p>
+          <p className="text-xs text-muted">
+            {L('支払いの確認には数秒かかることがあります', 'Confirmation can take a few seconds')}
+          </p>
         </div>
       )}
       <details>
-        <summary className="cursor-pointer text-sm text-muted">{L('スポンサーパスのコードを持っている', 'I have a sponsored pass code')}</summary>
-        <SponsoredForm code={code} setCode={setCode} busy={busy} onSubmit={() => run(async () => redeem(code, onGranted))} L={L} />
+        <summary className="cursor-pointer text-sm text-muted">
+          {L('スポンサーパスのコードを持っている', 'I have a sponsored pass code')}
+        </summary>
+        <SponsoredForm
+          code={code}
+          setCode={setCode}
+          busy={busy}
+          onSubmit={() => run(async () => redeem(code, onGranted))}
+          L={L}
+        />
       </details>
       {error && (
         <p className="text-sm text-danger" role="alert">
@@ -180,7 +240,11 @@ function SponsoredForm({
         autoComplete="off"
         data-testid="sponsored-code"
       />
-      <button type="submit" className="sw-btn bg-teal px-4 text-navy" disabled={busy || code.trim().length < 4}>
+      <button
+        type="submit"
+        className="sw-btn bg-teal px-4 text-navy"
+        disabled={busy || code.trim().length < 4}
+      >
         {L('使う', 'Use')}
       </button>
     </form>

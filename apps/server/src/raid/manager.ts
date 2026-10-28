@@ -1,5 +1,13 @@
 import { randomInt } from 'node:crypto';
-import type { Broadcast, GameConfig, GameEvent, PassMode, PaymentMode, PublicRaidSnapshot, RaidState } from '@sats-wars/shared';
+import type {
+  Broadcast,
+  GameConfig,
+  GameEvent,
+  PassMode,
+  PaymentMode,
+  PublicRaidSnapshot,
+  RaidState,
+} from '@sats-wars/shared';
 import { DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
@@ -7,7 +15,15 @@ import { AppError } from '../errors';
 import { newId } from '../auth/tokens';
 import { RaidRuntime } from './runtime';
 
-export const ADMIN_LIFECYCLE_COMMANDS = ['OPEN_LOBBY', 'START', 'PAUSE', 'RESUME', 'END', 'CANCEL', 'NEXT_RAID'] as const;
+export const ADMIN_LIFECYCLE_COMMANDS = [
+  'OPEN_LOBBY',
+  'START',
+  'PAUSE',
+  'RESUME',
+  'END',
+  'CANCEL',
+  'NEXT_RAID',
+] as const;
 export type AdminLifecycleCommand = (typeof ADMIN_LIFECYCLE_COMMANDS)[number];
 
 /** Pilots count as "online" while seen within this window. */
@@ -92,11 +108,14 @@ export class RaidManager {
 
   init(): this {
     const unfinished = this.repo.latestUnfinishedRaid();
-    const rt = unfinished ? RaidRuntime.recover(this.repo, unfinished.id, this.clock, this.opts.wall) : this.createRuntime();
+    const rt = unfinished
+      ? RaidRuntime.recover(this.repo, unfinished.id, this.clock, this.opts.wall)
+      : this.createRuntime();
     this.bind(rt);
     if (rt.state.status === 'CREATED' && this.autoLoop) this.openLobby('auto-loop');
     if (rt.state.status === 'LOBBY_OPEN') this.lobbyOpenedAt = this.opts.wall.now();
-    if (rt.state.status === 'PAUSED' && rt.state.pauseReason === 'SERVER_RESTART') this.restartPausedAt = this.opts.wall.now();
+    if (rt.state.status === 'PAUSED' && rt.state.pauseReason === 'SERVER_RESTART')
+      this.restartPausedAt = this.opts.wall.now();
     return this;
   }
 
@@ -166,24 +185,44 @@ export class RaidManager {
     this.set('broadcast', b, actor, b ? 'BROADCAST' : 'BROADCAST_CLEAR');
   }
   setSpeed(x: number, actor: string): void {
-    if (!this.opts.demoMode) throw new AppError('FORBIDDEN', 'time scale is only available in DEMO_MODE');
+    if (!this.opts.demoMode)
+      throw new AppError('FORBIDDEN', 'time scale is only available in DEMO_MODE');
     this.clock.setSpeed(x);
-    this.repo.audit(actor, 'SET_TIME_SCALE', this.runtime.raidId, { speed: x }, this.opts.wall.now());
+    this.repo.audit(
+      actor,
+      'SET_TIME_SCALE',
+      this.runtime.raidId,
+      { speed: x },
+      this.opts.wall.now(),
+    );
   }
 
   get nextConfig(): GameConfig {
     const saved = this.repo.getSetting<GameConfig>('nextConfig');
     const parsed = saved ? gameConfigSchema.safeParse(saved) : null;
     if (parsed?.success) return parsed.data;
-    return gameConfigSchema.parse({ ...structuredClone(DEFAULT_GAME_CONFIG), ...this.opts.configOverrides });
+    return gameConfigSchema.parse({
+      ...structuredClone(DEFAULT_GAME_CONFIG),
+      ...this.opts.configOverrides,
+    });
   }
 
   setNextConfig(input: unknown, actor: string): GameConfig {
     const parsed = gameConfigSchema.safeParse(input);
-    if (!parsed.success) throw new AppError('BAD_REQUEST', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    if (!parsed.success)
+      throw new AppError(
+        'BAD_REQUEST',
+        parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      );
     const before = this.nextConfig;
     this.repo.setSetting('nextConfig', parsed.data);
-    this.repo.audit(actor, 'SET_NEXT_CONFIG', null, { before, after: parsed.data }, this.opts.wall.now());
+    this.repo.audit(
+      actor,
+      'SET_NEXT_CONFIG',
+      null,
+      { before, after: parsed.data },
+      this.opts.wall.now(),
+    );
     return parsed.data;
   }
 
@@ -206,8 +245,16 @@ export class RaidManager {
   }
 
   lobbyEndsAt(): number | null {
-    if (this.runtime.state.status !== 'LOBBY_OPEN' || this.lobbyOpenedAt === null || this.firstPilotAt === null) return null;
-    return Math.max(this.lobbyOpenedAt + this.runtime.state.config.lobbySeconds * 1000, this.firstPilotAt + LOBBY_AFTER_FIRST_PILOT_MS);
+    if (
+      this.runtime.state.status !== 'LOBBY_OPEN' ||
+      this.lobbyOpenedAt === null ||
+      this.firstPilotAt === null
+    )
+      return null;
+    return Math.max(
+      this.lobbyOpenedAt + this.runtime.state.config.lobbySeconds * 1000,
+      this.firstPilotAt + LOBBY_AFTER_FIRST_PILOT_MS,
+    );
   }
 
   // ---- listeners -------------------------------------------------------------------
@@ -242,7 +289,8 @@ export class RaidManager {
     if (s.status === 'LOBBY_OPEN') {
       if (this.firstPilotAt === null && Object.keys(s.pilots).length > 0) this.firstPilotAt = now;
       const ends = this.lobbyEndsAt();
-      if (this.autoLoop && ends !== null && now >= ends) this.dispatchAudited({ type: 'START' }, 'auto-loop', 'START');
+      if (this.autoLoop && ends !== null && now >= ends)
+        this.dispatchAudited({ type: 'START' }, 'auto-loop', 'START');
       return;
     }
     if (s.status !== 'ENDED' && s.status !== 'CANCELLED') {
@@ -263,10 +311,17 @@ export class RaidManager {
       this.restartPausedAt = null;
       return;
     }
-    if (!this.autoLoop || this.opts.wall.now() - this.restartPausedAt < RESTART_AUTO_RESUME_MS) return;
+    if (!this.autoLoop || this.opts.wall.now() - this.restartPausedAt < RESTART_AUTO_RESUME_MS)
+      return;
     this.restartPausedAt = null;
     this.runtime.dispatch({ type: 'RESUME' });
-    this.repo.audit('auto-loop', 'RESUME', this.runtime.raidId, { reason: 'SERVER_RESTART' }, this.opts.wall.now());
+    this.repo.audit(
+      'auto-loop',
+      'RESUME',
+      this.runtime.raidId,
+      { reason: 'SERVER_RESTART' },
+      this.opts.wall.now(),
+    );
   }
 
   pilotsOnline(): number {
@@ -283,7 +338,8 @@ export class RaidManager {
 
   bestScore(): number | null {
     const hash = this.runtime.state.configHash;
-    if (!this.bestScoreCache || this.bestScoreCache.hash !== hash) this.bestScoreCache = { hash, value: this.repo.bestScore(hash) };
+    if (!this.bestScoreCache || this.bestScoreCache.hash !== hash)
+      this.bestScoreCache = { hash, value: this.repo.bestScore(hash) };
     return this.bestScoreCache.value;
   }
 
@@ -312,9 +368,13 @@ export class RaidManager {
     switch (cmd) {
       case 'NEXT_RAID':
         if (before === 'LIVE' || before === 'PAUSED') {
-          throw new AppError('INVALID_COMMAND', '進行中の作戦を先に終了または中止してください / End or cancel the running raid first');
+          throw new AppError(
+            'INVALID_COMMAND',
+            '進行中の作戦を先に終了または中止してください / End or cancel the running raid first',
+          );
         }
-        if (before === 'CREATED' || before === 'LOBBY_OPEN') this.runtime.dispatch({ type: 'CANCEL', reason: 'REPLACED' });
+        if (before === 'CREATED' || before === 'LOBBY_OPEN')
+          this.runtime.dispatch({ type: 'CANCEL', reason: 'REPLACED' });
         this.startNextRaid(actor);
         return;
       case 'OPEN_LOBBY':
@@ -333,11 +393,22 @@ export class RaidManager {
     }
   }
 
-  private dispatchAudited(input: Parameters<RaidRuntime['dispatch']>[0], actor: string, action: string, reason?: string): void {
+  private dispatchAudited(
+    input: Parameters<RaidRuntime['dispatch']>[0],
+    actor: string,
+    action: string,
+    reason?: string,
+  ): void {
     const before = this.runtime.state.status;
     const r = this.runtime.dispatch(input);
     if (r.outcome.kind === 'rejected') throw new AppError('INVALID_COMMAND', r.outcome.reason);
-    this.repo.audit(actor, action, this.runtime.raidId, { before, after: this.runtime.state.status, reason }, this.opts.wall.now());
+    this.repo.audit(
+      actor,
+      action,
+      this.runtime.raidId,
+      { before, after: this.runtime.state.status, reason },
+      this.opts.wall.now(),
+    );
   }
 
   private openLobby(actor: string): void {
@@ -355,7 +426,15 @@ export class RaidManager {
   }
 
   private createRuntime(): RaidRuntime {
-    const rt = RaidRuntime.create(this.repo, newId('raid'), this.opts.eventId, this.nextConfig, randomInt(1, 2 ** 31 - 1), this.clock, this.opts.wall);
+    const rt = RaidRuntime.create(
+      this.repo,
+      newId('raid'),
+      this.opts.eventId,
+      this.nextConfig,
+      randomInt(1, 2 ** 31 - 1),
+      this.clock,
+      this.opts.wall,
+    );
     return rt;
   }
 

@@ -50,7 +50,11 @@ export function robotWorldPosition(teamId: TeamId, height = 2): THREE.Vector3 {
  * Escort drones float over the city they are aiming at (so the threat reads on
  * the map); idle ones wait in a row near the boss. Deterministic from state.
  */
-export function enemyWorldPosition(e: Pick<Enemy, 'id' | 'kind'>, telegraphs: Telegraph[], index = 0): THREE.Vector3 {
+export function enemyWorldPosition(
+  e: Pick<Enemy, 'id' | 'kind'>,
+  telegraphs: Telegraph[],
+  index = 0,
+): THREE.Vector3 {
   if (e.kind === 'BOSS') return BOSS_POSITION.clone();
   const tg = telegraphs.find((t) => t.enemyId === e.id);
   if (tg && tg.targets[0]) return regionWorldPosition(tg.targets[0], 2.6);
@@ -82,7 +86,10 @@ export function resolveFxTarget(t: FxTarget | null, ctx: TargetContext): THREE.V
   }
 }
 
-export const CAMERA_PRESETS: Record<CameraPresetName, { position: [number, number, number]; target: [number, number, number] }> = {
+export const CAMERA_PRESETS: Record<
+  CameraPresetName,
+  { position: [number, number, number]; target: [number, number, number] }
+> = {
   intro: { position: [0, 13, 27], target: [0, 5, -4] },
   overview: { position: [0, 6.5, 19], target: [0, 5.2, -4.5] },
   boss: { position: [0, 8, 4], target: [0, 10, -17] },

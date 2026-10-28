@@ -163,7 +163,9 @@ export function ArenaApp() {
     RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100),
     FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
   };
-  const threats = Object.fromEntries(Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]));
+  const threats = Object.fromEntries(
+    Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]),
+  );
 
   return (
     <div

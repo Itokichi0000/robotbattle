@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import type { Role, TaskInput, TaskParams } from '@sats-wars/shared';
 import { ROLES, ROLE_LABELS } from '@sats-wars/shared';
-import { engineerParams, evaluateTask, guardianParams, gunnerParams, randomDirection, routerParams } from '@sats-wars/game-engine';
+import {
+  engineerParams,
+  evaluateTask,
+  guardianParams,
+  gunnerParams,
+  randomDirection,
+  routerParams,
+} from '@sats-wars/game-engine';
 import { successLabel } from './board';
 import { Minigame } from './minigames';
 
@@ -23,7 +30,13 @@ function practiceParams(role: Role): TaskParams {
  * Practice any seat while waiting. Runs entirely on this device and changes
  * nothing in the raid (no server call, no effect, no score).
  */
-export function TrainingPanel({ locale, initialRole = 'GUNNER' }: { locale: 'ja' | 'en'; initialRole?: Role }) {
+export function TrainingPanel({
+  locale,
+  initialRole = 'GUNNER',
+}: {
+  locale: 'ja' | 'en';
+  initialRole?: Role;
+}) {
   const L = (ja: string, en: string) => (locale === 'ja' ? ja : en);
   const [role, setRole] = useState<Role>(initialRole);
   const [round, setRound] = useState(0);
@@ -43,10 +56,19 @@ export function TrainingPanel({ locale, initialRole = 'GUNNER' }: { locale: 'ja'
   };
   return (
     <section className="swc-training" data-testid="training">
-      <h3 className="swc-h">{L('練習モード（本番には影響しません）', 'Practice (does not affect the raid)')}</h3>
+      <h3 className="swc-h">
+        {L('練習モード（本番には影響しません）', 'Practice (does not affect the raid)')}
+      </h3>
       <div className="swc-tabs" role="tablist">
         {ROLES.map((r) => (
-          <button key={r} type="button" role="tab" aria-selected={role === r} className={`swc-tab${role === r ? ' is-on' : ''}`} onClick={() => next(r)}>
+          <button
+            key={r}
+            type="button"
+            role="tab"
+            aria-selected={role === r}
+            className={`swc-tab${role === r ? ' is-on' : ''}`}
+            onClick={() => next(r)}
+          >
             {ROLE_LABELS[r].icon} {L(ROLE_LABELS[r].ja, ROLE_LABELS[r].en)}
           </button>
         ))}

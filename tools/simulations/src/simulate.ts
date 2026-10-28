@@ -1,6 +1,12 @@
 import type { GameConfig, RaidResult, RaidState, Role } from '@sats-wars/shared';
 import { makeGameConfig } from '@sats-wars/shared';
-import { type EngineCommand, createRaidState, mulberry32, reduce, solveTask } from '@sats-wars/game-engine';
+import {
+  type EngineCommand,
+  createRaidState,
+  mulberry32,
+  reduce,
+  solveTask,
+} from '@sats-wars/game-engine';
 
 /**
  * Raid simulator: N simulated pilots play the real engine for 8 minutes.
@@ -35,7 +41,18 @@ export interface RaidSim {
   shieldAbsorbed: number;
 }
 
-const SPREAD: Role[] = ['GUNNER', 'GUARDIAN', 'ROUTER', 'GUNNER', 'ENGINEER', 'GUARDIAN', 'GUNNER', 'ROUTER', 'GUARDIAN', 'ENGINEER'];
+const SPREAD: Role[] = [
+  'GUNNER',
+  'GUARDIAN',
+  'ROUTER',
+  'GUNNER',
+  'ENGINEER',
+  'GUARDIAN',
+  'GUNNER',
+  'ROUTER',
+  'GUARDIAN',
+  'ENGINEER',
+];
 const NO_SUPPORT: Role[] = ['GUNNER', 'GUARDIAN'];
 
 export function roleFor(mix: RoleMix, i: number): Role {
@@ -53,12 +70,30 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
     state = r.state;
     return r;
   };
-  for (let i = 0; i < o.pilots; i++) run({ type: 'BOARD', t: 0, pilotId: `p${i}`, callsign: `P${i}`, role: roleFor(o.mix, i), isBot: true });
+  for (let i = 0; i < o.pilots; i++)
+    run({
+      type: 'BOARD',
+      t: 0,
+      pilotId: `p${i}`,
+      callsign: `P${i}`,
+      role: roleFor(o.mix, i),
+      isBot: true,
+    });
   run({ type: 'OPEN_LOBBY', t: 0 });
   run({ type: 'START', t: 0 });
 
-  type Plan = { at: number; pilotId: string; step: 'request' | 'submit'; taskId?: string; input?: unknown };
-  const queue: Plan[] = Array.from({ length: o.pilots }, (_, i) => ({ at: 1500 + rand() * 4000, pilotId: `p${i}`, step: 'request' as const }));
+  type Plan = {
+    at: number;
+    pilotId: string;
+    step: 'request' | 'submit';
+    taskId?: string;
+    input?: unknown;
+  };
+  const queue: Plan[] = Array.from({ length: o.pilots }, (_, i) => ({
+    at: 1500 + rand() * 4000,
+    pilotId: `p${i}`,
+    step: 'request' as const,
+  }));
   const end = config.matchSeconds * 1000 + 1;
   let guard = 0;
   while (state.status === 'LIVE' && guard++ < 200_000) {
@@ -72,16 +107,40 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
         const task = r.outcome.task;
         const sink = task.target.kind === 'ENERGY' ? task.target.sink : undefined;
         const input = solveTask(task.params, o.skill, rand, 900, sink);
-        const playMs = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 2500 + rand() * 3000;
-        queue.push({ at: t + playMs + 150, pilotId: next.pilotId, step: 'submit', taskId: task.taskId, input });
+        const playMs =
+          'stopAtMs' in input
+            ? input.stopAtMs
+            : 'releaseAtMs' in input
+              ? input.releaseAtMs
+              : 2500 + rand() * 3000;
+        queue.push({
+          at: t + playMs + 150,
+          pilotId: next.pilotId,
+          step: 'submit',
+          taskId: task.taskId,
+          input,
+        });
       } else if (r.outcome.kind === 'task') {
-        const wait = r.outcome.code === 'COOLDOWN' ? Math.max(500, r.outcome.cooldownUntil - state.gameMs) : 3000;
+        const wait =
+          r.outcome.code === 'COOLDOWN'
+            ? Math.max(500, r.outcome.cooldownUntil - state.gameMs)
+            : 3000;
         queue.push({ at: t + wait + rand() * 1500, pilotId: next.pilotId, step: 'request' });
       }
     } else {
-      run({ type: 'SUBMIT_TASK', t, pilotId: next.pilotId, taskId: next.taskId!, input: next.input as never });
+      run({
+        type: 'SUBMIT_TASK',
+        t,
+        pilotId: next.pilotId,
+        taskId: next.taskId!,
+        input: next.input as never,
+      });
       // Cooldown, then a few seconds to look at the screen and decide.
-      queue.push({ at: t + config.normalActionCooldownSeconds * 1000 + 1000 + rand() * 3000, pilotId: next.pilotId, step: 'request' });
+      queue.push({
+        at: t + config.normalActionCooldownSeconds * 1000 + 1000 + rand() * 3000,
+        pilotId: next.pilotId,
+        step: 'request',
+      });
     }
   }
   if (state.status === 'LIVE') run({ type: 'TICK', t: end });

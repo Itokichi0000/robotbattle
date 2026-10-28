@@ -54,7 +54,9 @@ export class RaidConnection {
     });
     this.socket.on('disconnect', () => this.setState('reconnecting'));
     this.socket.io.on('reconnect_attempt', () => this.setState('reconnecting'));
-    this.socket.on('connect_error', () => this.setState(this.state === 'connecting' ? 'offline' : 'reconnecting'));
+    this.socket.on('connect_error', () =>
+      this.setState(this.state === 'connecting' ? 'offline' : 'reconnecting'),
+    );
     this.socket.on('raid:snapshot', (snap) => this.store.applySnapshot(snap));
     this.socket.on('raid:event', (e: GameEvent) => {
       if (this.store.applyEvent(e, this.serverNow()) === 'gap') this.resync();
@@ -74,7 +76,11 @@ export class RaidConnection {
   }
 
   private subscribe(): void {
-    this.socket.emit('raid:subscribe', { role: this.role, ...(this.token ? { token: this.token } : {}) }, () => undefined);
+    this.socket.emit(
+      'raid:subscribe',
+      { role: this.role, ...(this.token ? { token: this.token } : {}) },
+      () => undefined,
+    );
   }
 
   /** Re-subscribe after login/logout so the pilot room follows the session. */

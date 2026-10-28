@@ -1,4 +1,14 @@
-import type { AttackKind, EnemyKind, EnergySink, RaidPhase, RaidStatus, Role, SpecialStatus, TaskErrorCode, Weakpoint } from './state';
+import type {
+  AttackKind,
+  EnemyKind,
+  EnergySink,
+  RaidPhase,
+  RaidStatus,
+  Role,
+  SpecialStatus,
+  TaskErrorCode,
+  Weakpoint,
+} from './state';
 
 export type Locale = 'ja' | 'en';
 export const LOCALES: Locale[] = ['ja', 'en'];
@@ -25,11 +35,42 @@ export const PHASE_LABELS: Record<RaidPhase, L> = {
   FAILED: { ja: '防衛失敗', en: 'Defence failed' },
 };
 
-export const ROLE_LABELS: Record<Role, L & { icon: string; robotJa: string; doJa: string; doEn: string }> = {
-  GUNNER: { ja: '砲撃席', en: 'Gunner', icon: '🎯', robotJa: '雷神', doJa: '敵の弱点を撃つ', doEn: "Hit the enemy's weak points" },
-  GUARDIAN: { ja: '防衛席', en: 'Guardian', icon: '🛡', robotJa: '風神', doJa: '街をシールドで守る', doEn: 'Shield the cities' },
-  ROUTER: { ja: '電力接続席', en: 'Router', icon: '🔌', robotJa: '両機', doJa: 'エネルギーの経路をつなぐ', doEn: 'Route energy' },
-  ENGINEER: { ja: '整備席', en: 'Engineer', icon: '🔧', robotJa: '両機', doJa: '機体と街を修理する', doEn: 'Repair robots and cities' },
+export const ROLE_LABELS: Record<
+  Role,
+  L & { icon: string; robotJa: string; doJa: string; doEn: string }
+> = {
+  GUNNER: {
+    ja: '砲撃席',
+    en: 'Gunner',
+    icon: '🎯',
+    robotJa: '雷神',
+    doJa: '敵の弱点を撃つ',
+    doEn: "Hit the enemy's weak points",
+  },
+  GUARDIAN: {
+    ja: '防衛席',
+    en: 'Guardian',
+    icon: '🛡',
+    robotJa: '風神',
+    doJa: '街をシールドで守る',
+    doEn: 'Shield the cities',
+  },
+  ROUTER: {
+    ja: '電力接続席',
+    en: 'Router',
+    icon: '🔌',
+    robotJa: '両機',
+    doJa: 'エネルギーの経路をつなぐ',
+    doEn: 'Route energy',
+  },
+  ENGINEER: {
+    ja: '整備席',
+    en: 'Engineer',
+    icon: '🔧',
+    robotJa: '両機',
+    doJa: '機体と街を修理する',
+    doEn: 'Repair robots and cities',
+  },
 };
 
 export const ENEMY_LABELS: Record<EnemyKind, L & { icon: string }> = {
@@ -51,13 +92,23 @@ export const ATTACK_LABELS: Record<AttackKind, L> = {
 export const WEAKPOINT_LABELS: Record<Weakpoint, L & { hintJa: string; hintEn: string }> = {
   CORE: { ja: 'コア', en: 'Core', hintJa: '大ダメージ', hintEn: 'Big damage' },
   ARM: { ja: '腕', en: 'Arm', hintJa: '敵の攻撃を弱める', hintEn: 'Weakens its attacks' },
-  LEG: { ja: '脚', en: 'Leg', hintJa: '次の攻撃を3秒遅らせる', hintEn: 'Delays its next attack by 3 s' },
+  LEG: {
+    ja: '脚',
+    en: 'Leg',
+    hintJa: '次の攻撃を3秒遅らせる',
+    hintEn: 'Delays its next attack by 3 s',
+  },
 };
 
 export const SINK_LABELS: Record<EnergySink, L & { hintJa: string; hintEn: string }> = {
   RAIJIN: { ja: '雷神', en: 'Raijin', hintJa: '砲撃が強くなる', hintEn: 'Stronger shots' },
   FUJIN: { ja: '風神', en: 'Fujin', hintJa: 'シールドが強くなる', hintEn: 'Stronger shields' },
-  RESERVE: { ja: '予備電源', en: 'Reserve', hintJa: '最終技「神雷風陣」に必要', hintEn: 'Needed for the final special' },
+  RESERVE: {
+    ja: '予備電源',
+    en: 'Reserve',
+    hintJa: '最終技「神雷風陣」に必要',
+    hintEn: 'Needed for the final special',
+  },
 };
 
 export const SPECIAL_LABELS: Record<SpecialStatus, L> = {
@@ -139,7 +190,12 @@ export const TITLE_LABELS: Record<string, L> = {
   VETERAN: { ja: '歴戦の勇士', en: 'Veteran' },
 };
 
-export function rankFor(points: number): { index: number; ja: string; en: string; nextAt: number | null } {
+export function rankFor(points: number): {
+  index: number;
+  ja: string;
+  en: string;
+  nextAt: number | null;
+} {
   let index = 0;
   for (let i = 0; i < RANKS.length; i++) if (points >= RANKS[i]!.minPoints) index = i;
   const r = RANKS[index]!;

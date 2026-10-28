@@ -5,7 +5,10 @@ import { useEffect, useRef, useState } from 'react';
  * The server scores the input against the same clock origin (task hand-out),
  * with latency slack, so the client only reports "when" and never "how well".
  */
-export function useElapsed(running: boolean, offsetMs = 0): { elapsed: number; startRef: React.RefObject<number> } {
+export function useElapsed(
+  running: boolean,
+  offsetMs = 0,
+): { elapsed: number; startRef: React.RefObject<number> } {
   // offsetMs: time already spent on this task (e.g. the page was reloaded mid-task).
   const startRef = useRef<number>(performance.now() - offsetMs);
   const [elapsed, setElapsed] = useState(0);

@@ -79,8 +79,20 @@ export function ArenaScene(props: ArenaSceneProps) {
       <CameraRig director={director} reducedMotion={reducedMotion} />
       <LightingRig shadows={q.shadows} />
       <ArenaStage stars={q.stars} />
-      <MapOverlay cities={props.cities} threats={props.threats} cityMaxHp={props.cityMaxHp} director={director} reducedMotion={reducedMotion} locale={props.locale} />
-      <Enemies enemies={props.enemies} telegraphs={props.telegraphs} director={director} reducedMotion={reducedMotion} />
+      <MapOverlay
+        cities={props.cities}
+        threats={props.threats}
+        cityMaxHp={props.cityMaxHp}
+        director={director}
+        reducedMotion={reducedMotion}
+        locale={props.locale}
+      />
+      <Enemies
+        enemies={props.enemies}
+        telegraphs={props.telegraphs}
+        director={director}
+        reducedMotion={reducedMotion}
+      />
       <ReserveReactor level={props.reserve} />
       <ModelRobotActor
         teamId="RAIJIN"
@@ -96,7 +108,12 @@ export function ArenaScene(props: ArenaSceneProps) {
         energyRatio={glow.FUJIN}
         onModelError={props.onModelError}
       />
-      <Effects director={director} maxParticles={q.particles} reducedMotion={reducedMotion} targets={() => live.current} />
+      <Effects
+        director={director}
+        maxParticles={q.particles}
+        reducedMotion={reducedMotion}
+        targets={() => live.current}
+      />
       <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
     </Canvas>
   );
@@ -113,7 +130,11 @@ function ReserveReactor({ level }: { level: number }) {
       </mesh>
       <mesh position={[0, h / 2, 0]}>
         <cylinderGeometry args={[0.45, 0.45, h, 24]} />
-        <meshStandardMaterial color="#FFE27A" emissive={new THREE.Color('#FFB020')} emissiveIntensity={0.6 + level} />
+        <meshStandardMaterial
+          color="#FFE27A"
+          emissive={new THREE.Color('#FFB020')}
+          emissiveIntensity={0.6 + level}
+        />
       </mesh>
     </group>
   );

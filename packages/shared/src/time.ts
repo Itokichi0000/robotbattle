@@ -21,7 +21,10 @@ export interface ClockAnchor {
 }
 
 /** Estimate current clock values from an anchor and the client's estimate of server time. */
-export function estimateClock(anchor: ClockAnchor, serverNow: number): { clockMs: number; gameMs: number } {
+export function estimateClock(
+  anchor: ClockAnchor,
+  serverNow: number,
+): { clockMs: number; gameMs: number } {
   if (!anchor.running) return { clockMs: anchor.clockMs, gameMs: anchor.gameMs };
   const elapsed = Math.max(0, serverNow - anchor.serverTime);
   return { clockMs: anchor.clockMs + elapsed, gameMs: anchor.gameMs + elapsed };

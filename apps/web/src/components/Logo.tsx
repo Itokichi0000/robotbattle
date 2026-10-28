@@ -42,8 +42,11 @@ export function Logo({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
         <div className={`sw-display font-black whitespace-nowrap ${title} tracking-wider`}>
           <span className="text-amber">SATS</span> <span className="text-teal">WARS</span>
         </div>
-        <div className={`${sub} mt-1 font-bold whitespace-nowrap tracking-[0.3em] text-off/90 ${size === 'sm' ? 'hidden sm:block' : ''}`}>
-          EARTH DEFENSE <span className="text-amber">雷神</span>×<span className="text-teal">風神</span>
+        <div
+          className={`${sub} mt-1 font-bold whitespace-nowrap tracking-[0.3em] text-off/90 ${size === 'sm' ? 'hidden sm:block' : ''}`}
+        >
+          EARTH DEFENSE <span className="text-amber">雷神</span>×
+          <span className="text-teal">風神</span>
         </div>
       </div>
     </div>

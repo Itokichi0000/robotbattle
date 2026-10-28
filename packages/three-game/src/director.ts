@@ -1,8 +1,27 @@
-import type { CityHit, EnemyKind, RaidPhase, RaidResult, RegionId, Role, TaskEffect, TeamId } from '@sats-wars/shared';
+import type {
+  CityHit,
+  EnemyKind,
+  RaidPhase,
+  RaidResult,
+  RegionId,
+  Role,
+  TaskEffect,
+  TeamId,
+} from '@sats-wars/shared';
 import { CITY_INFO, ENEMY_LABELS, PHASE_LABELS, ROLE_LABELS } from '@sats-wars/shared';
 
 /** Animation clip names shared by procedural robots and GLB assets. */
-export const CLIP_NAMES = ['Idle', 'Intro', 'AttackLight', 'AttackHeavy', 'Guard', 'HitReact', 'Special', 'Victory', 'Defeat'] as const;
+export const CLIP_NAMES = [
+  'Idle',
+  'Intro',
+  'AttackLight',
+  'AttackHeavy',
+  'Guard',
+  'HitReact',
+  'Special',
+  'Victory',
+  'Defeat',
+] as const;
 export type ClipName = (typeof CLIP_NAMES)[number];
 
 /** Seconds; looping clips ignore duration. Attacks are short because many pilots act at once. */
@@ -22,7 +41,11 @@ export const LOOPING_CLIPS: ReadonlySet<ClipName> = new Set(['Idle', 'Victory'])
 export type CameraPresetName = 'intro' | 'overview' | 'boss' | 'mapFocus' | 'special' | 'final';
 
 /** What an effect points at; the scene resolves it to a world position. */
-export type FxTarget = { kind: 'city'; id: RegionId } | { kind: 'enemy'; id: number } | { kind: 'robot'; id: TeamId } | { kind: 'reserve' };
+export type FxTarget =
+  | { kind: 'city'; id: RegionId }
+  | { kind: 'enemy'; id: number }
+  | { kind: 'robot'; id: TeamId }
+  | { kind: 'reserve' };
 
 export type EffectKind =
   | 'impact'
@@ -55,7 +78,17 @@ export interface DirectorEffect {
 export type BannerTone = 'ally' | 'enemy' | 'neutral' | 'RAIJIN' | 'FUJIN';
 
 export interface Banner {
-  kind: 'opening' | 'phase' | 'boss' | 'special' | 'specialResult' | 'cityLost' | 'cityRebuilt' | 'defeated' | 'victory' | 'defeat';
+  kind:
+    | 'opening'
+    | 'phase'
+    | 'boss'
+    | 'special'
+    | 'specialResult'
+    | 'cityLost'
+    | 'cityRebuilt'
+    | 'defeated'
+    | 'victory'
+    | 'defeat';
   tone: BannerTone;
   textJa: string;
   textEn: string;
@@ -77,15 +110,36 @@ export type Cue =
   | { kind: 'phase'; phase: RaidPhase }
   | { kind: 'boarded'; callsign: string; robot: TeamId }
   | { kind: 'telegraph'; enemyId: number; enemyKind: EnemyKind; targets: RegionId[] }
-  | { kind: 'task'; role: Role; robot: TeamId; success: number; effect: TaskEffect | null; callsign: string; assist: boolean }
-  | { kind: 'attack'; enemyId: number; enemyKind: EnemyKind; hits: CityHit[]; robotHit: TeamId | null; jam: boolean }
+  | {
+      kind: 'task';
+      role: Role;
+      robot: TeamId;
+      success: number;
+      effect: TaskEffect | null;
+      callsign: string;
+      assist: boolean;
+    }
+  | {
+      kind: 'attack';
+      enemyId: number;
+      enemyKind: EnemyKind;
+      hits: CityHit[];
+      robotHit: TeamId | null;
+      jam: boolean;
+    }
   | { kind: 'enemySpawned'; enemyId: number; enemyKind: EnemyKind }
   | { kind: 'enemyDefeated'; enemyId: number; enemyKind: EnemyKind; callsign: string | null }
   | { kind: 'cityDestroyed'; cityId: RegionId }
   | { kind: 'cityRebuilt'; cityId: RegionId; callsign: string }
   | { kind: 'specialOpen' }
   | { kind: 'specialProgress'; role: Role; callsign: string }
-  | { kind: 'specialResolved'; outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED'; damage: number; bossId: number | null; cityHits: CityHit[] }
+  | {
+      kind: 'specialResolved';
+      outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED';
+      damage: number;
+      bossId: number | null;
+      cityHits: CityHit[];
+    }
   | { kind: 'raidEnded'; result: RaidResult }
   | { kind: 'cheer' };
 
@@ -164,7 +218,8 @@ export class ArenaDirector {
       case 'phase':
         return this.playPhase(cue.phase);
       case 'boarded':
-        if (this.throttle('boarded', 0.6)) this.emitEffect('chargeAura', cue.robot, null, { kind: 'robot', id: cue.robot }, 0.4);
+        if (this.throttle('boarded', 0.6))
+          this.emitEffect('chargeAura', cue.robot, null, { kind: 'robot', id: cue.robot }, 0.4);
         return;
       case 'telegraph':
         if (this.throttle('sfx-alarm', 1.5)) this.sound('tick', null);
@@ -219,7 +274,13 @@ export class ArenaDirector {
       case 'cheer':
         if (this.throttle('cheer', 0.5)) {
           this.cheerSide = 1 - this.cheerSide;
-          this.emitEffect('chargeAura', GODS[this.cheerSide]!, null, { kind: 'robot', id: GODS[this.cheerSide]! }, 0.35);
+          this.emitEffect(
+            'chargeAura',
+            GODS[this.cheerSide]!,
+            null,
+            { kind: 'robot', id: GODS[this.cheerSide]! },
+            0.35,
+          );
         }
         return;
     }
@@ -234,7 +295,12 @@ export class ArenaDirector {
     if (this.banner && this.banner.until <= this.time) this.setBanner(null);
     for (const t of GODS) {
       const r = this.robots[t];
-      if (!LOOPING_CLIPS.has(r.clip) && r.clip !== 'Defeat' && this.time - r.start > CLIP_DURATION[r.clip] + 0.05) this.setClip(t, 'Idle', 0);
+      if (
+        !LOOPING_CLIPS.has(r.clip) &&
+        r.clip !== 'Defeat' &&
+        this.time - r.start > CLIP_DURATION[r.clip] + 0.05
+      )
+        this.setClip(t, 'Idle', 0);
     }
   }
 
@@ -289,7 +355,13 @@ export class ArenaDirector {
   }
 
   private playPhase(phase: RaidPhase): void {
-    if (phase === 'INTRO_TRAINING' || phase === 'SUCCEEDED' || phase === 'FAILED' || phase === 'LOBBY') return;
+    if (
+      phase === 'INTRO_TRAINING' ||
+      phase === 'SUCCEEDED' ||
+      phase === 'FAILED' ||
+      phase === 'LOBBY'
+    )
+      return;
     const s = this.startTime();
     const label = PHASE_LABELS[phase];
     this.at(s, () => {
@@ -300,7 +372,8 @@ export class ArenaDirector {
         textJa: label.ja,
         textEn: label.en.toUpperCase(),
         subJa: phase === 'FINAL_WAVE' ? 'ボスのコアが硬化！ 神雷風陣で突破せよ' : undefined,
-        subEn: phase === 'FINAL_WAVE' ? 'The core hardens — break it with Shinrai Fujin' : undefined,
+        subEn:
+          phase === 'FINAL_WAVE' ? 'The core hardens — break it with Shinrai Fujin' : undefined,
         until: s + 2.2,
       });
     });
@@ -331,7 +404,10 @@ export class ArenaDirector {
   private playTask(cue: Extract<Cue, { kind: 'task' }>): void {
     if (cue.success <= 0 || !cue.effect) return;
     const e = cue.effect;
-    const free = (t: TeamId) => !this.busy && (this.robots[t].clip === 'Idle' || this.time - this.robots[t].start > CLIP_DURATION[this.robots[t].clip] * 0.6);
+    const free = (t: TeamId) =>
+      !this.busy &&
+      (this.robots[t].clip === 'Idle' ||
+        this.time - this.robots[t].start > CLIP_DURATION[this.robots[t].clip] * 0.6);
     switch (e.kind) {
       case 'DAMAGE': {
         const to: FxTarget = { kind: 'enemy', id: e.enemyId };
@@ -341,28 +417,42 @@ export class ArenaDirector {
           this.sound('thunder', 'RAIJIN');
         }
         if (this.throttle('hit-RAIJIN', 0.08)) this.sound('hit', 'RAIJIN');
-        if (free('RAIJIN')) this.setClip('RAIJIN', e.weakpoint === 'CORE' ? 'AttackHeavy' : 'AttackLight', 0.25);
+        if (free('RAIJIN'))
+          this.setClip('RAIJIN', e.weakpoint === 'CORE' ? 'AttackHeavy' : 'AttackLight', 0.25);
         return;
       }
       case 'SHIELD': {
         const to: FxTarget = { kind: 'city', id: e.cityId };
         this.emitEffect('shield', 'FUJIN', null, to, 1);
-        if (this.throttle('sig-FUJIN', 0.3)) this.emitEffect('wind', 'FUJIN', { kind: 'robot', id: 'FUJIN' }, to, 0.9);
+        if (this.throttle('sig-FUJIN', 0.3))
+          this.emitEffect('wind', 'FUJIN', { kind: 'robot', id: 'FUJIN' }, to, 0.9);
         if (this.throttle('sfx-shield', 0.15)) this.sound('shield', 'FUJIN');
         if (free('FUJIN')) this.setClip('FUJIN', 'Guard', 0);
         return;
       }
       case 'ENERGY': {
-        const to: FxTarget = e.sink === 'RESERVE' ? { kind: 'reserve' } : { kind: 'robot', id: e.sink };
+        const to: FxTarget =
+          e.sink === 'RESERVE' ? { kind: 'reserve' } : { kind: 'robot', id: e.sink };
         if (this.throttle('energy', 0.25)) {
-          this.emitEffect('energy', e.sink === 'FUJIN' ? 'FUJIN' : 'RAIJIN', { kind: 'reserve' }, to, 0.8);
+          this.emitEffect(
+            'energy',
+            e.sink === 'FUJIN' ? 'FUJIN' : 'RAIJIN',
+            { kind: 'reserve' },
+            to,
+            0.8,
+          );
           this.sound('charge', null);
         }
         return;
       }
       case 'REPAIR': {
         const r = e.repair;
-        const to: FxTarget = r.type === 'ROBOT' ? { kind: 'robot', id: r.robot } : r.type === 'CITY' ? { kind: 'city', id: r.cityId } : { kind: 'reserve' };
+        const to: FxTarget =
+          r.type === 'ROBOT'
+            ? { kind: 'robot', id: r.robot }
+            : r.type === 'CITY'
+              ? { kind: 'city', id: r.cityId }
+              : { kind: 'reserve' };
         if (this.throttle('repair', 0.25)) this.emitEffect('repair', cue.robot, null, to, 0.8);
         return;
       }
@@ -375,7 +465,8 @@ export class ArenaDirector {
       const to: FxTarget = { kind: 'city', id: h.cityId };
       this.emitEffect('beam', null, from, to, h.damage > 0 ? 1 : 0.5);
       if (h.absorbed > 0) this.emitEffect('shield', 'FUJIN', null, to, 1.1);
-      if (h.damage > 0) this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
+      if (h.damage > 0)
+        this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
     }
     if (cue.robotHit && !this.busy) this.setClip(cue.robotHit, 'HitReact', 0);
     if (cue.hits.some((h) => h.damage > 0) && this.throttle('attack-shake', 0.4)) {
@@ -385,7 +476,13 @@ export class ArenaDirector {
   }
 
   private playDefeated(cue: Extract<Cue, { kind: 'enemyDefeated' }>): void {
-    this.emitEffect('explosion', null, null, { kind: 'enemy', id: cue.enemyId }, cue.enemyKind === 'BOSS' ? 2 : 1);
+    this.emitEffect(
+      'explosion',
+      null,
+      null,
+      { kind: 'enemy', id: cue.enemyId },
+      cue.enemyKind === 'BOSS' ? 2 : 1,
+    );
     this.sound('ko', null);
     this.addShake(cue.enemyKind === 'BOSS' ? 0.9 : 0.3);
     if (cue.enemyKind === 'BOSS') return;
@@ -426,7 +523,8 @@ export class ArenaDirector {
     const boss: FxTarget | null = cue.bossId !== null ? { kind: 'enemy', id: cue.bossId } : null;
     if (cue.outcome === 'FAILED') {
       this.at(s, () => {
-        for (const h of cue.cityHits) this.emitEffect('beam', null, boss, { kind: 'city', id: h.cityId }, 1.2);
+        for (const h of cue.cityHits)
+          this.emitEffect('beam', null, boss, { kind: 'city', id: h.cityId }, 1.2);
         this.addShake(0.7);
         this.sound('ko', null);
         for (const t of GODS) this.setClip(t, 'HitReact', 0);
@@ -491,14 +589,26 @@ export class ArenaDirector {
               until: s + 30,
             }
           : r.outcome === 'CANCELLED'
-            ? { kind: 'defeat', tone: 'neutral', textJa: '作戦中止', textEn: 'RAID CANCELLED', until: s + 30 }
+            ? {
+                kind: 'defeat',
+                tone: 'neutral',
+                textJa: '作戦中止',
+                textEn: 'RAID CANCELLED',
+                until: s + 30,
+              }
             : {
                 kind: 'defeat',
                 tone: 'enemy',
                 textJa: '防衛失敗…',
                 textEn: 'DEFENCE FAILED…',
-                subJa: r.reason === 'CITIES_LOST' ? `都市が${r.survivingCities}つに・次の作戦で取り返そう` : '時間切れ・次の作戦で取り返そう',
-                subEn: r.reason === 'CITIES_LOST' ? 'Too many cities lost — next raid!' : 'Out of time — next raid!',
+                subJa:
+                  r.reason === 'CITIES_LOST'
+                    ? `都市が${r.survivingCities}つに・次の作戦で取り返そう`
+                    : '時間切れ・次の作戦で取り返そう',
+                subEn:
+                  r.reason === 'CITIES_LOST'
+                    ? 'Too many cities lost — next raid!'
+                    : 'Out of time — next raid!',
                 until: s + 30,
               },
       );
@@ -538,9 +648,23 @@ export class ArenaDirector {
     for (const l of this.soundListeners) l(name, teamId);
   }
 
-  private emitEffect(kind: EffectKind, teamId: TeamId | null, from: FxTarget | null, to: FxTarget | null, intensity: number): void {
+  private emitEffect(
+    kind: EffectKind,
+    teamId: TeamId | null,
+    from: FxTarget | null,
+    to: FxTarget | null,
+    intensity: number,
+  ): void {
     const scaled = this.settings.reducedMotion ? intensity * 0.5 : intensity;
-    const e: DirectorEffect = { id: ++this.effectId, kind, teamId, from, to, at: this.time, intensity: scaled };
+    const e: DirectorEffect = {
+      id: ++this.effectId,
+      kind,
+      teamId,
+      from,
+      to,
+      at: this.time,
+      intensity: scaled,
+    };
     for (const l of this.effectListeners) l(e);
   }
 }

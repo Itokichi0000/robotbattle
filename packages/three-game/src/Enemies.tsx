@@ -23,18 +23,48 @@ export function Enemies({ enemies, telegraphs, director, reducedMotion }: Enemie
   const escorts = enemies.filter((e) => e.kind !== 'BOSS');
   return (
     <group name="enemies">
-      {boss && <NullCore boss={boss} charging={telegraphs.some((t) => t.enemyId === boss.id)} director={director} reducedMotion={reducedMotion} />}
+      {boss && (
+        <NullCore
+          boss={boss}
+          charging={telegraphs.some((t) => t.enemyId === boss.id)}
+          director={director}
+          reducedMotion={reducedMotion}
+        />
+      )}
       {escorts.map((e, i) => (
-        <Escort key={e.id} enemy={e} index={i} telegraphs={telegraphs} director={director} reducedMotion={reducedMotion} />
+        <Escort
+          key={e.id}
+          enemy={e}
+          index={i}
+          telegraphs={telegraphs}
+          director={director}
+          reducedMotion={reducedMotion}
+        />
       ))}
     </group>
   );
 }
 
 const ARMOR = new THREE.MeshStandardMaterial({ color: '#12121A', metalness: 0.8, roughness: 0.35 });
-const PLATE = new THREE.MeshStandardMaterial({ color: '#3B1E5C', metalness: 0.6, roughness: 0.4, emissive: new THREE.Color(ALIEN_COLOR), emissiveIntensity: 0.15 });
+const PLATE = new THREE.MeshStandardMaterial({
+  color: '#3B1E5C',
+  metalness: 0.6,
+  roughness: 0.4,
+  emissive: new THREE.Color(ALIEN_COLOR),
+  emissiveIntensity: 0.15,
+});
 
-function NullCore({ boss, charging, director, reducedMotion }: { boss: Enemy; charging: boolean; director: ArenaDirector; reducedMotion: boolean }) {
+function NullCore({
+  boss,
+  charging,
+  director,
+  reducedMotion,
+}: {
+  boss: Enemy;
+  charging: boolean;
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
   const root = useRef<THREE.Group>(null);
   const core = useRef<THREE.MeshStandardMaterial>(null);
   const armL = useRef<THREE.Group>(null);
@@ -65,24 +95,50 @@ function NullCore({ boss, charging, director, reducedMotion }: { boss: Enemy; ch
         <icosahedronGeometry args={[1, 1]} />
       </mesh>
       {[0, 1, 2, 3, 4].map((i) => (
-        <mesh key={i} material={PLATE} position={[Math.cos((i / 5) * Math.PI * 2) * 0.95, Math.sin((i / 5) * Math.PI * 2) * 0.95, 0.25]} rotation={[0, 0, (i / 5) * Math.PI * 2]}>
+        <mesh
+          key={i}
+          material={PLATE}
+          position={[
+            Math.cos((i / 5) * Math.PI * 2) * 0.95,
+            Math.sin((i / 5) * Math.PI * 2) * 0.95,
+            0.25,
+          ]}
+          rotation={[0, 0, (i / 5) * Math.PI * 2]}
+        >
           <boxGeometry args={[0.35, 0.12, 0.5]} />
         </mesh>
       ))}
       {/* CORE weak point */}
       <mesh position={[0, 0, 0.82 + stage(boss.partHits.CORE) * 0.05]}>
         <sphereGeometry args={[0.38 + stage(boss.partHits.CORE) * 0.06, 24, 16]} />
-        <meshStandardMaterial ref={core} color="#200008" emissive={new THREE.Color(CORRUPT_RED)} emissiveIntensity={1.5} />
+        <meshStandardMaterial
+          ref={core}
+          color="#200008"
+          emissive={new THREE.Color(CORRUPT_RED)}
+          emissiveIntensity={1.5}
+        />
       </mesh>
       {/* ARM weak points */}
       {(['L', 'R'] as const).map((side) => (
-        <group key={side} ref={side === 'L' ? armL : armR} position={[side === 'L' ? -1 : 1, 0.2, 0]}>
-          <mesh material={ARMOR} position={[side === 'L' ? -0.6 : 0.6, -0.2, 0]} rotation={[0, 0, side === 'L' ? 0.4 : -0.4]}>
+        <group
+          key={side}
+          ref={side === 'L' ? armL : armR}
+          position={[side === 'L' ? -1 : 1, 0.2, 0]}
+        >
+          <mesh
+            material={ARMOR}
+            position={[side === 'L' ? -0.6 : 0.6, -0.2, 0]}
+            rotation={[0, 0, side === 'L' ? 0.4 : -0.4]}
+          >
             <boxGeometry args={[1.2, 0.28, 0.28]} />
           </mesh>
           <mesh position={[side === 'L' ? -1.2 : 1.2, -0.45, 0]}>
             <octahedronGeometry args={[0.22 + stage(boss.partHits.ARM) * 0.05]} />
-            <meshStandardMaterial color="#300010" emissive={new THREE.Color(boss.weaken > 0 ? '#FF9AAE' : CORRUPT_RED)} emissiveIntensity={1.2} />
+            <meshStandardMaterial
+              color="#300010"
+              emissive={new THREE.Color(boss.weaken > 0 ? '#FF9AAE' : CORRUPT_RED)}
+              emissiveIntensity={1.2}
+            />
           </mesh>
         </group>
       ))}
@@ -94,7 +150,11 @@ function NullCore({ boss, charging, director, reducedMotion }: { boss: Enemy; ch
           </mesh>
           <mesh position={[x * 0.3, -0.65, 0]}>
             <sphereGeometry args={[0.1 + stage(boss.partHits.LEG) * 0.03, 10, 8]} />
-            <meshStandardMaterial color="#300010" emissive={new THREE.Color(CORRUPT_RED)} emissiveIntensity={1} />
+            <meshStandardMaterial
+              color="#300010"
+              emissive={new THREE.Color(CORRUPT_RED)}
+              emissiveIntensity={1}
+            />
           </mesh>
         </group>
       ))}
@@ -103,7 +163,19 @@ function NullCore({ boss, charging, director, reducedMotion }: { boss: Enemy; ch
   );
 }
 
-function Escort({ enemy, index, telegraphs, director, reducedMotion }: { enemy: Enemy; index: number; telegraphs: Telegraph[]; director: ArenaDirector; reducedMotion: boolean }) {
+function Escort({
+  enemy,
+  index,
+  telegraphs,
+  director,
+  reducedMotion,
+}: {
+  enemy: Enemy;
+  index: number;
+  telegraphs: Telegraph[];
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
   const ref = useRef<THREE.Group>(null);
   const target = useMemo(() => new THREE.Vector3(), []);
   const placed = useRef(false);
@@ -131,11 +203,19 @@ function Escort({ enemy, index, telegraphs, director, reducedMotion }: { enemy: 
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[size * 1.4, size * 0.12, 6, 24]} />
-        <meshStandardMaterial color="#1A0F26" emissive={new THREE.Color(ALIEN_COLOR)} emissiveIntensity={0.6} />
+        <meshStandardMaterial
+          color="#1A0F26"
+          emissive={new THREE.Color(ALIEN_COLOR)}
+          emissiveIntensity={0.6}
+        />
       </mesh>
       <mesh position={[0, -size * 0.6, 0]}>
         <sphereGeometry args={[size * 0.28, 12, 8]} />
-        <meshStandardMaterial color="#200008" emissive={new THREE.Color(glow)} emissiveIntensity={1.6} />
+        <meshStandardMaterial
+          color="#200008"
+          emissive={new THREE.Color(glow)}
+          emissiveIntensity={1.6}
+        />
       </mesh>
     </group>
   );

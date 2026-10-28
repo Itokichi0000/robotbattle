@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { aggregate, simulateRaid } from './simulate';
 
 const many = (pilots: number, mix: 'spread' | 'gunners' | 'no-support', skill: number, n = 6) =>
-  aggregate(Array.from({ length: n }, (_, i) => simulateRaid({ pilots, mix, skill, seed: 500 + i * 101 })));
+  aggregate(
+    Array.from({ length: n }, (_, i) => simulateRaid({ pilots, mix, skill, seed: 500 + i * 101 })),
+  );
 
 describe('raid balance (smoke)', () => {
   it('is deterministic for a seed', () => {
@@ -18,11 +20,15 @@ describe('raid balance (smoke)', () => {
     expect(spread.survivingMean).toBeGreaterThan(gunners.survivingMean);
   });
 
-  it('a big crowd still has to cover the seats (fair-share normalisation)', { timeout: 60_000 }, () => {
-    const spread = many(40, 'spread', 0.65, 4);
-    const gunners = many(40, 'gunners', 0.65, 4);
-    expect(spread.winRate).toBeGreaterThan(gunners.winRate);
-  });
+  it(
+    'a big crowd still has to cover the seats (fair-share normalisation)',
+    { timeout: 60_000 },
+    () => {
+      const spread = many(40, 'spread', 0.65, 4);
+      const gunners = many(40, 'gunners', 0.65, 4);
+      expect(spread.winRate).toBeGreaterThan(gunners.winRate);
+    },
+  );
 
   it('small crews get the assist AI', () => {
     const solo = many(2, 'spread', 0.65, 3);

@@ -57,14 +57,25 @@ export class SessionService {
     const token = newToken();
     const now = this.wall.now();
     const expiresAt = now + TTL[kind];
-    this.repo.insertSession({ id_hash: sha256(token), pilot_id: pilotId, kind, issued_at: now, expires_at: expiresAt, revoked_at: null });
+    this.repo.insertSession({
+      id_hash: sha256(token),
+      pilot_id: pilotId,
+      kind,
+      issued_at: now,
+      expires_at: expiresAt,
+      revoked_at: null,
+    });
     return { token, expiresAt };
   }
 
-  authenticateToken(token: string | null, via: Authenticated['via'] = 'bearer'): Authenticated | null {
+  authenticateToken(
+    token: string | null,
+    via: Authenticated['via'] = 'bearer',
+  ): Authenticated | null {
     if (!token) return null;
     const session = this.repo.getSession(sha256(token));
-    if (!session || session.revoked_at !== null || session.expires_at <= this.wall.now()) return null;
+    if (!session || session.revoked_at !== null || session.expires_at <= this.wall.now())
+      return null;
     const pilot = this.repo.getPilot(session.pilot_id);
     if (!pilot) return null;
     return { pilot, session, token, via };
@@ -78,11 +89,17 @@ export class SessionService {
 
   setCookie(reply: FastifyReply, token: string, expiresAt: number): void {
     const maxAge = Math.max(0, Math.floor((expiresAt - this.wall.now()) / 1000));
-    appendCookie(reply, `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secureCookies ? '; Secure' : ''}`);
+    appendCookie(
+      reply,
+      `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${this.secureCookies ? '; Secure' : ''}`,
+    );
   }
 
   clearCookie(reply: FastifyReply): void {
-    appendCookie(reply, `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${this.secureCookies ? '; Secure' : ''}`);
+    appendCookie(
+      reply,
+      `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${this.secureCookies ? '; Secure' : ''}`,
+    );
   }
 
   get secure(): boolean {

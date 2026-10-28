@@ -11,7 +11,14 @@ import type { RegionId } from './regions';
  * RESULTS for resultsSeconds, then archived by the server), PAUSED, CANCELLED.
  * BOARDING is per pilot (the phone plays it when a pilot boards).
  */
-export const RAID_STATUSES = ['CREATED', 'LOBBY_OPEN', 'LIVE', 'PAUSED', 'ENDED', 'CANCELLED'] as const;
+export const RAID_STATUSES = [
+  'CREATED',
+  'LOBBY_OPEN',
+  'LIVE',
+  'PAUSED',
+  'ENDED',
+  'CANCELLED',
+] as const;
 export type RaidStatus = (typeof RAID_STATUSES)[number];
 
 export const RAID_PHASES = [
@@ -25,7 +32,13 @@ export const RAID_PHASES = [
   'FAILED',
 ] as const;
 export type RaidPhase = (typeof RAID_PHASES)[number];
-export const COMBAT_PHASES = ['INTRO_TRAINING', 'WAVE_1', 'WAVE_2', 'WAVE_3', 'FINAL_WAVE'] as const;
+export const COMBAT_PHASES = [
+  'INTRO_TRAINING',
+  'WAVE_1',
+  'WAVE_2',
+  'WAVE_3',
+  'FINAL_WAVE',
+] as const;
 export type CombatPhase = (typeof COMBAT_PHASES)[number];
 
 export const ROLES = ['GUNNER', 'GUARDIAN', 'ROUTER', 'ENGINEER'] as const;
@@ -155,7 +168,8 @@ export interface Pilot {
 
 // ---- tasks (minigames) --------------------------------------------------------
 
-export type RepairTarget = { type: 'ROBOT'; robot: RobotId } | { type: 'CITY'; cityId: RegionId } | { type: 'UNJAM' };
+export type RepairTarget =
+  { type: 'ROBOT'; robot: RobotId } | { type: 'CITY'; cityId: RegionId } | { type: 'UNJAM' };
 
 export type TaskTarget =
   | { kind: 'ENEMY'; enemyId: number; weakpoint: Weakpoint }
@@ -229,7 +243,15 @@ export const TASK_ERROR_CODES = [
 export type TaskErrorCode = (typeof TASK_ERROR_CODES)[number];
 
 export type TaskEffect =
-  | { kind: 'DAMAGE'; enemyId: number; enemyKind: EnemyKind; weakpoint: Weakpoint; amount: number; defeated: boolean; note: 'WEAKEN' | 'DELAY' | null }
+  | {
+      kind: 'DAMAGE';
+      enemyId: number;
+      enemyKind: EnemyKind;
+      weakpoint: Weakpoint;
+      amount: number;
+      defeated: boolean;
+      note: 'WEAKEN' | 'DELAY' | null;
+    }
   | { kind: 'SHIELD'; cityId: RegionId; amount: number }
   | { kind: 'ENERGY'; sink: EnergySink; amount: number }
   | { kind: 'REPAIR'; repair: RepairTarget; amount: number };

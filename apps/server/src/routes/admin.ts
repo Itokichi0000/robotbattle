@@ -9,16 +9,33 @@ import type { Services } from '../services';
 
 /** Fixed broadcast templates (free text is allowed but sanitised and short). */
 export const BROADCAST_TEMPLATES = {
-  NEXT_RAID_SOON: { ja: 'まもなく次の作戦が始まります！ QRから搭乗しよう', en: 'The next raid starts soon! Scan the QR to board' },
-  BREAK: { ja: 'まもなく休憩に入ります。次の作戦は少しお待ちください', en: 'Short break soon. The next raid will follow' },
-  WIFI: { ja: '会場Wi-Fiに接続してから参加してください', en: 'Please connect to the venue Wi-Fi to join' },
-  MAINTENANCE: { ja: 'システム調整中です。しばらくお待ちください', en: 'Maintenance in progress, please wait' },
+  NEXT_RAID_SOON: {
+    ja: 'まもなく次の作戦が始まります！ QRから搭乗しよう',
+    en: 'The next raid starts soon! Scan the QR to board',
+  },
+  BREAK: {
+    ja: 'まもなく休憩に入ります。次の作戦は少しお待ちください',
+    en: 'Short break soon. The next raid will follow',
+  },
+  WIFI: {
+    ja: '会場Wi-Fiに接続してから参加してください',
+    en: 'Please connect to the venue Wi-Fi to join',
+  },
+  MAINTENANCE: {
+    ja: 'システム調整中です。しばらくお待ちください',
+    en: 'Maintenance in progress, please wait',
+  },
   LAST_RAID: { ja: '本日最後の作戦です！', en: 'Last raid of the day!' },
 } as const;
 
 // Strips markup characters, control characters and bidi/zero-width marks from staff broadcast text.
-// eslint-disable-next-line no-control-regex -- control characters are exactly what we remove
-const clean = (s: string) => s.normalize('NFKC').replace(/[<>&"'`\\\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E]/g, '').trim().slice(0, 80);
+const clean = (s: string) =>
+  s
+    .normalize('NFKC')
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what we remove
+    .replace(/[<>&"'`\\\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E]/g, '')
+    .trim()
+    .slice(0, 80);
 
 const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.enum(ADMIN_LIFECYCLE_COMMANDS), reason: z.string().max(200).optional() }),
@@ -28,11 +45,18 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('SET_PAYMENT_INTEGRATION'), enabled: z.boolean() }),
   z.object({ command: z.literal('SET_AUTO_LOOP'), enabled: z.boolean() }),
   z.object({ command: z.literal('SET_PASS_MODE'), mode: z.enum(['FREE', 'PAID']) }),
-  z.object({ command: z.literal('SET_DEMO_BOTS'), count: z.number().int().min(0).max(100), skill: z.number().min(0).max(1).optional() }),
+  z.object({
+    command: z.literal('SET_DEMO_BOTS'),
+    count: z.number().int().min(0).max(100),
+    skill: z.number().min(0).max(1).optional(),
+  }),
   z.object({ command: z.literal('SET_TIME_SCALE'), speed: z.number().min(0.5).max(10) }),
   z.object({
     command: z.literal('BROADCAST'),
-    template: z.enum([...(Object.keys(BROADCAST_TEMPLATES) as [keyof typeof BROADCAST_TEMPLATES]), 'CUSTOM']),
+    template: z.enum([
+      ...(Object.keys(BROADCAST_TEMPLATES) as [keyof typeof BROADCAST_TEMPLATES]),
+      'CUSTOM',
+    ]),
     ja: z.string().max(200).optional(),
     en: z.string().max(200).optional(),
     seconds: z.number().int().min(5).max(600).default(30),
@@ -45,27 +69,43 @@ const commandSchema = z.discriminatedUnion('command', [
 export function registerAdminRoutes(
   app: FastifyInstance,
   services: Services,
-  deps: { isAllowedOrigin: (o: string | undefined) => boolean; realtimeStats: () => RealtimeStats; onSettingsChanged: () => void },
+  deps: {
+    isAllowedOrigin: (o: string | undefined) => boolean;
+    realtimeStats: () => RealtimeStats;
+    onSettingsChanged: () => void;
+  },
 ): void {
   const { manager, passes, repo, adminAuth, bots, wall, env, pilots } = services;
 
   const requireAdmin = (req: FastifyRequest): string => {
     const origin = req.headers.origin;
-    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
+    if (origin && !deps.isAllowedOrigin(origin))
+      throw new AppError('FORBIDDEN', 'origin not allowed');
     const session = adminAuth.verify(extractBearer(req.headers.authorization));
     if (!session) throw new AppError('UNAUTHORIZED', 'admin login required');
     return session.actor;
   };
 
-  app.post('/api/admin/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
-    const origin = req.headers.origin;
-    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
-    const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
-    const token = adminAuth.login(password);
-    repo.audit('admin', token ? 'LOGIN' : 'LOGIN_FAILED', null, { ip: req.ip.replace(/\d+$/, 'x') }, wall.now());
-    if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
-    return { token };
-  });
+  app.post(
+    '/api/admin/login',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req) => {
+      const origin = req.headers.origin;
+      if (origin && !deps.isAllowedOrigin(origin))
+        throw new AppError('FORBIDDEN', 'origin not allowed');
+      const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
+      const token = adminAuth.login(password);
+      repo.audit(
+        'admin',
+        token ? 'LOGIN' : 'LOGIN_FAILED',
+        null,
+        { ip: req.ip.replace(/\d+$/, 'x') },
+        wall.now(),
+      );
+      if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
+      return { token };
+    },
+  );
 
   app.post('/api/admin/logout', async (req) => {
     adminAuth.logout(extractBearer(req.headers.authorization));
@@ -76,7 +116,9 @@ export function registerAdminRoutes(
     requireAdmin(req);
     const rt = manager.current();
     const s = rt.state;
-    const roles = Object.fromEntries(ROLES.map((r) => [r, Object.values(s.pilots).filter((p) => p.role === r).length]));
+    const roles = Object.fromEntries(
+      ROLES.map((r) => [r, Object.values(s.pilots).filter((p) => p.role === r).length]),
+    );
     return {
       snapshot: manager.snapshot(),
       settings: {
@@ -94,7 +136,11 @@ export function registerAdminRoutes(
         demoBotSkill: bots.skill,
         eventId: env.EVENT_ID,
       },
-      crew: { total: Object.keys(s.pilots).length, bots: Object.values(s.pilots).filter((p) => p.isBot).length, roles },
+      crew: {
+        total: Object.keys(s.pilots).length,
+        bots: Object.values(s.pilots).filter((p) => p.isBot).length,
+        roles,
+      },
       entitlements: repo.entitlementSummary(rt.raidId),
       invoices: repo.invoiceSummary(),
       sponsored: repo.sponsoredSummary(),
@@ -145,7 +191,15 @@ export function registerAdminRoutes(
         const ja = t ? t.ja : clean(cmd.ja ?? '');
         const en = t ? t.en : clean(cmd.en ?? '');
         if (!ja && !en) throw new AppError('BAD_REQUEST', 'message required');
-        manager.setBroadcast({ id: `b${wall.now()}`, messageJa: ja || en, messageEn: en || ja, until: wall.now() + cmd.seconds * 1000 }, actor);
+        manager.setBroadcast(
+          {
+            id: `b${wall.now()}`,
+            messageJa: ja || en,
+            messageEn: en || ja,
+            until: wall.now() + cmd.seconds * 1000,
+          },
+          actor,
+        );
         break;
       }
       case 'BROADCAST_CLEAR':
@@ -155,7 +209,8 @@ export function registerAdminRoutes(
         manager.setPaymentsEnabled(false, actor);
         manager.setJoinStopped(true, actor);
         manager.setAutoLoop(false, actor);
-        if (manager.current().state.status === 'LIVE') manager.command('PAUSE', actor, 'EMERGENCY_STOP');
+        if (manager.current().state.status === 'LIVE')
+          manager.command('PAUSE', actor, 'EMERGENCY_STOP');
         repo.audit(actor, 'EMERGENCY_STOP', manager.current().raidId, null, wall.now());
         break;
       }
@@ -214,10 +269,19 @@ export function registerAdminRoutes(
   app.post('/api/admin/pilots/:id/pass-credit', async (req) => {
     const actor = requireAdmin(req);
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
-    const body = z.object({ delta: z.number().int().min(-10).max(10), note: z.string().min(3).max(300) }).parse(req.body ?? {});
+    const body = z
+      .object({ delta: z.number().int().min(-10).max(10), note: z.string().min(3).max(300) })
+      .parse(req.body ?? {});
     if (!repo.getPilot(id)) throw new AppError('NOT_FOUND', 'pilot not found');
-    if (!repo.changePassCredits(id, body.delta)) throw new AppError('BAD_REQUEST', 'credits cannot go below zero');
-    repo.audit(actor, 'ADJUST_PASS_CREDIT', id, { delta: body.delta, note: body.note.slice(0, 200) }, wall.now());
+    if (!repo.changePassCredits(id, body.delta))
+      throw new AppError('BAD_REQUEST', 'credits cannot go below zero');
+    repo.audit(
+      actor,
+      'ADJUST_PASS_CREDIT',
+      id,
+      { delta: body.delta, note: body.note.slice(0, 200) },
+      wall.now(),
+    );
     return { passCredits: repo.getPilot(id)!.pass_credits };
   });
 
@@ -256,12 +320,23 @@ export function registerAdminRoutes(
     const body = z
       .object({
         count: z.number().int().min(1).max(500),
-        expiresInMinutes: z.number().int().min(5).max(7 * 24 * 60).default(12 * 60),
+        expiresInMinutes: z
+          .number()
+          .int()
+          .min(5)
+          .max(7 * 24 * 60)
+          .default(12 * 60),
         label: z.string().max(60).default('sponsored'),
         currentRaidOnly: z.boolean().default(false),
       })
       .parse(req.body ?? {});
-    const codes = passes.issueSponsored(body.count, body.expiresInMinutes * 60_000, clean(body.label) || 'sponsored', body.currentRaidOnly ? manager.current().raidId : null, actor);
+    const codes = passes.issueSponsored(
+      body.count,
+      body.expiresInMinutes * 60_000,
+      clean(body.label) || 'sponsored',
+      body.currentRaidOnly ? manager.current().raidId : null,
+      actor,
+    );
     return { codes };
   });
 
@@ -297,7 +372,9 @@ export function registerAdminRoutes(
 
   app.get('/api/admin/events', async (req) => {
     requireAdmin(req);
-    const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(req.query);
+    const { afterSeq } = z
+      .object({ afterSeq: z.coerce.number().int().min(0).default(0) })
+      .parse(req.query);
     return { events: repo.loadEvents(manager.current().raidId, afterSeq, 500) };
   });
 }

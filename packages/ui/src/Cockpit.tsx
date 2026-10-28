@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Role, Task, TaskInput, TaskResult } from '@sats-wars/shared';
 import { ROLES, ROLE_LABELS, TASK_ERROR_LABELS, type TaskErrorCode } from '@sats-wars/shared';
 import { type ClientError, type RaidClient, newSubmissionId } from './client';
@@ -79,10 +79,17 @@ export function SeatPicker({
               {lab.icon}
             </span>
             <span className="swc-seat-name">{L(lab.ja, lab.en)}</span>
-            <span className="swc-seat-robot">{L(`操縦：${lab.robotJa}`, r === 'GUNNER' ? 'Raijin' : r === 'GUARDIAN' ? 'Fujin' : 'Both robots')}</span>
+            <span className="swc-seat-robot">
+              {L(
+                `操縦：${lab.robotJa}`,
+                r === 'GUNNER' ? 'Raijin' : r === 'GUARDIAN' ? 'Fujin' : 'Both robots',
+              )}
+            </span>
             <span className="swc-seat-do">{L(lab.doJa, lab.doEn)}</span>
             <span className="swc-seat-meta">
-              {needed === r && !isCur ? <b className="swc-tag swc-tag-need">{L('いま必要！', 'Needed!')}</b> : null}
+              {needed === r && !isCur ? (
+                <b className="swc-tag swc-tag-need">{L('いま必要！', 'Needed!')}</b>
+              ) : null}
               <span>
                 👥 {crew[r]}
                 {L('人', '')}
@@ -91,7 +98,11 @@ export function SeatPicker({
           </button>
         );
       })}
-      {disabledUntilSec > 0 && <p className="swc-note">{L(`席の変更はあと${disabledUntilSec}秒`, `Seat change in ${disabledUntilSec}s`)}</p>}
+      {disabledUntilSec > 0 && (
+        <p className="swc-note">
+          {L(`席の変更はあと${disabledUntilSec}秒`, `Seat change in ${disabledUntilSec}s`)}
+        </p>
+      )}
     </div>
   );
 }
@@ -102,7 +113,7 @@ export function SeatPicker({
  * by the server from the raw input.
  */
 export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }: CockpitProps) {
-  const L = (ja: string, en: string) => (locale === 'ja' ? ja : en);
+  const L = useCallback((ja: string, en: string) => (locale === 'ja' ? ja : en), [locale]);
   const gameNow = useGameNow(client.gameNow);
   const [phase, setPhase] = useState<Phase>({ k: 'idle' });
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +125,10 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
   const board = useMemo(() => boardFrom(raid, gameNow), [raid, gameNow]);
   const view = useMemo(() => raidView(raid, gameNow), [raid, gameNow]);
   const role = seat.role;
-  const options = useMemo(() => (role && raid.status === 'LIVE' ? choiceOptions(role, board, L) : []), [role, board, raid.status, locale]); // eslint-disable-line react-hooks/exhaustive-deps
+  const options = useMemo(
+    () => (role && raid.status === 'LIVE' ? choiceOptions(role, board, L) : []),
+    [role, board, raid.status, L],
+  );
   const chosen = options.find((o) => o.key === picked) ?? options[0] ?? null;
   const live = raid.status === 'LIVE';
   const durationMs = raid.config.miniGameDurationSeconds * 1000;
@@ -125,7 +139,8 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
     if (!t || resumed.current === t.taskId || phase.k !== 'idle') return;
     resumed.current = t.taskId;
     const offset = client.gameNow() - t.createdAt;
-    if (offset < durationMs - 1500) setPhase({ k: 'playing', task: t, offsetMs: Math.max(0, offset) });
+    if (offset < durationMs - 1500)
+      setPhase({ k: 'playing', task: t, offsetMs: Math.max(0, offset) });
   }, [seat.task, phase.k, client, durationMs]);
 
   // Result banners and timeouts close by themselves.
@@ -157,7 +172,9 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
     try {
       await fn();
     } catch (e) {
-      setError((e as ClientError).message || L('通信エラー。もう一度どうぞ', 'Network error. Try again'));
+      setError(
+        (e as ClientError).message || L('通信エラー。もう一度どうぞ', 'Network error. Try again'),
+      );
     } finally {
       setBusy(false);
     }
@@ -168,7 +185,11 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
       if (seat.boarded) await client.changeRole(r);
       else await client.board(r);
       setPicked(null);
-      onSeat({ boarded: true, role: r, roleChangeReadyAt: client.gameNow() + raid.config.roleChangeCooldownSeconds * 1000 });
+      onSeat({
+        boarded: true,
+        role: r,
+        roleChangeReadyAt: client.gameNow() + raid.config.roleChangeCooldownSeconds * 1000,
+      });
     });
 
   const sortie = () =>
@@ -176,7 +197,10 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
       setPhase({ k: 'requesting' });
       let res;
       try {
-        res = await client.requestTask({ ...(chosen?.choice ?? {}), ...(easy ? { difficulty: 'EASY' as const } : {}) });
+        res = await client.requestTask({
+          ...(chosen?.choice ?? {}),
+          ...(easy ? { difficulty: 'EASY' as const } : {}),
+        });
       } catch (e) {
         setPhase({ k: 'idle' });
         throw e;
@@ -184,8 +208,17 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
       if (res.code !== 'OK' || !res.task) {
         if (res.cooldownUntil) onSeat({ cooldownUntil: res.cooldownUntil });
         // Nothing to do in this seat right now: point at the seat the robots need.
-        const needed = res.code === 'NO_TARGET' && view.needed !== role ? ROLE_LABELS[view.needed] : null;
-        setError(tErr(res.code, L) + (needed ? L(`。いま必要なのは ${needed.icon}${needed.ja}`, `. Needed now: ${needed.icon} ${needed.en}`) : ''));
+        const needed =
+          res.code === 'NO_TARGET' && view.needed !== role ? ROLE_LABELS[view.needed] : null;
+        setError(
+          tErr(res.code, L) +
+            (needed
+              ? L(
+                  `。いま必要なのは ${needed.icon}${needed.ja}`,
+                  `. Needed now: ${needed.icon} ${needed.en}`,
+                )
+              : ''),
+        );
         setPhase({ k: 'idle' });
         return;
       }
@@ -211,15 +244,32 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
     void attempt(2);
   };
 
-  const cooldownLeft = Math.max(0, Math.ceil((Math.max(seat.cooldownUntil, blockedUntil) - gameNow) / 1000));
+  const cooldownLeft = Math.max(
+    0,
+    Math.ceil((Math.max(seat.cooldownUntil, blockedUntil) - gameNow) / 1000),
+  );
   const seatLeft = live ? Math.max(0, Math.ceil((seat.roleChangeReadyAt - gameNow) / 1000)) : 0;
 
   if (!seat.boarded) {
     return (
       <section className="swc-cockpit">
         <h2 className="swc-h">{L('どの席に乗る？', 'Pick your seat')}</h2>
-        {boardGate ?? <SeatPicker locale={locale} current={null} needed={live ? view.needed : null} crew={view.crewByRole} disabledUntilSec={0} onPick={pickSeat} busy={busy} />}
-        {error && <p className="swc-error" role="alert">{error}</p>}
+        {boardGate ?? (
+          <SeatPicker
+            locale={locale}
+            current={null}
+            needed={live ? view.needed : null}
+            crew={view.crewByRole}
+            disabledUntilSec={0}
+            onPick={pickSeat}
+            busy={busy}
+          />
+        )}
+        {error && (
+          <p className="swc-error" role="alert">
+            {error}
+          </p>
+        )}
       </section>
     );
   }
@@ -233,7 +283,8 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
             {lab.icon}
           </span>
           <div>
-            <b>{L(lab.ja, lab.en)}</b> <span className="swc-muted">{L(`／${lab.robotJa}`, '')}</span>
+            <b>{L(lab.ja, lab.en)}</b>{' '}
+            <span className="swc-muted">{L(`／${lab.robotJa}`, '')}</span>
             <div className="swc-muted">{L(lab.doJa, lab.doEn)}</div>
           </div>
         </header>
@@ -241,14 +292,29 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
 
       {phase.k === 'playing' || phase.k === 'sending' ? (
         <div className="swc-mission-live" data-testid="minigame">
-          <TimerBar startedAt={phase.k === 'playing' ? phase.offsetMs : 0} durationMs={durationMs} running={phase.k === 'playing'} />
-          <Minigame key={phase.task.taskId} task={phase.task} locale={locale} offsetMs={phase.k === 'playing' ? phase.offsetMs : 0} onSubmit={(input) => submit(phase.task, input)} disabled={phase.k === 'sending'} />
+          <TimerBar
+            startedAt={phase.k === 'playing' ? phase.offsetMs : 0}
+            durationMs={durationMs}
+            running={phase.k === 'playing'}
+          />
+          <Minigame
+            key={phase.task.taskId}
+            task={phase.task}
+            locale={locale}
+            offsetMs={phase.k === 'playing' ? phase.offsetMs : 0}
+            onSubmit={(input) => submit(phase.task, input)}
+            disabled={phase.k === 'sending'}
+          />
           {phase.k === 'sending' && <p className="swc-muted">{L('送信中…', 'Sending…')}</p>}
         </div>
       ) : (
         <>
           {phase.k === 'result' && (
-            <p className={`swc-result${phase.result.success >= 0.6 ? ' is-good' : phase.result.success > 0 ? ' is-ok' : ' is-miss'}`} role="status" data-testid="task-result">
+            <p
+              className={`swc-result${phase.result.success >= 0.6 ? ' is-good' : phase.result.success > 0 ? ' is-ok' : ' is-miss'}`}
+              role="status"
+              data-testid="task-result"
+            >
               {resultSentence(phase.result, L)}
             </p>
           )}
@@ -260,7 +326,10 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
           {!live ? (
             <p className="swc-wait" data-testid="cockpit-wait">
               {raid.status === 'LOBBY_OPEN' || raid.status === 'CREATED'
-                ? L('まもなく出撃。席はいつでも変えられます', 'Launching soon. You can still change seats')
+                ? L(
+                    'まもなく出撃。席はいつでも変えられます',
+                    'Launching soon. You can still change seats',
+                  )
                 : raid.status === 'PAUSED'
                   ? L('一時停止中。そのまま待ってね', 'Paused. Please wait')
                   : L('作戦終了。大画面を見てね', 'Mission over. Look at the big screen')}
@@ -285,8 +354,16 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
                   ))}
                 </div>
               )}
-              <button type="button" className="swc-big-btn swc-sortie" onClick={sortie} disabled={busy || cooldownLeft > 0 || phase.k === 'requesting'} data-testid="sortie">
-                {cooldownLeft > 0 ? L(`次の出撃まで ${cooldownLeft}`, `Next sortie in ${cooldownLeft}`) : L('出撃！', 'SORTIE!')}
+              <button
+                type="button"
+                className="swc-big-btn swc-sortie"
+                onClick={sortie}
+                disabled={busy || cooldownLeft > 0 || phase.k === 'requesting'}
+                data-testid="sortie"
+              >
+                {cooldownLeft > 0
+                  ? L(`次の出撃まで ${cooldownLeft}`, `Next sortie in ${cooldownLeft}`)
+                  : L('出撃！', 'SORTIE!')}
               </button>
             </>
           )}
@@ -301,20 +378,40 @@ export function Cockpit({ client, raid, seat, onSeat, locale, easy, boardGate }:
       {phase.k !== 'playing' && phase.k !== 'sending' && (
         <details className="swc-change-seat">
           <summary>{L('席を変える', 'Change seat')}</summary>
-          <SeatPicker locale={locale} current={role} needed={live ? view.needed : null} crew={view.crewByRole} disabledUntilSec={seatLeft} onPick={pickSeat} busy={busy} />
+          <SeatPicker
+            locale={locale}
+            current={role}
+            needed={live ? view.needed : null}
+            crew={view.crewByRole}
+            disabledUntilSec={seatLeft}
+            onPick={pickSeat}
+            busy={busy}
+          />
         </details>
       )}
     </section>
   );
 }
 
-function TimerBar({ startedAt, durationMs, running }: { startedAt: number; durationMs: number; running: boolean }) {
+function TimerBar({
+  startedAt,
+  durationMs,
+  running,
+}: {
+  startedAt: number;
+  durationMs: number;
+  running: boolean;
+}) {
   // CSS animation: no per-frame React work for a simple countdown.
   return (
     <div className="swc-timer" aria-hidden="true">
       <div
         className="swc-timer-fill"
-        style={{ animationDuration: `${durationMs}ms`, animationDelay: `-${startedAt}ms`, animationPlayState: running ? 'running' : 'paused' }}
+        style={{
+          animationDuration: `${durationMs}ms`,
+          animationDelay: `-${startedAt}ms`,
+          animationPlayState: running ? 'running' : 'paused',
+        }}
       />
     </div>
   );

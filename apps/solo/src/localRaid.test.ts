@@ -17,7 +17,10 @@ function run(raid: LocalRaid, clock: ReturnType<typeof fakeClock>, ms: number) {
 describe('LocalRaid (offline demo host)', () => {
   it('boards the player, runs a mission through the same engine, and finishes the raid', async () => {
     const clock = fakeClock();
-    const raid = new LocalRaid({ callsign: 'テスト', crew: 6, botSkill: 0.7, speed: 1, seed: 7 }, clock.now);
+    const raid = new LocalRaid(
+      { callsign: 'テスト', crew: 6, botSkill: 0.7, speed: 1, seed: 7 },
+      clock.now,
+    );
     expect(raid.snapshot().status).toBe('LOBBY_OPEN');
     await raid.board('GUARDIAN');
     expect(raid.state.pilots[PLAYER_ID]?.role).toBe('GUARDIAN');
@@ -50,7 +53,10 @@ describe('LocalRaid (offline demo host)', () => {
 
   it('pausing freezes the raid clock', async () => {
     const clock = fakeClock();
-    const raid = new LocalRaid({ callsign: 'P', crew: 2, botSkill: 0.7, speed: 1, seed: 3 }, clock.now);
+    const raid = new LocalRaid(
+      { callsign: 'P', crew: 2, botSkill: 0.7, speed: 1, seed: 3 },
+      clock.now,
+    );
     raid.launchNow();
     run(raid, clock, 1000);
     expect(raid.state.status).toBe('LIVE');

@@ -1,11 +1,21 @@
 import type { CrewMember, GameConfig, GameEvent, RaidState } from '@sats-wars/shared';
 import { isClockRunning } from '@sats-wars/shared';
-import { type EngineCommand, type ReduceResult, createRaidState, reduce, snapshotCore } from '@sats-wars/game-engine';
+import {
+  type EngineCommand,
+  type ReduceResult,
+  createRaidState,
+  reduce,
+  snapshotCore,
+} from '@sats-wars/game-engine';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 
 /** Distributive Omit so each command variant keeps its own fields. */
-export type CommandInput = EngineCommand extends infer C ? (C extends EngineCommand ? Omit<C, 't'> : never) : never;
+export type CommandInput = EngineCommand extends infer C
+  ? C extends EngineCommand
+    ? Omit<C, 't'>
+    : never
+  : never;
 
 export type RuntimeListener = (events: GameEvent[], state: RaidState) => void;
 
@@ -52,7 +62,15 @@ export class RaidRuntime {
     this.syncClock();
   }
 
-  static create(repo: Repo, raidId: string, eventId: string, config: GameConfig, seed: number, mono: MonoClock, wall: WallClock): RaidRuntime {
+  static create(
+    repo: Repo,
+    raidId: string,
+    eventId: string,
+    config: GameConfig,
+    seed: number,
+    mono: MonoClock,
+    wall: WallClock,
+  ): RaidRuntime {
     const state = createRaidState(raidId, config, seed);
     repo.tx(() => {
       repo.insertRaid(raidId, eventId, config, state.configHash, seed, wall.now());
@@ -82,7 +100,8 @@ export class RaidRuntime {
     rt.baseClock = Math.max(state.clockMs, row.clock_ms);
     rt.runningSince = null;
     repo.tx(() => repo.insertEvents(events, state.revision));
-    if (isClockRunning(state.status)) rt.dispatchAt({ type: 'PAUSE', reason: 'SERVER_RESTART' }, rt.baseClock);
+    if (isClockRunning(state.status))
+      rt.dispatchAt({ type: 'PAUSE', reason: 'SERVER_RESTART' }, rt.baseClock);
     else rt.persistProjection();
     rt.recent = repo.recentEvents(raidId, RECENT_EVENTS);
     return rt;
@@ -94,7 +113,9 @@ export class RaidRuntime {
 
   /** Current pause-corrected raid clock. */
   nowT(): number {
-    return this.runningSince === null ? this.baseClock : this.baseClock + (this.mono.now() - this.runningSince);
+    return this.runningSince === null
+      ? this.baseClock
+      : this.baseClock + (this.mono.now() - this.runningSince);
   }
 
   /** Estimated current game ms, without mutating state. */
@@ -123,7 +144,11 @@ export class RaidRuntime {
     return this.dispatchAt(input, this.nowT(), persistExtra);
   }
 
-  private dispatchAt(input: CommandInput, t: number, persistExtra?: (r: ReduceResult) => void): ReduceResult {
+  private dispatchAt(
+    input: CommandInput,
+    t: number,
+    persistExtra?: (r: ReduceResult) => void,
+  ): ReduceResult {
     const cmd = { ...input, t } as EngineCommand;
     const r = reduce(this.state, cmd);
     // Commands that changed nothing (refused task requests, duplicate boards…)
@@ -143,7 +168,8 @@ export class RaidRuntime {
       this.repo.tx(() => {
         if (logged) this.repo.appendCommand(this.raidId, this.commandIdx, cmd, now);
         this.repo.insertEvents(r.events, r.state.revision);
-        if (r.events.length > 0 || logged) this.repo.saveRaidProjection(r.state, now, undefined, this.botsAboard);
+        if (r.events.length > 0 || logged)
+          this.repo.saveRaidProjection(r.state, now, undefined, this.botsAboard);
         persistExtra?.(r);
       });
       if (logged) this.commandIdx++;
@@ -156,7 +182,8 @@ export class RaidRuntime {
     }
     if (r.events.length > 0) {
       this.recent.push(...r.events);
-      if (this.recent.length > RECENT_EVENTS) this.recent.splice(0, this.recent.length - RECENT_EVENTS);
+      if (this.recent.length > RECENT_EVENTS)
+        this.recent.splice(0, this.recent.length - RECENT_EVENTS);
       const shown = r.events.map((e) => this.presentEvent(e));
       for (const l of this.listeners) l(shown, this.state);
     }
@@ -164,7 +191,9 @@ export class RaidRuntime {
   }
 
   persistProjection(finalSnapshot?: unknown): void {
-    this.repo.tx(() => this.repo.saveRaidProjection(this.state, this.wall.now(), finalSnapshot, this.botsAboard));
+    this.repo.tx(() =>
+      this.repo.saveRaidProjection(this.state, this.wall.now(), finalSnapshot, this.botsAboard),
+    );
   }
 
   private syncClock(): void {
@@ -201,16 +230,29 @@ export class RaidRuntime {
     const patch = e.patch.crew ? { ...e.patch, crew: this.crew(e.patch.crew) } : e.patch;
     const d = e.data as { pilotId?: string | null; callsign?: string | null };
     if (d.pilotId && typeof d.callsign === 'string') {
-      return { ...e, patch, data: { ...e.data, callsign: this.displayName(d.pilotId, d.callsign) } } as GameEvent;
+      return {
+        ...e,
+        patch,
+        data: { ...e.data, callsign: this.displayName(d.pilotId, d.callsign) },
+      } as GameEvent;
     }
     return patch === e.patch ? e : ({ ...e, patch } as GameEvent);
   }
 
   snapshotBase() {
-    const core = snapshotCore(this.state, this.recent.map((e) => this.presentEvent(e)), this.wall.now());
+    const core = snapshotCore(
+      this.state,
+      this.recent.map((e) => this.presentEvent(e)),
+      this.wall.now(),
+    );
     // Report the clock "now" rather than at the last tick.
     const t = this.nowT();
     const delta = core.running ? Math.max(0, t - core.clockMs) : 0;
-    return { ...core, crew: this.crew(core.crew), clockMs: core.clockMs + delta, gameMs: core.gameMs + delta };
+    return {
+      ...core,
+      crew: this.crew(core.crew),
+      clockMs: core.clockMs + delta,
+      gameMs: core.gameMs + delta,
+    };
   }
 }

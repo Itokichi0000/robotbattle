@@ -29,7 +29,8 @@ export function RouterGame({ params, locale, onSubmit, disabled }: MinigameProps
     return m;
   }, [params.edges]);
   const last = path[path.length - 1]!;
-  const canGo = (id: number) => !sent && !disabled && !path.includes(id) && (linked.get(last)?.has(id) ?? false);
+  const canGo = (id: number) =>
+    !sent && !disabled && !path.includes(id) && (linked.get(last)?.has(id) ?? false);
   const tap = (id: number) => {
     if (sent || disabled) return;
     if (id === last && path.length > 1) {
@@ -55,23 +56,66 @@ export function RouterGame({ params, locale, onSubmit, disabled }: MinigameProps
     const n = params.nodes.find((x) => x.id === id)!;
     return { x: 20 + n.x * (W - 40), y: 16 + n.y * (H - 32) };
   };
-  const onPath = (a: number, b: number) => path.some((p, i) => i > 0 && ((path[i - 1] === a && p === b) || (path[i - 1] === b && p === a)));
+  const onPath = (a: number, b: number) =>
+    path.some(
+      (p, i) => i > 0 && ((path[i - 1] === a && p === b) || (path[i - 1] === b && p === a)),
+    );
   return (
     <div className="swc-game swc-router">
       <p className="swc-game-help">
-        {L(`⚡から光る点をたどって行き先へ。✕は通れない（${params.maxHops}本以内）`, `Route ⚡ to a destination through relays. ✕ is blocked (max ${params.maxHops} links)`)}
+        {L(
+          `⚡から光る点をたどって行き先へ。✕は通れない（${params.maxHops}本以内）`,
+          `Route ⚡ to a destination through relays. ✕ is blocked (max ${params.maxHops} links)`,
+        )}
       </p>
-      <svg viewBox={`0 0 ${W} ${H}`} className="swc-router-svg" role="group" aria-label={L('エネルギー経路', 'Energy routes')}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="swc-router-svg"
+        role="group"
+        aria-label={L('エネルギー経路', 'Energy routes')}
+      >
         {params.edges.map(([a, b]) => {
           const pa = pos(a);
           const pb = pos(b);
-          return <line key={`${a}-${b}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} className={onPath(a, b) ? 'swc-edge is-on' : 'swc-edge'} />;
+          return (
+            <line
+              key={`${a}-${b}`}
+              x1={pa.x}
+              y1={pa.y}
+              x2={pb.x}
+              y2={pb.y}
+              className={onPath(a, b) ? 'swc-edge is-on' : 'swc-edge'}
+            />
+          );
         })}
         {params.nodes.map((n) => {
           const p = pos(n.id);
-          const label = n.kind === 'SOURCE' ? '⚡' : n.kind === 'BLOCKED' ? '✕' : n.kind === 'SINK' ? (n.sink === 'RAIJIN' ? '雷' : n.sink === 'FUJIN' ? '風' : '蓄') : String(n.id);
-          const name = n.kind === 'SINK' && n.sink ? L(SINK_LABELS[n.sink].ja, SINK_LABELS[n.sink].en) : n.kind === 'BLOCKED' ? L('妨害', 'Blocked') : n.kind === 'SOURCE' ? L('電源', 'Source') : L(`中継${n.id}`, `Relay ${n.id}`);
-          const cls = ['swc-node', `is-${n.kind.toLowerCase()}`, path.includes(n.id) ? 'is-on' : '', canGo(n.id) ? 'is-next' : ''].join(' ');
+          const label =
+            n.kind === 'SOURCE'
+              ? '⚡'
+              : n.kind === 'BLOCKED'
+                ? '✕'
+                : n.kind === 'SINK'
+                  ? n.sink === 'RAIJIN'
+                    ? '雷'
+                    : n.sink === 'FUJIN'
+                      ? '風'
+                      : '蓄'
+                  : String(n.id);
+          const name =
+            n.kind === 'SINK' && n.sink
+              ? L(SINK_LABELS[n.sink].ja, SINK_LABELS[n.sink].en)
+              : n.kind === 'BLOCKED'
+                ? L('妨害', 'Blocked')
+                : n.kind === 'SOURCE'
+                  ? L('電源', 'Source')
+                  : L(`中継${n.id}`, `Relay ${n.id}`);
+          const cls = [
+            'swc-node',
+            `is-${n.kind.toLowerCase()}`,
+            path.includes(n.id) ? 'is-on' : '',
+            canGo(n.id) ? 'is-next' : '',
+          ].join(' ');
           return (
             <g
               key={n.id}
@@ -102,7 +146,12 @@ export function RouterGame({ params, locale, onSubmit, disabled }: MinigameProps
         })}
       </svg>
       <div className="swc-row">
-        <button type="button" className="swc-btn" onClick={() => setPath([0])} disabled={sent || path.length === 1}>
+        <button
+          type="button"
+          className="swc-btn"
+          onClick={() => setPath([0])}
+          disabled={sent || path.length === 1}
+        >
           ↺ {L('やり直す', 'Reset')}
         </button>
       </div>

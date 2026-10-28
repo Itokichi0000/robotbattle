@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { GameConfig, GameEvent, RaidState, Role, TaskInput } from '@sats-wars/shared';
 import { DEFAULT_GAME_CONFIG, REGION_IDS, makeGameConfig } from '@sats-wars/shared';
-import { type EngineCommand, type ReduceResult, type TaskChoice, createRaidState, reduce, replay } from './engine';
+import {
+  type EngineCommand,
+  type ReduceResult,
+  type TaskChoice,
+  createRaidState,
+  reduce,
+  replay,
+} from './engine';
 import { mulberry32 } from './random';
 import { evaluateTask, reticleAt, routerParams, shortestHops, solveTask } from './tasks';
 
@@ -35,7 +42,14 @@ class Sim {
     return this.run({ type: 'TICK', t: this.t });
   }
   board(pilotId: string, role: Role, isBot = false) {
-    return this.run({ type: 'BOARD', t: this.t, pilotId, callsign: pilotId.toUpperCase(), role, isBot });
+    return this.run({
+      type: 'BOARD',
+      t: this.t,
+      pilotId,
+      callsign: pilotId.toUpperCase(),
+      role,
+      isBot,
+    });
   }
   start() {
     this.run({ type: 'OPEN_LOBBY', t: this.t });
@@ -57,7 +71,8 @@ class Sim {
     if (o.code !== 'OK' || !o.task) return { code: o.code, result: null };
     const rand = mulberry32(this.events.length + 1);
     const input = solveTask(o.task.params, skill, rand, 700, choice.sink);
-    const needed = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 1500;
+    const needed =
+      'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 1500;
     this.wait(needed);
     return { code: 'OK', result: this.submit(pilotId, o.task.taskId, input) };
   }
@@ -102,7 +117,9 @@ describe('raid timeline', () => {
     expect(lead).toBeGreaterThanOrEqual(8 * S);
     const hit = sim.of('ATTACK_RESOLVED')[0]!;
     expect(hit.gameMs).toBe(tg.data.telegraph.resolvesAt);
-    expect(hit.data.hits[0]!.damage).toBeLessThanOrEqual(Math.ceil(DEFAULT_GAME_CONFIG.scout.damage * DEFAULT_GAME_CONFIG.trainingDamageRatio));
+    expect(hit.data.hits[0]!.damage).toBeLessThanOrEqual(
+      Math.ceil(DEFAULT_GAME_CONFIG.scout.damage * DEFAULT_GAME_CONFIG.trainingDamageRatio),
+    );
   });
 
   it('pause freezes the raid clock and the enemies', () => {
@@ -157,12 +174,16 @@ describe('cockpit seats', () => {
     expect(o.code).toBe('OK');
     expect(sim.request('a').code).toBe('TASK_OPEN');
     // Claiming a stop time later than really elapsed is rejected (task closed, no damage).
-    expect(sim.submit('a', o.task!.taskId, { role: 'GUNNER', stopAtMs: 9000 }).code).toBe('INVALID_INPUT');
+    expect(sim.submit('a', o.task!.taskId, { role: 'GUNNER', stopAtMs: 9000 }).code).toBe(
+      'INVALID_INPUT',
+    );
     expect(sim.submit('a', o.task!.taskId, { role: 'GUNNER', stopAtMs: 100 }).code).toBe('NO_TASK');
     sim.wait(10 * S);
     const o2 = sim.request('a');
     sim.wait(14 * S);
-    expect(sim.submit('a', o2.task!.taskId, { role: 'GUNNER', stopAtMs: 1000 }).code).toBe('EXPIRED');
+    expect(sim.submit('a', o2.task!.taskId, { role: 'GUNNER', stopAtMs: 1000 }).code).toBe(
+      'EXPIRED',
+    );
   });
 
   it('GUNNER weak points: ARM weakens, LEG delays the telegraph once', () => {
@@ -195,7 +216,9 @@ describe('cockpit seats', () => {
     if (p.role !== 'GUARDIAN') throw new Error();
     sim.wait(1000);
     const wrong = p.direction === 'LEFT' ? 'RIGHT' : 'LEFT';
-    expect(sim.submit('d2', o.task!.taskId, { role: 'GUARDIAN', direction: wrong, releaseAtMs: 900 })).toMatchObject({ ok: true, success: 0, effect: null });
+    expect(
+      sim.submit('d2', o.task!.taskId, { role: 'GUARDIAN', direction: wrong, releaseAtMs: 900 }),
+    ).toMatchObject({ ok: true, success: 0, effect: null });
     const { result } = sim.play('d', {}, 1);
     expect(result).toMatchObject({ success: 1, effect: { kind: 'SHIELD', cityId: 'kanto' } });
     sim.to(tg.resolvesAt / S + 0.1);
@@ -210,11 +233,20 @@ describe('cockpit seats', () => {
     const reserve = p.nodes.find((n) => n.sink === 'RESERVE')!;
     expect(shortestHops(p, reserve.id)).toBe(2);
     const good = solveTask(p, 1, mulberry32(1), 700, 'RESERVE');
-    expect(evaluateTask(p, good, 5000, 12000)).toEqual({ valid: true, success: 1, sink: 'RESERVE' });
+    expect(evaluateTask(p, good, 5000, 12000)).toEqual({
+      valid: true,
+      success: 1,
+      sink: 'RESERVE',
+    });
     const blocked = p.nodes.find((n) => n.kind === 'BLOCKED')!;
     const out = p.edges.find(([a, b]) => a === blocked.id && p.nodes[b]!.kind === 'SINK');
-    if (out) expect(evaluateTask(p, { role: 'ROUTER', path: [0, blocked.id, out[1]] }, 5000, 12000)).toMatchObject({ success: 0 });
-    expect(evaluateTask(p, { role: 'ROUTER', path: [0, reserve.id] }, 5000, 12000)).toMatchObject({ valid: false });
+    if (out)
+      expect(
+        evaluateTask(p, { role: 'ROUTER', path: [0, blocked.id, out[1]] }, 5000, 12000),
+      ).toMatchObject({ success: 0 });
+    expect(evaluateTask(p, { role: 'ROUTER', path: [0, reserve.id] }, 5000, 12000)).toMatchObject({
+      valid: false,
+    });
 
     const sim = new Sim();
     sim.board('r', 'ROUTER');
@@ -226,14 +258,21 @@ describe('cockpit seats', () => {
   });
 
   it('ENGINEER: exact order repairs; destroyed cities can be rebuilt with a good run', () => {
-    const cfg = makeGameConfig({ cityMaxHp: 10, minimumSurvivingCities: 1, trainingDamageRatio: 1 });
+    const cfg = makeGameConfig({
+      cityMaxHp: 10,
+      minimumSurvivingCities: 1,
+      trainingDamageRatio: 1,
+    });
     const sim = new Sim(cfg);
     sim.board('e', 'ENGINEER');
     sim.start();
     sim.to(40);
     expect(sim.state.cities.kanto.destroyed).toBe(true);
     const { result } = sim.play('e', { repair: { type: 'CITY', cityId: 'kanto' } }, 1);
-    expect(result).toMatchObject({ success: 1, effect: { kind: 'REPAIR', amount: cfg.cityRebuildHp } });
+    expect(result).toMatchObject({
+      success: 1,
+      effect: { kind: 'REPAIR', amount: cfg.cityRebuildHp },
+    });
     expect(sim.state.cities.kanto).toMatchObject({ destroyed: false, hp: cfg.cityRebuildHp });
     expect(sim.of('CITY_REBUILT')).toHaveLength(1);
   });
@@ -244,18 +283,26 @@ describe('cockpit seats', () => {
     sim.start();
     sim.to(8);
     sim.request('a');
-    expect(sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'ROUTER' }).outcome).toMatchObject({ code: 'OK' });
+    expect(
+      sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'ROUTER' }).outcome,
+    ).toMatchObject({ code: 'OK' });
     expect(sim.state.pilots.a!.task).toBeNull();
-    expect(sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'GUNNER' }).outcome).toMatchObject({ code: 'ROLE_COOLDOWN' });
+    expect(
+      sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'GUNNER' }).outcome,
+    ).toMatchObject({ code: 'ROLE_COOLDOWN' });
     sim.wait(20 * S);
-    expect(sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'GUNNER' }).outcome).toMatchObject({ code: 'OK' });
+    expect(
+      sim.run({ type: 'CHANGE_ROLE', t: sim.t, pilotId: 'a', role: 'GUNNER' }).outcome,
+    ).toMatchObject({ code: 'OK' });
   });
 });
 
 describe('cooperation', () => {
   it('a crowd piling onto one seat is normalised: 9 gunners do not hit 3× harder than 3', () => {
     const totalDamage = (n: number) => {
-      const sim = new Sim(makeGameConfig({ difficultyMaxScale: 1, difficultyMinScale: 1, bossBaseHp: 100_000 }));
+      const sim = new Sim(
+        makeGameConfig({ difficultyMaxScale: 1, difficultyMinScale: 1, bossBaseHp: 100_000 }),
+      );
       for (let i = 0; i < n; i++) sim.board(`g${i}`, 'GUNNER');
       sim.start();
       sim.to(272);
@@ -388,7 +435,9 @@ describe('神雷風陣 and outcomes', () => {
   });
 
   it('defeating NULL CORE wins with a 1000-point scale score and role MVPs', () => {
-    const sim = new Sim(makeGameConfig({ bossBaseHp: 60, difficultyMinScale: 1, difficultyMaxScale: 1 }));
+    const sim = new Sim(
+      makeGameConfig({ bossBaseHp: 60, difficultyMinScale: 1, difficultyMaxScale: 1 }),
+    );
     sim.board('g', 'GUNNER');
     sim.board('d', 'GUARDIAN');
     sim.start();
@@ -404,7 +453,9 @@ describe('神雷風陣 and outcomes', () => {
     expect(sim.state.phase).toBe('SUCCEEDED');
     expect(r.score.bossDefeat).toBe(200);
     expect(r.score.total).toBeLessThanOrEqual(1000);
-    expect(r.score.total).toBe(r.score.citySurvival + r.score.speed + r.score.coordination + r.score.bossDefeat);
+    expect(r.score.total).toBe(
+      r.score.citySurvival + r.score.speed + r.score.coordination + r.score.bossDefeat,
+    );
     expect(r.mvps.GUNNER?.pilotId).toBe('g');
     expect(r.clearTimeMs).toBe(r.endedAtGameMs);
   });
@@ -432,9 +483,18 @@ describe('determinism', () => {
   });
 
   it('reticle math is shared with the UI', () => {
-    const p = { role: 'GUNNER' as const, periodMs: 2000, phase: 0, ringCenter: 0.5, ringWidth: 0.1 };
+    const p = {
+      role: 'GUNNER' as const,
+      periodMs: 2000,
+      phase: 0,
+      ringCenter: 0.5,
+      ringWidth: 0.1,
+    };
     expect(reticleAt(p, 500)).toBeCloseTo(0.5);
-    expect(evaluateTask(p, { role: 'GUNNER', stopAtMs: 500 }, 600, 12000)).toEqual({ valid: true, success: 1 });
+    expect(evaluateTask(p, { role: 'GUNNER', stopAtMs: 500 }, 600, 12000)).toEqual({
+      valid: true,
+      success: 1,
+    });
     expect(REGION_IDS).toHaveLength(8);
   });
 });

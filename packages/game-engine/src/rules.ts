@@ -19,7 +19,16 @@ import { CITY_INFO, REGION_IDS } from '@sats-wars/shared';
 /** Read-only view the helpers need (also buildable from a public snapshot). */
 export type Board = Pick<
   RaidState,
-  'config' | 'cities' | 'robots' | 'enemies' | 'telegraphs' | 'bossId' | 'reserveEnergy' | 'jammedUntil' | 'gameMs' | 'phase'
+  | 'config'
+  | 'cities'
+  | 'robots'
+  | 'enemies'
+  | 'telegraphs'
+  | 'bossId'
+  | 'reserveEnergy'
+  | 'jammedUntil'
+  | 'gameMs'
+  | 'phase'
 >;
 
 export const ms = (seconds: number) => seconds * 1000;
@@ -65,7 +74,11 @@ export function difficultyScale(c: GameConfig, activePilots: number): number {
  * succeeding in the same seat recently share that strength, so spreading over
  * all four seats is always stronger than piling onto one.
  */
-export function roleScale(s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>, role: Role, includePilotId?: string): number {
+export function roleScale(
+  s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>,
+  role: Role,
+  includePilotId?: string,
+): number {
   const since = s.gameMs - ms(s.config.activeWindowSeconds);
   const ids = new Set(
     Object.values(s.pilots)
@@ -84,7 +97,10 @@ export function robotPower(c: GameConfig, r: RobotState): number {
   return health * component * (1 + (c.energyBoostMax * r.energy) / 100);
 }
 
-export const ROBOT_FOR_ROLE: Partial<Record<Role, RobotId>> = { GUNNER: 'RAIJIN', GUARDIAN: 'FUJIN' };
+export const ROBOT_FOR_ROLE: Partial<Record<Role, RobotId>> = {
+  GUNNER: 'RAIJIN',
+  GUARDIAN: 'FUJIN',
+};
 
 export function liveEnemies(b: Pick<Board, 'enemies'>): Enemy[] {
   return b.enemies.filter((e) => e.hp > 0);
@@ -96,7 +112,9 @@ export function upcomingTelegraphs(b: Pick<Board, 'telegraphs'>): Telegraph[] {
 }
 
 /** Damage each city would take from the pending telegraphs (after current shields). */
-export function pendingCityDamage(b: Pick<Board, 'telegraphs' | 'cities' | 'enemies'>): Partial<Record<RegionId, number>> {
+export function pendingCityDamage(
+  b: Pick<Board, 'telegraphs' | 'cities' | 'enemies'>,
+): Partial<Record<RegionId, number>> {
   const raw: Partial<Record<RegionId, number>> = {};
   for (const t of b.telegraphs) {
     const e = b.enemies.find((x) => x.id === t.enemyId);
@@ -122,16 +140,28 @@ export function recommendGunnerTarget(b: Board): { enemyId: number; weakpoint: W
   const pending = pendingCityDamage(b);
   const lethal = (t: Telegraph) => t.targets.some((id) => (pending[id] ?? 0) >= b.cities[id].hp);
   // Stop an escort whose attack would destroy a city; otherwise the boss is the job.
-  const urgent = upcomingTelegraphs(b).find((t) => t.enemyId !== b.bossId && lethal(t) && enemies.some((e) => e.id === t.enemyId));
+  const urgent = upcomingTelegraphs(b).find(
+    (t) => t.enemyId !== b.bossId && lethal(t) && enemies.some((e) => e.id === t.enemyId),
+  );
   if (urgent) return { enemyId: urgent.enemyId, weakpoint: 'CORE' };
-  if (boss) return { enemyId: boss.id, weakpoint: boss.weaken < b.config.gunner.armWeakenMax && boss.partHits.ARM < 2 ? 'ARM' : 'CORE' };
+  if (boss)
+    return {
+      enemyId: boss.id,
+      weakpoint:
+        boss.weaken < b.config.gunner.armWeakenMax && boss.partHits.ARM < 2 ? 'ARM' : 'CORE',
+    };
   const next = upcomingTelegraphs(b).find((t) => enemies.some((e) => e.id === t.enemyId));
   if (next) return { enemyId: next.enemyId, weakpoint: 'CORE' };
-  return { enemyId: [...enemies].sort((a, z) => a.hp - z.hp || a.id - z.id)[0]!.id, weakpoint: 'CORE' };
+  return {
+    enemyId: [...enemies].sort((a, z) => a.hp - z.hp || a.id - z.id)[0]!.id,
+    weakpoint: 'CORE',
+  };
 }
 
 /** The threat a GUARDIAN should cover: soonest one that would really hurt. */
-export function recommendGuardianTarget(b: Board): { telegraphId: number; cityId: RegionId } | { cityId: RegionId } {
+export function recommendGuardianTarget(
+  b: Board,
+): { telegraphId: number; cityId: RegionId } | { cityId: RegionId } {
   const pending = pendingCityDamage(b);
   for (const t of upcomingTelegraphs(b)) {
     const city = t.targets.find((id) => (pending[id] ?? 0) > 0);
@@ -140,7 +170,9 @@ export function recommendGuardianTarget(b: Board): { telegraphId: number; cityId
   const first = upcomingTelegraphs(b)[0];
   if (first) return { telegraphId: first.id, cityId: first.targets[0]! };
   // No threat: pre-shield the weakest standing city.
-  const standing = standingCities(b.cities).sort((a, z) => b.cities[a].hp + b.cities[a].shield - (b.cities[z].hp + b.cities[z].shield));
+  const standing = standingCities(b.cities).sort(
+    (a, z) => b.cities[a].hp + b.cities[a].shield - (b.cities[z].hp + b.cities[z].shield),
+  );
   return { cityId: standing[0] ?? 'kanto' };
 }
 
@@ -153,21 +185,39 @@ export function recommendSink(b: Board): EnergySink {
 export function recommendRepair(b: Board): RepairTarget {
   if (b.jammedUntil > b.gameMs) return { type: 'UNJAM' };
   const robots = (['RAIJIN', 'FUJIN'] as const).filter((r) => b.robots[r].componentDamaged);
-  if (robots.length) return { type: 'ROBOT', robot: robots.sort((a, z) => b.robots[a].health - b.robots[z].health)[0]! };
-  const rebuild = REGION_IDS.find((id) => b.cities[id].destroyed && b.cities[id].rebuildReadyAt <= b.gameMs);
+  if (robots.length)
+    return {
+      type: 'ROBOT',
+      robot: robots.sort((a, z) => b.robots[a].health - b.robots[z].health)[0]!,
+    };
+  const rebuild = REGION_IDS.find(
+    (id) => b.cities[id].destroyed && b.cities[id].rebuildReadyAt <= b.gameMs,
+  );
   if (rebuild) return { type: 'CITY', cityId: rebuild };
   const hurt = standingCities(b.cities)
     .filter((id) => b.cities[id].hp < b.config.cityMaxHp)
     .sort((a, z) => b.cities[a].hp - b.cities[z].hp);
   if (hurt[0]) return { type: 'CITY', cityId: hurt[0] };
-  return { type: 'ROBOT', robot: b.robots.RAIJIN.health <= b.robots.FUJIN.health ? 'RAIJIN' : 'FUJIN' };
+  return {
+    type: 'ROBOT',
+    robot: b.robots.RAIJIN.health <= b.robots.FUJIN.health ? 'RAIJIN' : 'FUJIN',
+  };
 }
 
 /** Which seat the raid needs most right now (shown as "必要な役割"). */
 export function neededRole(b: Board): Role {
   const pending = pendingCityDamage(b);
   if (Object.keys(pending).length) return 'GUARDIAN';
-  if (b.jammedUntil > b.gameMs || b.robots.RAIJIN.componentDamaged || b.robots.FUJIN.componentDamaged) return 'ENGINEER';
-  if ((b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE') && b.reserveEnergy < b.config.special.energyMinimum) return 'ROUTER';
+  if (
+    b.jammedUntil > b.gameMs ||
+    b.robots.RAIJIN.componentDamaged ||
+    b.robots.FUJIN.componentDamaged
+  )
+    return 'ENGINEER';
+  if (
+    (b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE') &&
+    b.reserveEnergy < b.config.special.energyMinimum
+  )
+    return 'ROUTER';
   return 'GUNNER';
 }
