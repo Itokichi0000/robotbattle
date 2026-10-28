@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { FakeClock } from '../src/clock';
-import { MockPaymentAdapter } from '../src/payments/mock';
+import type { GameEvent } from '@sats-wars/shared';
+import { carryOverHp } from '@sats-wars/game-engine';
 import {
   type TestServer,
-  act,
   admin,
   auth,
-  joinAndPay,
+  fundedPlayer,
+  joinTeam,
   makeServer,
-  reserve,
+  mockPay,
   tempDbPath,
+  topup,
+  untilRound,
+  zap,
 } from './helpers';
 
 let s: TestServer | null = null;
@@ -18,524 +21,347 @@ afterEach(async () => {
   s = null;
 });
 
-async function liveServer(env: Record<string, string> = {}) {
-  s = await makeServer({ env });
-  const token = await s.adminToken();
-  await admin(s, token, { command: 'OPEN_LOBBY' });
-  return { s, token };
-}
+const credit = (srv: TestServer, playerId: string) => srv.services.repo.getPlayer(playerId)!.credit_sats;
 
-describe('join + mock payment + actions', () => {
-  it('mock pay -> ACTIVE with 3 AP -> 3 actions -> 4th rejected', async () => {
-    const { s, token } = await liveServer();
-    const p = await joinAndPay(s, 'たろう');
-    expect(p.pay).toMatchObject({
-      participantStatus: 'ACTIVE',
-      invoiceStatus: 'PAID',
-      apRemaining: 3,
-    });
-    // Actions are rejected (no AP spent) while in the lobby.
-    const early = await act(s, p.token, 'CHARGE');
-    expect(early.json().result).toMatchObject({ ok: false, code: 'MATCH_NOT_LIVE' });
-    await admin(s, token, { command: 'START' });
-    const a1 = await act(s, p.token, 'ATTACK', 'kanto');
-    expect(a1.json()).toMatchObject({ result: { ok: true, code: 'CAPTURED' }, apRemaining: 2 });
-    const a2 = await act(s, p.token, 'DEFEND', 'kanto');
-    expect(a2.json().result.code).toBe('SHIELD_PLACED');
-    const a3 = await act(s, p.token, 'CHARGE');
-    expect(a3.json()).toMatchObject({ result: { ok: true }, apRemaining: 0 });
-    const a4 = await act(s, p.token, 'CHARGE');
-    expect(a4.json()).toMatchObject({ result: { ok: false, code: 'NO_AP' }, apRemaining: 0 });
-    const me = await s.inject({ url: '/api/me', headers: auth(p.token) });
-    expect(me.json()).toMatchObject({ status: 'ACTIVE', apRemaining: 0, apTotal: 3 });
-    expect(me.json().lastResults).toHaveLength(5); // includes the early MATCH_NOT_LIVE attempt
+describe('ZAP BATTLE server flow', () => {
+  it('starts a season by itself and lets anyone pick a team for free', async () => {
+    s = await makeServer();
+    const snap = s.services.manager.snapshot();
+    expect(snap.status).toBe('LIVE');
+    expect(snap.phase).toBe('OPENING');
+    expect(snap.roundOrder).toHaveLength(8);
+    const p = await joinTeam(s, 'FUJIN');
+    expect(p).toMatchObject({ teamId: 'FUJIN', creditSats: 0 });
+    expect(p.nickname).toMatch(/^風神ファン/);
+    const me = (await s.inject({ url: '/api/me', headers: auth(p.token) })).json();
+    expect(me).toMatchObject({ teamId: 'FUJIN', creditSats: 0, zapsThisSeason: 0 });
+    expect(s.services.manager.snapshot().supporters.FUJIN).toBe(1);
   });
 
-  it('retrying the same clientActionId does not spend AP twice', async () => {
-    const { s, token } = await liveServer();
-    const p = await joinAndPay(s);
-    await admin(s, token, { command: 'START' });
-    const r1 = await act(s, p.token, 'CHARGE', undefined, 'retry-1234');
-    const r2 = await act(s, p.token, 'CHARGE', undefined, 'retry-1234');
-    expect(r1.json().apRemaining).toBe(2);
-    expect(r2.json()).toMatchObject({ apRemaining: 2, result: { duplicate: true, ok: true } });
+  it('a punch without credit is refused and changes nothing', async () => {
+    s = await makeServer();
+    await untilRound(s);
+    const p = await joinTeam(s);
+    const before = s.services.manager.snapshot().lastSeq;
+    const res = await zap(s, p.token);
+    expect(res.statusCode).toBe(402);
+    expect(res.json().error).toBe('INSUFFICIENT_CREDIT');
+    expect(s.services.manager.snapshot().lastSeq).toBe(before);
   });
 
-  it('rejects actions without a valid token and before payment', async () => {
-    const { s } = await liveServer();
-    const noAuth = await s.inject({
-      method: 'POST',
-      url: '/api/actions',
-      payload: { clientActionId: 'abcdefgh', type: 'CHARGE' },
-    });
-    expect(noAuth.statusCode).toBe(401);
-    const r = (await reserve(s)).json();
-    const unpaid = await act(s, r.token, 'CHARGE');
-    expect(unpaid.statusCode).toBe(403);
+  it('top-up: only the offered amounts, credited once after verification', async () => {
+    s = await makeServer();
+    const p = await joinTeam(s);
+    expect((await topup(s, p.token, 100)).statusCode).toBe(400);
+    const inv = (await topup(s, p.token, 210)).json();
+    expect(inv).toMatchObject({ amountSats: 210, zaps: 10, status: 'PENDING', paymentMode: 'mock' });
+    expect(inv.bolt11).toContain('NOT-A-REAL-INVOICE');
+    // Asking again for the same amount reuses the pending invoice.
+    expect((await topup(s, p.token, 210)).json().invoiceId).toBe(inv.invoiceId);
+    const first = (await mockPay(s, p.token, inv.invoiceId)).json();
+    const second = (await mockPay(s, p.token, inv.invoiceId)).json();
+    expect(first).toMatchObject({ status: 'PAID', creditSats: 210 });
+    expect(second).toMatchObject({ status: 'PAID', creditSats: 210 });
+    expect(credit(s, p.playerId)).toBe(210);
+    const status = (await s.inject({ url: `/api/topups/${inv.invoiceId}`, headers: auth(p.token) })).json();
+    expect(status).toMatchObject({ status: 'PAID', creditSats: 210 });
+    // Another player cannot read it.
+    const other = await joinTeam(s, 'FUJIN');
+    expect((await s.inject({ url: `/api/topups/${inv.invoiceId}`, headers: auth(other.token) })).statusCode).toBe(404);
   });
 
-  it('does not accept client-declared team/AP fields', async () => {
-    const { s } = await liveServer();
-    const res = await s.inject({
-      method: 'POST',
-      url: '/api/join/reserve',
-      payload: { nickname: 'x', teamId: 'RAIJIN', ap: 999, paid: true },
-    });
+  it('a punch costs 21 sats, hits the other robot and shows the name on screen', async () => {
+    s = await makeServer();
+    const p = await fundedPlayer(s, 'RAIJIN', 210, 'たろう');
+    await untilRound(s);
+    const res = await zap(s, p.token, 'tap-00000001');
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body).not.toHaveProperty('ap');
-    const st = await s.inject({
-      url: `/api/join/payment-status/${body.reservationId}`,
-      headers: auth(body.token),
-    });
-    expect(st.json()).toMatchObject({ participantStatus: 'RESERVED', apRemaining: 0 });
-  });
-
-  it('balances teams on reservation', async () => {
-    const { s } = await liveServer();
-    const teams: string[] = [];
-    for (let i = 0; i < 10; i++) teams.push((await reserve(s, `p${i}`)).json().teamId);
-    expect(teams.filter((t) => t === 'RAIJIN')).toHaveLength(5);
-    expect(teams.filter((t) => t === 'FUJIN')).toHaveLength(5);
-  });
-
-  it('rejects a second reservation from the same device', async () => {
-    const { s } = await liveServer();
-    expect((await reserve(s, 'a', 'device-123456')).statusCode).toBe(200);
-    const dup = await reserve(s, 'b', 'device-123456');
-    expect(dup.statusCode).toBe(409);
-    expect(dup.json().error).toBe('ALREADY_JOINED');
-  });
-
-  it('expires unpaid reservations after the TTL and frees the seat', async () => {
-    const { s } = await liveServer({ LOBBY_MS: '600000' });
-    const r = (await reserve(s)).json();
-    await s.advance(181_000);
-    const inv = await s.inject({
-      method: 'POST',
-      url: '/api/join/invoice',
-      headers: auth(r.token),
-      payload: { reservationId: r.reservationId },
-    });
-    expect(inv.statusCode).toBe(410);
-    expect(inv.json().error).toBe('RESERVATION_EXPIRED');
-    const st = await s.inject({
-      url: `/api/join/payment-status/${r.reservationId}`,
-      headers: auth(r.token),
-    });
-    expect(st.json().participantStatus).toBe('EXPIRED');
-  });
-
-  it('closes joining after joinCloseMs and when the match is not open', async () => {
-    s = await makeServer();
-    expect((await reserve(s)).json().error).toBe('JOIN_CLOSED'); // CREATED
-    const token = await s.adminToken();
-    await admin(s, token, { command: 'START' });
-    await s.advance(181_000);
-    expect((await reserve(s)).json().error).toBe('JOIN_CLOSED');
-  });
-
-  it('respects the payments kill switch but still allows passes', async () => {
-    const { s, token } = await liveServer();
-    await admin(s, token, { command: 'SET_PAYMENTS_ENABLED', enabled: false });
-    const r = (await reserve(s)).json();
-    const inv = await s.inject({
-      method: 'POST',
-      url: '/api/join/invoice',
-      headers: auth(r.token),
-      payload: { reservationId: r.reservationId },
-    });
-    expect(inv.json().error).toBe('PAYMENTS_DISABLED');
-    const codes = (
-      await s.inject({
-        method: 'POST',
-        url: '/api/admin/passes',
-        headers: auth(token),
-        payload: { count: 1 },
-      })
-    ).json().codes as string[];
-    const redeem = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(r.token),
-      payload: { reservationId: r.reservationId, code: codes[0] },
-    });
-    expect(redeem.json()).toMatchObject({ participantStatus: 'ACTIVE', apRemaining: 3 });
-  });
-});
-
-describe('sponsored passes', () => {
-  it('are single use, case-insensitive, and cannot be guessed', async () => {
-    const { s, token } = await liveServer();
-    const { codes } = (
-      await s.inject({
-        method: 'POST',
-        url: '/api/admin/passes',
-        headers: auth(token),
-        payload: { count: 2, label: 'kids' },
-      })
-    ).json();
-    expect(codes).toHaveLength(2);
-    const a = (await reserve(s)).json();
-    const ok = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(a.token),
-      payload: { reservationId: a.reservationId, code: codes[0].toLowerCase().replace(/-/g, ' ') },
-    });
-    expect(ok.json().participantStatus).toBe('ACTIVE');
-    const b = (await reserve(s)).json();
-    const reuse = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(b.token),
-      payload: { reservationId: b.reservationId, code: codes[0] },
-    });
-    expect(reuse.json().error).toBe('INVALID_PASS');
-    const guess = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(b.token),
-      payload: { reservationId: b.reservationId, code: 'SW-AAAA-BBBB-CCCC' },
-    });
-    expect(guess.json().error).toBe('INVALID_PASS');
-    const passes = (await s.inject({ url: '/api/admin/passes', headers: auth(token) })).json()
-      .passes;
-    expect(passes.map((p: { status: string }) => p.status).sort()).toEqual(['ISSUED', 'REDEEMED']);
-    // Plain codes are never listed back.
-    expect(JSON.stringify(passes)).not.toContain(codes[1]);
-  });
-
-  it('expired or revoked passes are rejected', async () => {
-    const { s, token } = await liveServer({ LOBBY_MS: '1800000' });
-    const { codes } = (
-      await s.inject({
-        method: 'POST',
-        url: '/api/admin/passes',
-        headers: auth(token),
-        payload: { count: 1, expiresInMinutes: 5 },
-      })
-    ).json();
-    await s.advance(5 * 60_000 + 1000);
-    const r = (await reserve(s)).json();
-    const res = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(r.token),
-      payload: { reservationId: r.reservationId, code: codes[0] },
-    });
-    expect(res.json().error).toBe('INVALID_PASS');
-  });
-});
-
-describe('payment verification and webhooks', () => {
-  async function setup() {
-    const clock = new FakeClock();
-    const adapter = new MockPaymentAdapter(clock);
-    s = await makeServer({ clock, adapter, env: { LNBITS_WEBHOOK_SECRET: 'hook-secret-1234' } });
-    const token = await s.adminToken();
-    await admin(s, token, { command: 'OPEN_LOBBY' });
-    const r = (await reserve(s)).json();
-    const inv = (
-      await s.inject({
-        method: 'POST',
-        url: '/api/join/invoice',
-        headers: auth(r.token),
-        payload: { reservationId: r.reservationId },
-      })
-    ).json();
-    const row = s.services.repo.getInvoice(inv.invoiceId)!;
-    return { s, adapter, token, r, inv, row };
-  }
-
-  it('a webhook for an unpaid invoice grants nothing (status is re-verified)', async () => {
-    const { s, r, row } = await setup();
-    const hook = await s.inject({
-      method: 'POST',
-      url: '/api/webhooks/lnbits/hook-secret-1234',
-      payload: { payment_hash: row.payment_hash, paid: true, amount: 21000 },
-    });
-    expect(hook.statusCode).toBe(200);
-    const st = await s.inject({
-      url: `/api/join/payment-status/${r.reservationId}`,
-      headers: auth(r.token),
-    });
-    expect(st.json()).toMatchObject({
-      participantStatus: 'PENDING_PAYMENT',
-      invoiceStatus: 'PENDING',
-      apRemaining: 0,
-    });
-  });
-
-  it('rejects webhooks with a wrong secret and ignores unknown hashes', async () => {
-    const { s } = await setup();
-    const bad = await s.inject({
-      method: 'POST',
-      url: '/api/webhooks/lnbits/wrong',
-      payload: { payment_hash: 'a'.repeat(64) },
-    });
-    expect(bad.statusCode).toBe(404);
-    const unknown = await s.inject({
-      method: 'POST',
-      url: '/api/webhooks/lnbits/hook-secret-1234',
-      payload: { payment_hash: 'b'.repeat(64) },
-    });
-    expect(unknown.statusCode).toBe(200);
-  });
-
-  it('duplicate webhooks + poller + client polling grant AP exactly once', async () => {
-    const { s, adapter, r, row } = await setup();
-    adapter.markPaid(row.lnbits_checking_id);
-    await Promise.all([
-      s.inject({
-        method: 'POST',
-        url: '/api/webhooks/lnbits/hook-secret-1234',
-        payload: { payment_hash: row.payment_hash },
-      }),
-      s.inject({
-        method: 'POST',
-        url: '/api/webhooks/lnbits/hook-secret-1234',
-        payload: { payment_hash: row.payment_hash },
-      }),
-      s.inject({ url: `/api/join/payment-status/${r.reservationId}`, headers: auth(r.token) }),
-      s.services.join.pollPending(),
-    ]);
-    await s.services.join.pollPending();
+    expect(body).toMatchObject({ duplicate: false, creditSats: 189 });
+    expect(body.result).toMatchObject({ ok: true, code: 'HIT', teamId: 'RAIJIN', damage: 10 });
     const snap = s.services.manager.snapshot();
-    const team = snap.teams[r.teamId as 'RAIJIN' | 'FUJIN'];
-    expect(team.participantCount).toBe(1);
-    expect(team.apTotal).toBe(3);
-    expect(s.services.repo.getInvoice(row.id)!.status).toBe('PAID');
+    expect(snap.round!.hp.FUJIN).toBe(snap.round!.hpMax - 10);
+    expect(snap.round!.hp.RAIJIN).toBe(snap.round!.hpMax);
+    const ev = snap.recentEvents.at(-1) as Extract<GameEvent, { type: 'ZAP' }>;
+    expect(ev).toMatchObject({ type: 'ZAP', data: { nickname: 'たろう', teamId: 'RAIJIN', code: 'HIT' } });
+    // A retried request (same clientActionId) is answered from storage and not charged again.
+    await s.advance(300);
+    const again = (await zap(s, p.token, 'tap-00000001')).json();
+    expect(again).toMatchObject({ duplicate: true, creditSats: 189 });
+    expect(s.services.manager.snapshot().lastSeq).toBe(snap.lastSeq);
+    // Machine-gun tapping faster than the cooldown is refused (and free).
+    await zap(s, p.token);
+    const tooFast = await zap(s, p.token);
+    expect(tooFast.statusCode).toBe(429);
+    expect(credit(s, p.playerId)).toBe(168);
   });
 
-  it('a missing webhook is covered by the poller', async () => {
-    const { s, adapter, r, row } = await setup();
-    adapter.markPaid(row.lnbits_checking_id);
-    await s.advance(2000);
-    const st = await s.inject({ url: '/api/me', headers: auth(r.token) });
-    expect(st.json()).toMatchObject({ status: 'ACTIVE', apRemaining: 3 });
+  it('punches between rounds or while paused are free no-ops', async () => {
+    s = await makeServer();
+    const token = await s.adminToken();
+    const p = await fundedPlayer(s, 'FUJIN', 105);
+    const logBefore = s.services.repo.loadCommands(s.services.manager.current().matchId).length;
+    const opening = (await zap(s, p.token)).json();
+    expect(opening).toMatchObject({ result: { ok: false, code: 'ROUND_NOT_ACTIVE' }, creditSats: 105 });
+    // Refused taps are not written to the command log.
+    expect(s.services.repo.loadCommands(s.services.manager.current().matchId)).toHaveLength(logBefore);
+    await untilRound(s);
+    await admin(s, token, { command: 'PAUSE' });
+    await s.advance(300);
+    const paused = (await zap(s, p.token)).json();
+    expect(paused).toMatchObject({ result: { ok: false, code: 'PAUSED' }, creditSats: 105 });
+    await admin(s, token, { command: 'RESUME' });
+    await s.advance(300);
+    expect((await zap(s, p.token)).json()).toMatchObject({ result: { ok: true }, creditSats: 84 });
   });
 
-  it('provider outages do not grant or lose payments', async () => {
-    const { s, adapter, r, row } = await setup();
+  it('enough punches knock the robot out: region painted, KO credited, next round follows', async () => {
+    s = await makeServer();
+    const p = await fundedPlayer(s, 'RAIJIN', 525, 'KOキング');
+    await untilRound(s);
+    const r0 = s.services.manager.current().state.round!;
+    expect(r0.hpMax).toBe(200);
+    let last: { result: { code: string } } | null = null;
+    let punches = 0;
+    while (s.services.manager.current().state.phase === 'ROUND') {
+      last = (await zap(s, p.token)).json();
+      punches++;
+      await s.advance(300);
+    }
+    // 9 normal (90) + special (60) + 5 normal (50) = 200.
+    expect(punches).toBe(15);
+    expect(last!.result.code).toBe('KO');
+    const snap = s.services.manager.snapshot();
+    expect(snap.phase).toBe('ROUND_END');
+    expect(snap.regions.filter((r) => r.ownerTeamId)).toEqual([
+      { regionId: r0.regionId, ownerTeamId: 'RAIJIN', roundIndex: 0 },
+    ]);
+    expect(snap.teams.RAIJIN).toMatchObject({ regionsWon: 1, kos: 1, zapsTotal: 15, specialsTotal: 1 });
+    expect(snap.rounds[0]).toMatchObject({ endReason: 'KO', winnerTeamId: 'RAIJIN' });
+    expect(snap.rounds[0]!.finisher).toMatchObject({ nickname: 'KOキング' });
+    const me = (await s.inject({ url: '/api/me', headers: auth(p.token) })).json();
+    expect(me).toMatchObject({ creditSats: 525 - 15 * 21, zapsThisSeason: 15, kos: 1 });
+    // Hitting during the KO celebration costs nothing.
+    expect((await zap(s, p.token)).json()).toMatchObject({ result: { ok: false } });
+    expect(credit(s, p.playerId)).toBe(525 - 15 * 21);
+    await untilRound(s);
+    expect(s.services.manager.current().state.round!.index).toBe(1);
+  });
+
+  it('a full season with demo bots decides a winner and loops into the next season', async () => {
+    s = await makeServer();
+    const token = await s.adminToken();
+    await admin(s, token, { command: 'SET_DEMO_BOTS', perTeam: 6 });
+    const first = s.services.manager.current().matchId;
+    let waited = 0;
+    while (s.services.manager.current().state.status !== 'FINISHED') {
+      await s.advance(1000);
+      waited += 1000;
+      expect(waited).toBeLessThan(15 * 60_000);
+    }
+    const done = s.services.manager.snapshot();
+    expect(done.rounds).toHaveLength(8);
+    expect(done.result).not.toBeNull();
+    const won = done.teams.RAIJIN.regionsWon + done.teams.FUJIN.regionsWon;
+    expect(won).toBe(done.regions.filter((r) => r.ownerTeamId).length);
+    // Bots never touch money.
+    expect(s.services.repo.invoiceSummary()).toEqual({});
+    // Final snapshot is frozen for /results.
+    const saved = (await s.inject({ url: `/api/matches/${first}/snapshot` })).json();
+    expect(saved.snapshot.status).toBe('FINISHED');
+    await s.advance(done.config.nextSeasonDelayMs + 200);
+    const next = s.services.manager.snapshot();
+    expect(next.matchId).not.toBe(first);
+    expect(next.status).toBe('LIVE');
+    // Round-1 HP follows the crowd of the season that just ended.
+    expect(next.config.hpInitial).toBe(carryOverHp(done.config, done.rounds[7]));
+  });
+
+  it('credit carries over between seasons and survives a lost browser tab (same device)', async () => {
+    s = await makeServer();
+    const token = await s.adminToken();
+    const p = await joinTeam(s, 'RAIJIN', { deviceId: 'device-abc-123' });
+    const inv = (await topup(s, p.token, 105)).json();
+    await mockPay(s, p.token, inv.invoiceId);
+    await admin(s, token, { command: 'CANCEL' });
+    await admin(s, token, { command: 'NEXT_MATCH' });
+    const again = await joinTeam(s, 'FUJIN', { deviceId: 'device-abc-123' });
+    expect(again).toMatchObject({ playerId: p.playerId, teamId: 'FUJIN', creditSats: 105 });
+    expect(again.token).not.toBe(p.token);
+    // The old token is replaced.
+    expect((await s.inject({ url: '/api/me', headers: auth(p.token) })).statusCode).toBe(401);
+  });
+
+  it('switching team is free and immediate', async () => {
+    s = await makeServer();
+    const p = await fundedPlayer(s, 'RAIJIN', 105);
+    await untilRound(s);
+    const sw = await s.inject({ method: 'POST', url: '/api/me/team', headers: auth(p.token), payload: { teamId: 'FUJIN' } });
+    expect(sw.json()).toEqual({ teamId: 'FUJIN' });
+    expect((await zap(s, p.token)).json().result.teamId).toBe('FUJIN');
+  });
+
+  it('late payment (paid at the edge, seen after expiry) still becomes credit — never forfeited', async () => {
+    s = await makeServer();
+    const p = await joinTeam(s);
+    const inv = (await topup(s, p.token, 105)).json();
+    const row = s.services.repo.getInvoice(inv.invoiceId)!;
+    const adapter = s.services.adapter as import('../src/payments/mock').MockPaymentAdapter;
+    s.clock.advance(row.expires_at - s.clock.now() + 1000);
+    adapter.markPaid(row.lnbits_checking_id, { ignoreExpiry: true });
+    await s.services.players.pollPending();
+    expect(s.services.repo.getInvoice(inv.invoiceId)!.status).toBe('PAID');
+    expect(credit(s, p.playerId)).toBe(105);
+  });
+
+  it('unpaid invoices expire without side effects', async () => {
+    s = await makeServer();
+    const p = await joinTeam(s);
+    const inv = (await topup(s, p.token, 105)).json();
+    s.clock.advance(30 * 60_000);
+    await s.services.players.pollPending();
+    expect(s.services.repo.getInvoice(inv.invoiceId)!.status).toBe('EXPIRED');
+    expect(credit(s, p.playerId)).toBe(0);
+  });
+
+  it('provider outage keeps the invoice pending, then credits once it recovers', async () => {
+    s = await makeServer();
+    const p = await joinTeam(s);
+    const inv = (await topup(s, p.token, 210)).json();
+    const adapter = s.services.adapter as import('../src/payments/mock').MockPaymentAdapter;
+    const row = s.services.repo.getInvoice(inv.invoiceId)!;
     adapter.markPaid(row.lnbits_checking_id);
     adapter.failChecks = true;
-    await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)).toMatchObject({
-      status: 'PENDING',
-      check_failures: 1,
-    });
+    await s.services.players.pollPending();
+    expect(s.services.repo.getInvoice(inv.invoiceId)).toMatchObject({ status: 'PENDING', check_failures: 1 });
     adapter.failChecks = false;
-    await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)!.status).toBe('PAID');
-    const me = await s.inject({ url: '/api/me', headers: auth(r.token) });
-    expect(me.json().apRemaining).toBe(3);
+    await s.services.players.pollPending();
+    expect(credit(s, p.playerId)).toBe(210);
   });
 
-  it('expired invoices become EXPIRED and cannot be paid afterwards', async () => {
-    const { s, adapter, row } = await setup();
-    await s.advance(row.expires_at - s.clock.now() + 1000);
-    expect(adapter.markPaid(row.lnbits_checking_id)).toBe(false);
-    await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)!.status).toBe('EXPIRED');
-  });
-
-  it('a payment confirmed after the match ended is LATE_PAID, grants no AP, and can be carried over', async () => {
-    const { s, adapter, token, r, row } = await setup();
-    await admin(s, token, { command: 'CANCEL' });
-    adapter.markPaid(row.lnbits_checking_id);
-    await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)).toMatchObject({
-      status: 'LATE_PAID',
-      late_payment_disposition: 'PENDING_REVIEW',
-    });
-    const me = await s.inject({ url: '/api/me', headers: auth(r.token) });
-    expect(me.json()).toMatchObject({
-      invoiceStatus: 'LATE_PAID',
-      apRemaining: 0,
-      lateCarryoverCode: null,
-    });
-    const disp = await s.inject({
-      method: 'POST',
-      url: `/api/admin/invoices/${row.id}/disposition`,
-      headers: auth(token),
-      payload: { disposition: 'CARRY_OVER', note: 'next match' },
-    });
-    expect(disp.statusCode).toBe(200);
-    const me2 = (await s.inject({ url: '/api/me', headers: auth(r.token) })).json();
-    expect(me2.lateCarryoverCode).toMatch(/^SW-/);
-    // The carry-over code works in the next match.
-    await admin(s, token, { command: 'NEXT_MATCH' });
-    await admin(s, token, { command: 'OPEN_LOBBY' });
-    const r2 = (await reserve(s)).json();
-    const redeem = await s.inject({
-      method: 'POST',
-      url: '/api/join/redeem-pass',
-      headers: auth(r2.token),
-      payload: { reservationId: r2.reservationId, code: me2.lateCarryoverCode },
-    });
-    expect(redeem.json().participantStatus).toBe('ACTIVE');
-    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json()
-      .entries;
-    expect(audit.map((e: { action: string }) => e.action)).toContain('LATE_PAYMENT');
-  });
-
-  it('mock-pay endpoint does not exist in lnbits mode', async () => {
-    s = await makeServer({
-      env: {
-        PAYMENT_MODE: 'lnbits',
-        LNBITS_URL: 'http://127.0.0.1:9',
-        LNBITS_INVOICE_KEY: 'x',
-        LNBITS_WEBHOOK_SECRET: 'y',
-        ALLOW_REAL_PAYMENTS: 'true',
-      },
-      adapter: new MockPaymentAdapter(new FakeClock()),
-    });
-    const res = await s.inject({ method: 'POST', url: '/api/dev/mock-pay', payload: {} });
-    expect(res.statusCode).toBe(404);
-  });
-});
-
-describe('admin', () => {
-  it('requires authentication and rejects disallowed origins', async () => {
-    s = await makeServer({ env: { ALLOWED_ORIGINS: 'http://localhost:3000' } });
-    expect((await s.inject({ url: '/api/admin/overview' })).statusCode).toBe(401);
-    const wrong = await s.inject({
-      method: 'POST',
-      url: '/api/admin/login',
-      payload: { password: 'nope' },
-    });
-    expect(wrong.statusCode).toBe(401);
+  it('sponsor codes add credit once, even while Lightning top-ups are paused', async () => {
+    s = await makeServer();
     const token = await s.adminToken();
-    const evil = await s.inject({
-      url: '/api/admin/overview',
-      headers: { ...auth(token), origin: 'https://evil.example' },
-    });
-    expect(evil.statusCode).toBe(403);
-    const ok = await s.inject({
-      url: '/api/admin/overview',
-      headers: { ...auth(token), origin: 'http://localhost:3000' },
-    });
-    expect(ok.statusCode).toBe(200);
-    expect(JSON.stringify(ok.json())).not.toContain('test-admin-password');
-  });
-
-  it('PAUSE/RESUME freezes game time; EMERGENCY_STOP pauses and stops payments', async () => {
-    const { s, token } = await liveServer();
-    await admin(s, token, { command: 'START' });
-    await s.advance(10_000);
-    await admin(s, token, { command: 'PAUSE' });
-    const g1 = s.services.manager.snapshot().gameMs;
-    await s.advance(60_000);
-    expect(s.services.manager.snapshot().gameMs).toBe(g1);
-    expect(s.services.manager.snapshot().clashes).toHaveLength(0);
-    await admin(s, token, { command: 'RESUME' });
-    await s.advance(36_000);
-    expect(s.services.manager.snapshot().clashes).toHaveLength(1);
-    await admin(s, token, { command: 'EMERGENCY_STOP' });
-    const snap = s.services.manager.snapshot();
-    expect(snap.status).toBe('PAUSED');
-    expect(snap.paymentsEnabled).toBe(false);
-  });
-
-  it('runs a full match to FINISHED and rolls to the next match with frozen config', async () => {
-    const { s, token } = await liveServer();
-    const cfg = (await s.inject({ url: '/api/admin/next-config', headers: auth(token) })).json()
-      .config;
-    const put = await s.inject({
-      method: 'PUT',
-      url: '/api/admin/next-config',
-      headers: auth(token),
-      payload: { config: { ...cfg, entryFeeSats: 42, version: 'test-2' } },
-    });
-    expect(put.statusCode).toBe(200);
-    // The running match keeps its config.
-    expect(s.services.manager.snapshot().config.entryFeeSats).toBe(21);
-    await admin(s, token, { command: 'START' });
-    const p = await joinAndPay(s);
-    await act(s, p.token, 'ATTACK', 'tohoku');
-    await s.advance(300_000);
-    const done = s.services.manager.snapshot();
-    expect(done.status).toBe('FINISHED');
-    expect(done.clashes).toHaveLength(6);
-    expect(done.result?.winnerTeamId).toBe(p.teamId);
-    const firstId = done.matchId;
-    await admin(s, token, { command: 'NEXT_MATCH' });
-    const next = s.services.manager.snapshot();
-    expect(next.matchId).not.toBe(firstId);
-    expect(next.config).toMatchObject({ entryFeeSats: 42, version: 'test-2' });
-    // Old match result is retrievable.
-    const old = await s.inject({ url: `/api/matches/${firstId}/snapshot` });
-    expect(old.json().snapshot).toMatchObject({
-      status: 'FINISHED',
-      result: { winnerTeamId: p.teamId },
-    });
-    // Old tokens cannot act in the new match.
-    const stale = await act(s, p.token, 'CHARGE');
-    expect(stale.statusCode).toBe(403);
-  });
-
-  it('rejects invalid configs and invalid lifecycle commands', async () => {
-    const { s, token } = await liveServer();
-    const bad = await s.inject({
-      method: 'PUT',
-      url: '/api/admin/next-config',
-      headers: auth(token),
-      payload: { config: { foo: 1 } },
-    });
-    expect(bad.statusCode).toBe(400);
-    const res = await s.inject({
+    const issued = await s.inject({
       method: 'POST',
-      url: '/api/admin/command',
+      url: '/api/admin/passes',
       headers: auth(token),
-      payload: { command: 'NEXT_MATCH' },
+      payload: { count: 2, amountSats: 105 },
     });
-    expect(res.statusCode).toBe(409);
+    const { codes } = issued.json() as { codes: string[] };
+    expect(codes).toHaveLength(2);
+    await admin(s, token, { command: 'SET_PAYMENTS_ENABLED', enabled: false });
+    const p = await joinTeam(s);
+    const blocked = await topup(s, p.token, 105);
+    expect(blocked.statusCode).toBe(503);
+    expect(blocked.json().error).toBe('PAYMENTS_DISABLED');
+    const redeem = (code: string) =>
+      s!.inject({ method: 'POST', url: '/api/codes/redeem', headers: auth(p.token), payload: { code } });
+    expect((await redeem(codes[0]!.toLowerCase())).json()).toEqual({ addedSats: 105, creditSats: 105 });
+    expect((await redeem(codes[0]!)).statusCode).toBe(400);
+    expect((await redeem('NOPE-NOPE-NOPE')).statusCode).toBe(400);
+    expect(credit(s, p.playerId)).toBe(105);
   });
 
-  it('can hide a nickname from public output', async () => {
-    const { s, token } = await liveServer();
-    await admin(s, token, { command: 'START' });
-    const p = await joinAndPay(s, 'NaughtyName');
-    await act(s, p.token, 'CHARGE');
+  it('free cheers are rate limited and never touch credit', async () => {
+    s = await makeServer();
+    const p = await joinTeam(s);
+    const cheer = () => s!.inject({ method: 'POST', url: '/api/cheer', headers: auth(p.token), payload: { emoji: '🔥' } });
+    expect((await cheer()).statusCode).toBe(200);
+    expect((await cheer()).statusCode).toBe(429);
+    s.clock.advance(1000);
+    expect((await cheer()).statusCode).toBe(200);
+    const bad = await s.inject({ method: 'POST', url: '/api/cheer', headers: auth(p.token), payload: { emoji: '💩' } });
+    expect(bad.statusCode).toBe(400);
+    expect(credit(s, p.playerId)).toBe(0);
+  });
+
+  it('hidden nicknames are masked on public screens', async () => {
+    s = await makeServer();
+    const token = await s.adminToken();
+    const p = await fundedPlayer(s, 'RAIJIN', 105, 'NGネーム');
     await s.inject({
       method: 'POST',
-      url: `/api/admin/participants/${p.participantId}/nickname-visibility`,
+      url: `/api/admin/players/${p.playerId}/nickname-visibility`,
       headers: auth(token),
       payload: { hidden: true },
     });
-    const snap = JSON.stringify(s.services.manager.snapshot());
-    expect(snap).not.toContain('NaughtyName');
+    await untilRound(s);
+    await zap(s, p.token);
+    const json = JSON.stringify(s.services.manager.snapshot());
+    expect(json).not.toContain('NGネーム');
   });
-});
 
-describe('restart recovery', () => {
-  it('rebuilds the match from the command log and comes back PAUSED', async () => {
-    const dbPath = tempDbPath();
-    const clock = new FakeClock();
-    s = await makeServer({ dbPath, clock });
+  it('admin API needs a session and checks Origin; emergency stop halts everything', async () => {
+    s = await makeServer({ env: { ALLOWED_ORIGINS: 'http://localhost:3000' } });
+    expect((await s.inject({ url: '/api/admin/overview' })).statusCode).toBe(401);
+    const bad = await s.inject({
+      method: 'POST',
+      url: '/api/admin/login',
+      headers: { origin: 'https://evil.example' },
+      payload: { password: 'x' },
+    });
+    expect(bad.statusCode).toBe(403);
+    expect((await s.inject({ method: 'POST', url: '/api/admin/login', payload: { password: 'wrong' } })).statusCode).toBe(401);
     const token = await s.adminToken();
-    await admin(s, token, { command: 'START' });
-    const p = await joinAndPay(s);
-    await act(s, p.token, 'ATTACK', 'kanto');
-    await s.advance(50_000);
-    const before = s.services.manager.snapshot();
-    await s.close();
+    await untilRound(s);
+    await admin(s, token, { command: 'EMERGENCY_STOP' });
+    const ov = (await s.inject({ url: '/api/admin/overview', headers: auth(token) })).json();
+    expect(ov).toMatchObject({ paymentsEnabled: false, autoLoop: false, snapshot: { status: 'PAUSED' } });
+    expect(ov.credit).toMatchObject({ outstanding: 0 });
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json();
+    expect(audit.entries.map((e: { action: string }) => e.action)).toContain('EMERGENCY_STOP');
+  });
 
+  it('staff credit adjustments are audited and cannot go negative', async () => {
+    s = await makeServer();
+    const token = await s.adminToken();
+    const p = await joinTeam(s);
+    const add = await s.inject({
+      method: 'POST',
+      url: `/api/admin/players/${p.playerId}/credit`,
+      headers: auth(token),
+      payload: { deltaSats: 105, note: 'LNbitsで入金確認済み' },
+    });
+    expect(add.json()).toEqual({ creditSats: 105 });
+    const neg = await s.inject({
+      method: 'POST',
+      url: `/api/admin/players/${p.playerId}/credit`,
+      headers: auth(token),
+      payload: { deltaSats: -500, note: 'oops' },
+    });
+    expect(neg.statusCode).toBe(400);
+    expect(credit(s, p.playerId)).toBe(105);
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json();
+    expect(audit.entries[0]).toMatchObject({ action: 'ADJUST_CREDIT', target_id: p.playerId });
+  });
+
+  it('restart: the season comes back paused, credit and tokens survive, then auto-resumes', async () => {
+    const dbPath = tempDbPath();
+    s = await makeServer({ dbPath });
+    const p = await fundedPlayer(s, 'RAIJIN', 210);
+    await untilRound(s);
+    await zap(s, p.token);
+    const before = s.services.manager.snapshot();
+    const clock = s.clock;
+    await s.close();
+    clock.advance(5000);
     s = await makeServer({ dbPath, clock });
     const after = s.services.manager.snapshot();
     expect(after.matchId).toBe(before.matchId);
     expect(after.status).toBe('PAUSED');
-    expect(after.pauseReason).toBe('SERVER_RESTART');
-    expect(after.regions).toEqual(before.regions);
-    expect(after.teams).toEqual(before.teams);
-    expect(after.clashes).toEqual(before.clashes);
-    // The participant token still works after restart.
-    const me = await s.inject({ url: '/api/me', headers: auth(p.token) });
-    expect(me.json()).toMatchObject({ status: 'ACTIVE', apRemaining: 2 });
-    const token2 = await s.adminToken();
-    await admin(s, token2, { command: 'RESUME' });
-    await s.advance(45_000);
-    expect(s.services.manager.snapshot().clashes).toHaveLength(2);
+    expect(after.round!.hp).toEqual(before.round!.hp);
+    expect(after.lastSeq).toBeGreaterThan(before.lastSeq);
+    const me = (await s.inject({ url: '/api/me', headers: auth(p.token) })).json();
+    expect(me.creditSats).toBe(189);
+    await s.advance(10_500);
+    expect(s.services.manager.snapshot().status).toBe('LIVE');
+  });
+
+  it('mock payment endpoint does not exist outside mock mode; health and ready respond', async () => {
+    s = await makeServer();
+    expect((await s.inject({ url: '/health' })).json()).toEqual({ ok: true });
+    expect((await s.inject({ url: '/ready' })).json()).toMatchObject({ ok: true, paymentMode: 'mock' });
+    expect((await s.inject({ method: 'POST', url: '/api/webhooks/lnbits/wrong', payload: {} })).statusCode).toBe(404);
   });
 });

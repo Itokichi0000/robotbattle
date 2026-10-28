@@ -1,12 +1,13 @@
-import type { RegionId } from './regions';
 import type {
-  ActionOkCode,
-  ActionType,
-  ClashRecord,
-  MatchResult,
+  Finisher,
   MatchStatus,
-  RegionState,
+  Phase,
+  RegionPaint,
+  RoundState,
+  RoundSummary,
+  SeasonResult,
   TeamState,
+  ZapOkCode,
 } from './state';
 import type { TeamId } from './teams';
 
@@ -15,12 +16,16 @@ import type { TeamId } from './teams';
  * re-implementing rules. Applying a patch is idempotent.
  */
 export interface EventPatch {
-  regions?: RegionState[];
-  teams?: TeamState[];
   status?: MatchStatus;
   pausedFrom?: MatchStatus | null;
   liveStartClock?: number | null;
-  result?: MatchResult | null;
+  phase?: Phase;
+  phaseEndsAt?: number | null;
+  roundIndex?: number;
+  round?: RoundState | null;
+  regions?: RegionPaint[];
+  teams?: TeamState[];
+  result?: SeasonResult | null;
 }
 
 interface EventBase<T extends string, D> {
@@ -36,24 +41,21 @@ interface EventBase<T extends string, D> {
 
 export type GameEvent =
   | EventBase<'MATCH_STATUS_CHANGED', { from: MatchStatus; to: MatchStatus; reason: string | null }>
+  | EventBase<'ROUND_STARTED', { round: RoundState }>
   | EventBase<
-      'PARTICIPANT_JOINED',
-      { participantId: string; teamId: TeamId; nickname: string; isBot: boolean }
-    >
-  | EventBase<
-      'ACTION_APPLIED',
+      'ZAP',
       {
         participantId: string;
         nickname: string;
         teamId: TeamId;
-        actionType: ActionType;
-        regionId: RegionId | null;
-        code: ActionOkCode;
+        code: ZapOkCode;
+        damage: number;
+        special: boolean;
+        pinch: boolean;
+        hp: Record<TeamId, number>;
       }
     >
-  | EventBase<'CONTEST_EXPIRED', { regionId: RegionId; ownerTeamId: TeamId | null }>
-  | EventBase<'SHIELD_EXPIRED', { regionId: RegionId }>
-  | EventBase<'CLASH_RESOLVED', { clash: ClashRecord }>
-  | EventBase<'MATCH_RESULT', { result: MatchResult }>;
+  | EventBase<'ROUND_ENDED', { summary: RoundSummary; finisher: Finisher | null }>
+  | EventBase<'SEASON_ENDED', { result: SeasonResult }>;
 
 export type GameEventType = GameEvent['type'];

@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import type { GameConfig, PublicMatchSnapshot } from '@sats-wars/shared';
-import { STATUS_LABELS, TEAM_META, formatClock } from '@sats-wars/shared';
+import { PHASE_LABELS, REGION_INFO, STATUS_LABELS, TEAM_META } from '@sats-wars/shared';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
 
@@ -9,14 +9,12 @@ interface Overview {
   snapshot: PublicMatchSnapshot;
   paymentMode: string;
   paymentsEnabled: boolean;
+  autoLoop: boolean;
   demoBotsPerTeam: number;
-  participantsByStatus: Record<string, number>;
-  invoices: {
-    currentMatch: Record<string, { count: number; sats: number }>;
-    allTime: Record<string, { count: number; sats: number }>;
-  };
-  passes: Record<string, number>;
-  actions: { ok: number; rejected: number };
+  zaps: { zaps: number; players: number };
+  credit: { outstanding: number; toppedUp: number; passes: number; spent: number; adjusted: number };
+  invoices: Record<string, { count: number; sats: number }>;
+  passes: Record<string, { count: number; sats: number }>;
   realtime: {
     connections: number;
     byRole: Record<string, number>;
@@ -39,24 +37,23 @@ interface Overview {
 
 interface InvoiceRow {
   id: string;
-  matchId: string;
-  participantId: string;
+  playerId: string;
   amountSats: number;
   status: string;
   createdAt: number;
+  expiresAt: number;
   checkFailures: number;
-  lateDisposition: string | null;
   paymentHashPrefix: string;
 }
-interface ParticipantRow {
+interface PlayerRow {
   id: string;
   teamId: 'RAIJIN' | 'FUJIN';
   nickname: string;
   nicknameHidden: boolean;
-  source: string;
-  status: string;
-  apRemaining: number;
-  apTotal: number;
+  creditSats: number;
+  zapsTotal: number;
+  kos: number;
+  lastSeenAt: number;
 }
 interface AuditRow {
   id: number;
@@ -177,7 +174,8 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
 
   if (!ov) return <div className="p-6">Loading…</div>;
   const s = ov.snapshot;
-  const gameMs = s.running ? s.gameMs + (Date.now() - s.serverTime) : s.gameMs;
+  const clockMs = s.running ? s.clockMs + (Date.now() - s.serverTime) : s.clockMs;
+  const phaseLeft = s.phaseEndsAt !== null && s.running ? Math.max(0, Math.ceil((s.phaseEndsAt - clockMs) / 1000)) : null;
 
   return (
     <div className="mx-auto max-w-6xl p-4">
@@ -213,87 +211,68 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
 
       <div className="grid gap-4 md:grid-cols-3">
         <section className="sw-panel p-4 md:col-span-2">
-          <h2 className="font-black">試合 / Match</h2>
+          <h2 className="font-black">シーズン / Season</h2>
           <p className="mt-1 font-mono text-xs text-off/70">
             {s.matchId} · config {s.configVersion}
           </p>
-          <div className="mt-2 flex items-baseline gap-4">
+          <div className="mt-2 flex flex-wrap items-baseline gap-4">
             <span className="text-3xl font-black" data-testid="admin-status">
               {STATUS_LABELS[s.status].ja} / {s.status}
             </span>
-            <span className="text-xl tabular-nums">
-              {s.status === 'LOBBY'
-                ? `start in ${formatClock(-gameMs)}`
-                : `game ${formatClock(Math.max(0, gameMs))}`}
+            <span className="text-xl">
+              {PHASE_LABELS[s.phase].ja} · {s.round ? `R${s.round.index + 1} ${REGION_INFO[s.round.regionId].labelJa}` : '—'}
+              {phaseLeft !== null ? ` · ${phaseLeft}s` : ''}
             </span>
           </div>
-          {s.pauseReason && (
-            <p className="text-sm text-yellow-300">pause reason: {s.pauseReason}</p>
-          )}
+          {s.pauseReason && <p className="text-sm text-yellow-300">pause reason: {s.pauseReason}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
-            <Btn
-              onClick={() => command({ command: 'OPEN_LOBBY' })}
-              disabled={busy || s.status !== 'CREATED'}
-              testId="cmd-open-lobby"
-            >
-              ロビー開始 / Open lobby
+            <Btn onClick={() => command({ command: 'START' })} disabled={busy || s.status !== 'CREATED'} testId="cmd-start">
+              スタート / Start
             </Btn>
-            <Btn
-              onClick={() => command({ command: 'START' })}
-              disabled={busy || (s.status !== 'LOBBY' && s.status !== 'CREATED')}
-              testId="cmd-start"
-            >
-              スタート / Start now
-            </Btn>
-            <Btn
-              onClick={() => command({ command: 'PAUSE' })}
-              disabled={busy || !['LOBBY', 'LIVE', 'FINALIZING'].includes(s.status)}
-              testId="cmd-pause"
-            >
+            <Btn onClick={() => command({ command: 'PAUSE' })} disabled={busy || s.status !== 'LIVE'} testId="cmd-pause">
               一時停止 / Pause
             </Btn>
-            <Btn
-              onClick={() => command({ command: 'RESUME' })}
-              disabled={busy || s.status !== 'PAUSED'}
-              testId="cmd-resume"
-            >
+            <Btn onClick={() => command({ command: 'RESUME' })} disabled={busy || s.status !== 'PAUSED'} testId="cmd-resume">
               再開 / Resume
             </Btn>
             <Btn
-              onClick={() =>
-                command(
-                  { command: 'CANCEL' },
-                  '試合を中止します。よろしいですか？ / Cancel this match?',
-                )
-              }
+              onClick={() => command({ command: 'CANCEL' }, 'シーズンを中止します（残高は保持）。よろしいですか？ / Cancel this season?')}
               disabled={busy || s.status === 'FINISHED' || s.status === 'CANCELLED'}
               cls="bg-danger/80"
             >
-              強制終了 / Cancel
+              中止 / Cancel
             </Btn>
             <Btn
               onClick={() => command({ command: 'NEXT_MATCH' })}
               disabled={busy || !['FINISHED', 'CANCELLED', 'CREATED'].includes(s.status)}
               testId="cmd-next"
             >
-              次の試合 / Next match
+              次のシーズン / Next season
             </Btn>
           </div>
+          <label className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-black/30 p-3 text-sm">
+            <span>
+              自動ループ（無人運転）/ Auto-loop
+              <br />
+              <b className={ov.autoLoop ? 'text-ok' : 'text-yellow-300'}>{ov.autoLoop ? 'ON' : 'OFF'}</b>
+              <span className="ml-2 text-xs text-off/60">シーズン終了後に自動で次を開始・再起動後10秒で自動再開</span>
+            </span>
+            <Btn onClick={() => command({ command: 'SET_AUTO_LOOP', enabled: !ov.autoLoop })} disabled={busy} testId="cmd-autoloop">
+              {ov.autoLoop ? '停止 / Off' : '有効 / On'}
+            </Btn>
+          </label>
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
             {(['RAIJIN', 'FUJIN'] as const).map((t) => (
-              <div
-                key={t}
-                className="rounded-lg bg-black/30 p-3"
-                style={{ borderLeft: `4px solid ${TEAM_META[t].color}` }}
-              >
+              <div key={t} className="rounded-lg bg-black/30 p-3" style={{ borderLeft: `4px solid ${TEAM_META[t].color}` }}>
                 <b>
                   {TEAM_META[t].symbol} {TEAM_META[t].nameJa}
                 </b>
                 <div>
-                  HP {s.teams[t].hp} · EN {s.teams[t].energy} · {s.teams[t].participantCount}人 · AP{' '}
-                  {s.teams[t].apRemaining}/{s.teams[t].apTotal} · actions {s.teams[t].actionCount}
+                  HP {s.round?.hp[t] ?? '—'}/{s.round?.hpMax ?? '—'} · {s.supporters[t]}人 · 地方 {s.teams[t].regionsWon} · KO {s.teams[t].kos}
                 </div>
-                <div>regions {s.regions.filter((r) => r.ownerTeamId === t).length}</div>
+                <div>
+                  パンチ {s.teams[t].zapsTotal} · 必殺 {s.teams[t].specialsTotal}
+                </div>
               </div>
             ))}
           </div>
@@ -306,7 +285,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
             onClick={() =>
               command(
                 { command: 'EMERGENCY_STOP' },
-                '緊急停止：試合を一時停止し、決済受付を停止します / Emergency stop?',
+                '緊急停止：シーズンを一時停止し、チャージ受付と自動ループを止めます / Emergency stop?',
               )
             }
             data-testid="cmd-emergency"
@@ -335,47 +314,36 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
             onApply={(n) => command({ command: 'SET_DEMO_BOTS', perTeam: n })}
           />
           <p className="text-xs text-off/60">
-            復帰手順: docs/EVENT_OPERATIONS.md ・ 再起動後の試合は PAUSED で復元されます / After a
-            restart the match is restored as PAUSED.
+            復帰手順: docs/EVENT_OPERATIONS.md ・ 再起動後はPAUSEDで復元（自動ループONなら10秒後に自動再開）/ After a
+            restart the season is restored as PAUSED (auto-resumes after 10s when auto-loop is on).
           </p>
         </section>
 
         <section className="sw-panel p-4">
-          <h2 className="font-black">決済 / Payments</h2>
+          <h2 className="font-black">残高・チャージ / Credit</h2>
           <Table
-            rows={Object.entries(ov.invoices.currentMatch).map(([k, v]) => [
-              k,
-              v.count,
-              `${v.sats} sats`,
-            ])}
-            head={['status (this match)', 'count', 'sum']}
+            rows={[
+              ['未使用残高 outstanding', `${ov.credit.outstanding} sats`],
+              ['チャージ topped up', `${ov.credit.toppedUp} sats`],
+              ['コード passes', `${ov.credit.passes} sats`],
+              ['パンチ消費 spent', `${ov.credit.spent} sats`],
+              ['手動調整 adjusted', `${ov.credit.adjusted} sats`],
+            ]}
+            head={['credit', 'sats']}
           />
-          <Table
-            rows={Object.entries(ov.invoices.allTime).map(([k, v]) => [
-              k,
-              v.count,
-              `${v.sats} sats`,
-            ])}
-            head={['status (all)', 'count', 'sum']}
-          />
-          <Table
-            rows={Object.entries(ov.passes).map(([k, v]) => [k, v])}
-            head={['passes', 'count']}
-          />
+          <Table rows={Object.entries(ov.invoices).map(([k, v]) => [k, v.count, `${v.sats} sats`])} head={['invoices', 'count', 'sum']} />
+          <Table rows={Object.entries(ov.passes).map(([k, v]) => [k, v.count, `${v.sats} sats`])} head={['codes', 'count', 'sum']} />
         </section>
 
         <section className="sw-panel p-4">
-          <h2 className="font-black">参加 / Participation</h2>
-          <Table
-            rows={Object.entries(ov.participantsByStatus).map(([k, v]) => [k, v])}
-            head={['participant status', 'count']}
-          />
+          <h2 className="font-black">このシーズン / This season</h2>
           <Table
             rows={[
-              ['ok', ov.actions.ok],
-              ['rejected', ov.actions.rejected],
+              ['punches (paid)', ov.zaps.zaps],
+              ['punching players', ov.zaps.players],
+              ['rounds played', s.rounds.length],
             ]}
-            head={['actions', 'count']}
+            head={['metric', 'value']}
           />
         </section>
 
@@ -414,7 +382,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
 
         <PassesPanel token={token} />
         <InvoicesPanel token={token} />
-        <ParticipantsPanel token={token} />
+        <PlayersPanel token={token} />
         <ConfigPanel token={token} config={ov.nextConfig} />
         <AuditPanel token={token} />
       </div>
@@ -486,13 +454,13 @@ function BotsControl({ current, onApply }: { current: number; onApply: (n: numbe
   return (
     <div className="rounded-lg bg-black/30 p-3">
       <div>
-        デモBOT（各チーム） / Demo bots per team: <b>{current}</b>
+        デモBOT（各チーム）/ Demo bots per team: <b>{current}</b>
       </div>
       <div className="mt-2 flex gap-2">
         <input
           type="number"
           min={0}
-          max={200}
+          max={100}
           value={n}
           onChange={(e) => setN(Number(e.target.value))}
           className="w-20 rounded bg-black/40 px-2"
@@ -502,15 +470,16 @@ function BotsControl({ current, onApply }: { current: number; onApply: (n: numbe
           適用 / Apply
         </Btn>
       </div>
-      <p className="mt-1 text-xs text-off/60">BOTは画面上で「BOT」と表示され、決済しません。</p>
+      <p className="mt-1 text-xs text-off/60">BOTは名前に「BOT」と付き、satsを使いません（空いている時間の賑やかし用）。</p>
     </div>
   );
 }
 
 function PassesPanel({ token }: { token: string }) {
   const [count, setCount] = useState(10);
-  const [minutes, setMinutes] = useState(180);
-  const [label, setLabel] = useState('kids');
+  const [amount, setAmount] = useState(105);
+  const [minutes, setMinutes] = useState(720);
+  const [label, setLabel] = useState('venue');
   const [codes, setCodes] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const issue = async () => {
@@ -518,7 +487,7 @@ function PassesPanel({ token }: { token: string }) {
     try {
       const r = await api<{ codes: string[] }>('/api/admin/passes', {
         token,
-        body: { count, expiresInMinutes: minutes, label },
+        body: { count, amountSats: amount, expiresInMinutes: minutes, label },
       });
       setCodes(r.codes);
     } catch (e) {
@@ -527,8 +496,19 @@ function PassesPanel({ token }: { token: string }) {
   };
   return (
     <section className="sw-panel p-4">
-      <h2 className="font-black">スポンサーパス / Sponsored passes</h2>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+      <h2 className="font-black">配布コード / Credit codes</h2>
+      <p className="text-xs text-off/60">会場で配るsatsの代わりに使えるコード。1枚＝指定satsの残高。</p>
+      <div className="mt-2 grid grid-cols-4 gap-2 text-sm">
+        <label>
+          sats/枚
+          <input
+            type="number"
+            min={21}
+            value={amount}
+            onChange={(e) => setAmount(Number(e.target.value))}
+            className="w-full rounded bg-black/40 px-2 py-1"
+          />
+        </label>
         <label>
           枚数
           <input
@@ -591,26 +571,14 @@ function InvoicesPanel({ token }: { token: string }) {
     const id = setInterval(() => void load(), 5000);
     return () => clearInterval(id);
   }, [load]);
-  const disposition = async (id: string, d: string) => {
-    const note = window.prompt('メモ / note (optional)') ?? '';
-    await api(`/api/admin/invoices/${id}/disposition`, {
-      token,
-      body: { disposition: d, note },
-    }).catch((e) => alert(String(e)));
-    await load();
-  };
   const recheck = async (id: string) => {
-    await api(`/api/admin/invoices/${id}/recheck`, { token, body: {} }).catch((e) =>
-      alert(String(e)),
-    );
+    await api(`/api/admin/invoices/${id}/recheck`, { token, body: {} }).catch((e) => alert(String(e)));
     await load();
   };
-  const attention = rows.filter(
-    (r) => r.status === 'LATE_PAID' || r.checkFailures > 0 || r.status === 'PENDING',
-  );
+  const attention = rows.filter((r) => r.checkFailures > 0 || r.status === 'PENDING');
   return (
     <section className="sw-panel p-4 md:col-span-2">
-      <h2 className="font-black">要確認の請求書 / Invoices needing attention</h2>
+      <h2 className="font-black">確認中の請求書 / Pending invoices</h2>
       {attention.length === 0 ? (
         <p className="text-sm text-off/60">なし / none</p>
       ) : (
@@ -618,11 +586,11 @@ function InvoicesPanel({ token }: { token: string }) {
           <thead>
             <tr className="text-left text-off/60">
               <th>id</th>
+              <th>player</th>
               <th>status</th>
               <th>sats</th>
               <th>hash</th>
               <th>check fails</th>
-              <th>late</th>
               <th />
             </tr>
           </thead>
@@ -630,41 +598,30 @@ function InvoicesPanel({ token }: { token: string }) {
             {attention.map((r) => (
               <tr key={r.id} className="border-t border-white/5">
                 <td className="font-mono text-xs">{r.id.slice(-10)}</td>
+                <td className="font-mono text-xs">{r.playerId.slice(-8)}</td>
                 <td>{r.status}</td>
                 <td>{r.amountSats}</td>
                 <td className="font-mono text-xs">{r.paymentHashPrefix}…</td>
                 <td>{r.checkFailures}</td>
-                <td>{r.lateDisposition ?? ''}</td>
-                <td className="flex flex-wrap gap-1 py-1">
-                  {r.status === 'PENDING' && <Btn onClick={() => recheck(r.id)}>再照会</Btn>}
-                  {r.status === 'LATE_PAID' && (
-                    <>
-                      <Btn onClick={() => disposition(r.id, 'CARRY_OVER')}>繰越コード発行</Btn>
-                      <Btn onClick={() => disposition(r.id, 'REFUND_REQUESTED')}>返金対応</Btn>
-                      <Btn onClick={() => disposition(r.id, 'RESOLVED')}>解決済</Btn>
-                    </>
-                  )}
-                </td>
+                <td className="py-1">{r.status === 'PENDING' && <Btn onClick={() => recheck(r.id)}>再照会</Btn>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       <p className="mt-2 text-xs text-off/60">
-        運営画面から送金は行いません。返金は運営の会計手順で別途実施し、ここには記録のみ残します。
+        遅れて届いた入金も没収せず自動で残高に加算されます。LNbits側で入金済みなのに反映されない場合は「再照会」、それでも駄目なら
+        プレイヤー一覧から手動で残高調整（監査ログに残ります）。運営画面から送金は行いません。
       </p>
     </section>
   );
 }
 
-function ParticipantsPanel({ token }: { token: string }) {
-  const [rows, setRows] = useState<ParticipantRow[]>([]);
+function PlayersPanel({ token }: { token: string }) {
+  const [rows, setRows] = useState<PlayerRow[]>([]);
   const load = useCallback(async () => {
     try {
-      setRows(
-        (await api<{ participants: ParticipantRow[] }>('/api/admin/participants', { token }))
-          .participants,
-      );
+      setRows((await api<{ players: PlayerRow[] }>('/api/admin/players', { token })).players);
     } catch {
       // ignore
     }
@@ -674,16 +631,23 @@ function ParticipantsPanel({ token }: { token: string }) {
     const id = setInterval(() => void load(), 5000);
     return () => clearInterval(id);
   }, [load]);
-  const toggle = async (p: ParticipantRow) => {
-    await api(`/api/admin/participants/${p.id}/nickname-visibility`, {
-      token,
-      body: { hidden: !p.nicknameHidden },
-    });
+  const toggle = async (p: PlayerRow) => {
+    await api(`/api/admin/players/${p.id}/nickname-visibility`, { token, body: { hidden: !p.nicknameHidden } });
+    await load();
+  };
+  const adjust = async (p: PlayerRow) => {
+    const raw = window.prompt(`${p.nickname} の残高を増減（sats、例: 105 / -21）`);
+    if (!raw) return;
+    const deltaSats = Number(raw);
+    if (!Number.isInteger(deltaSats) || deltaSats === 0) return alert('整数を入力してください');
+    const note = window.prompt('理由（必須・監査ログに残ります）') ?? '';
+    if (!note.trim()) return;
+    await api(`/api/admin/players/${p.id}/credit`, { token, body: { deltaSats, note } }).catch((e) => alert(String(e)));
     await load();
   };
   return (
     <section className="sw-panel p-4">
-      <h2 className="font-black">参加者 / Participants ({rows.length})</h2>
+      <h2 className="font-black">プレイヤー / Players ({rows.length})</h2>
       <div className="mt-2 max-h-72 overflow-auto">
         <table className="w-full text-sm">
           <tbody>
@@ -691,14 +655,16 @@ function ParticipantsPanel({ token }: { token: string }) {
               <tr key={p.id} className="border-t border-white/5">
                 <td style={{ color: TEAM_META[p.teamId].color }}>{TEAM_META[p.teamId].symbol}</td>
                 <td className={p.nicknameHidden ? 'line-through opacity-50' : ''}>{p.nickname}</td>
-                <td className="text-xs">{p.source}</td>
-                <td className="text-xs">{p.status}</td>
-                <td className="text-xs">
-                  AP {p.apRemaining}/{p.apTotal}
+                <td className="text-xs tabular-nums">{p.creditSats} sats</td>
+                <td className="text-xs tabular-nums">
+                  {p.zapsTotal}発 · KO{p.kos}
                 </td>
-                <td>
+                <td className="whitespace-nowrap">
                   <button className="text-xs underline" onClick={() => toggle(p)}>
                     {p.nicknameHidden ? '表示' : '非表示'}
+                  </button>{' '}
+                  <button className="text-xs underline" onClick={() => adjust(p)}>
+                    残高調整
                   </button>
                 </td>
               </tr>
@@ -717,16 +683,16 @@ function ConfigPanel({ token, config }: { token: string; config: GameConfig }) {
     try {
       const parsed = JSON.parse(text) as unknown;
       await api('/api/admin/next-config', { method: 'PUT', token, body: { config: parsed } });
-      setMsg('保存しました（次の試合から適用）/ Saved for the next match');
+      setMsg('保存しました（次のシーズンから適用）/ Saved for the next season');
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : String(e));
     }
   };
   return (
     <section className="sw-panel p-4 md:col-span-2">
-      <h2 className="font-black">次の試合の設定 / Next match config</h2>
+      <h2 className="font-black">次のシーズンの設定 / Next season config</h2>
       <p className="text-xs text-off/60">
-        進行中の試合には反映されません。/ Never applied to the running match.
+        進行中のシーズンには反映されません。zapCostSats=1発の値段、topupOptionsSats=チャージ額の選択肢。/ Never applied to the running season.
       </p>
       <textarea
         className="mt-2 h-64 w-full rounded bg-black/40 p-2 font-mono text-xs"

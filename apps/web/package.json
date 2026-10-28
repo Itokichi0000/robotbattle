@@ -13,6 +13,7 @@
   "dependencies": {
     "@react-three/drei": "~10.7.6",
     "@react-three/fiber": "~9.4.0",
+    "@sats-wars/game-engine": "workspace:*",
     "@sats-wars/shared": "workspace:*",
     "@sats-wars/three-game": "workspace:*",
     "next": "16.3.8",

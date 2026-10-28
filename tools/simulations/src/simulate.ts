@@ -1,165 +1,194 @@
-import type { GameConfig, MatchState, TeamId } from '@sats-wars/shared';
-import { DEFAULT_GAME_CONFIG } from '@sats-wars/shared';
-import {
-  type EngineCommand,
-  type StrategyName,
-  chooseAction,
-  countOwnedRegions,
-  createMatchState,
-  mulberry32,
-  reduce,
-} from '@sats-wars/game-engine';
-
-export interface SimOptions {
-  playersPerTeam: Record<TeamId, number>;
-  strategy: Record<TeamId, StrategyName>;
-  seed: number;
-  config?: GameConfig;
-  /** Fraction of players that join after the start (late joiners). */
-  lateJoinFraction?: number;
-}
-
-export interface SimResult {
-  winner: TeamId | null;
-  reason: string;
-  endGameMs: number;
-  finalHp: Record<TeamId, number>;
-  regions: Record<TeamId, number>;
-  specials: Record<TeamId, number>;
-  actionsOk: number;
-  actionsRejected: number;
-  ko: boolean;
-}
-
-interface PlannedSpend {
-  t: number;
-  participantId: string;
-  teamId: TeamId;
-}
+import type { GameConfig, MatchState, RoundSummary, TeamId } from '@sats-wars/shared';
+import { TEAM_IDS, makeGameConfig } from '@sats-wars/shared';
+import { createMatchState, mulberry32, reduce } from '@sats-wars/game-engine';
 
 /**
- * One headless match: players join over time and spend AP at random moments,
- * choosing actions with the given strategy at that moment (they see current state).
+ * Crowd model for ZAP BATTLE. Each team has a steady number of people with a
+ * phone in hand; each person taps with exponential gaps (some fast, some
+ * casual) until their top-up runs out, then someone new steps in. People only
+ * tap during a fight (the button is disabled between rounds), with a short
+ * reaction delay when a round starts.
  */
-export function simulateMatch(opts: SimOptions): SimResult {
-  const cfg = opts.config ?? DEFAULT_GAME_CONFIG;
-  const rng = mulberry32(opts.seed);
-  let state: MatchState = createMatchState(`sim-${opts.seed}`, cfg, opts.seed);
-  const apply = (cmd: EngineCommand) => {
-    const r = reduce(state, cmd);
-    state = r.state;
-    return r;
-  };
-  apply({ type: 'OPEN_LOBBY', t: 0 });
-  apply({ type: 'START_LIVE', t: 0 });
+export interface CrowdOptions {
+  playersPerTeam: Record<TeamId, number>;
+  seed: number;
+  config?: Partial<GameConfig>;
+  /** Each person's mean seconds between taps is uniform in this range. */
+  gapSec?: [number, number];
+  /** Punches bought per person (picked uniformly from this list). */
+  budgets?: number[];
+  /** Seconds before a replacement steps in after someone runs out. */
+  replaceDelaySec?: number;
+}
 
-  const joins: Array<{ t: number; participantId: string; teamId: TeamId }> = [];
-  const spends: PlannedSpend[] = [];
-  const late = opts.lateJoinFraction ?? 0.3;
-  for (const teamId of ['RAIJIN', 'FUJIN'] as TeamId[]) {
-    for (let i = 0; i < opts.playersPerTeam[teamId]; i++) {
-      const participantId = `${teamId}-${i}`;
-      const joinT = rng() < late ? Math.floor(rng() * cfg.joinCloseMs) : 0;
-      joins.push({ t: joinT, participantId, teamId });
-      for (let k = 0; k < cfg.apPerParticipant; k++) {
-        const t = joinT + 500 + Math.floor(rng() * (cfg.actionCloseMs - 1000 - joinT));
-        spends.push({ t, participantId, teamId });
+export interface SeasonSim {
+  winner: TeamId | null;
+  regionCounts: Record<TeamId, number>;
+  rounds: RoundSummary[];
+  punches: Record<TeamId, number>;
+  satsSpent: Record<TeamId, number>;
+  /** Taps refused by the engine (between rounds) — never charged. */
+  refused: number;
+  seasonSec: number;
+}
+
+interface Person {
+  gapMs: number;
+  budget: number;
+  next: number;
+  waiting: boolean;
+}
+
+const STEP_MS = 100;
+
+export function simulateSeason(o: CrowdOptions): SeasonSim {
+  const cfg = makeGameConfig(o.config ?? {});
+  const rng = mulberry32((o.seed * 2654435761) >>> 0);
+  const [gMin, gMax] = o.gapSec ?? [0.35, 2.5];
+  const budgets = o.budgets ?? [5, 5, 10, 10, 25];
+  const replaceMs = (o.replaceDelaySec ?? 8) * 1000;
+  const expo = (mean: number) => -Math.log(1 - rng()) * mean;
+  const newPerson = (t: number): Person => {
+    const gapMs = (gMin + rng() * (gMax - gMin)) * 1000;
+    return {
+      gapMs,
+      budget: budgets[Math.floor(rng() * budgets.length)]!,
+      // Client UI spaces taps at least ~260 ms apart.
+      next: t + Math.max(260, expo(gapMs)),
+      waiting: false,
+    };
+  };
+
+  let state: MatchState = createMatchState('sim', cfg, o.seed);
+  let t = 0;
+  state = reduce(state, { type: 'START', t }).state;
+  const crowd: Record<TeamId, Person[]> = {
+    RAIJIN: Array.from({ length: o.playersPerTeam.RAIJIN }, () => newPerson(0)),
+    FUJIN: Array.from({ length: o.playersPerTeam.FUJIN }, () => newPerson(0)),
+  };
+  const punches: Record<TeamId, number> = { RAIJIN: 0, FUJIN: 0 };
+  let refused = 0;
+
+  while (state.status !== 'FINISHED' && t < 3 * 3_600_000) {
+    const t1 = t + STEP_MS;
+    if (state.phase === 'ROUND') {
+      for (const team of TEAM_IDS) {
+        for (const p of crowd[team]) {
+          if (p.waiting) {
+            p.waiting = false;
+            p.next = t + 300 + expo(900); // noticing the new round
+          }
+        }
       }
     }
-  }
-  type Ev = {
-    t: number;
-    kind: 'join' | 'spend';
-    participantId: string;
-    teamId: TeamId;
-    order: number;
-  };
-  const evs: Ev[] = [
-    ...joins.map((j, i) => ({ ...j, kind: 'join' as const, order: i })),
-    ...spends.map((s, i) => ({ ...s, kind: 'spend' as const, order: 100_000 + i })),
-  ].sort((a, b) => a.t - b.t || a.order - b.order);
-
-  let ok = 0;
-  let rejected = 0;
-  let n = 0;
-  for (const e of evs) {
-    if (state.status !== 'LIVE') break;
-    if (e.kind === 'join') {
-      apply({
-        type: 'ADD_PARTICIPANT',
-        t: e.t,
-        participantId: e.participantId,
-        teamId: e.teamId,
-        nickname: e.participantId,
-        isBot: true,
-        ap: cfg.apPerParticipant,
-      });
-      continue;
+    // Every tap due in (t, t1], in time order, so neither team is favoured by processing order.
+    const due: Array<{ at: number; team: TeamId; p: Person }> = [];
+    for (const team of TEAM_IDS) {
+      for (const p of crowd[team]) if (!p.waiting && p.budget > 0 && p.next <= t1) due.push({ at: Math.max(p.next, t), team, p });
     }
-    apply({ type: 'TICK', t: e.t });
-    if (state.status !== 'LIVE') break;
-    const plan = chooseAction(state, e.teamId, opts.strategy[e.teamId], rng);
-    if (!plan) continue;
-    const r = apply({
-      type: 'ACTION',
-      t: e.t,
-      participantId: e.participantId,
-      clientActionId: `c${n++}`,
-      actionType: plan.actionType,
-      regionId: plan.regionId,
-    });
-    if (r.outcome.kind === 'action' && r.outcome.result.ok) ok++;
-    else rejected++;
+    due.sort((a, b) => a.at - b.at);
+    for (const d of due) {
+      const r = reduce(state, { type: 'ZAP', t: d.at, participantId: `${d.team}-x`, nickname: 'sim', teamId: d.team });
+      state = r.state;
+      if (r.outcome.kind === 'zap' && r.outcome.result.ok) {
+        d.p.budget--;
+        punches[d.team]++;
+        d.p.next = d.at + Math.max(260, expo(d.p.gapMs));
+      } else {
+        refused++;
+        d.p.waiting = true;
+      }
+    }
+    // Replace people who ran out of credit.
+    for (const team of TEAM_IDS) {
+      const list = crowd[team];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i]!.budget === 0) {
+          const fresh = newPerson(t1 + expo(replaceMs));
+          fresh.waiting = state.phase !== 'ROUND';
+          list[i] = fresh;
+        }
+      }
+    }
+    state = reduce(state, { type: 'TICK', t: t1 }).state;
+    t = t1;
   }
-  apply({ type: 'TICK', t: cfg.matchMs + 60_000 });
   const res = state.result!;
   return {
     winner: res.winnerTeamId,
-    reason: res.reason,
-    endGameMs: res.decidedAtGameMs,
-    finalHp: res.finalHp,
-    regions: {
-      RAIJIN: countOwnedRegions(state, 'RAIJIN'),
-      FUJIN: countOwnedRegions(state, 'FUJIN'),
-    },
-    specials: {
-      RAIJIN: state.clashes.filter((c) => c.outcome.RAIJIN.special).length,
-      FUJIN: state.clashes.filter((c) => c.outcome.FUJIN.special).length,
-    },
-    actionsOk: ok,
-    actionsRejected: rejected,
-    ko: res.reason === 'KO' || res.reason === 'DOUBLE_KO',
+    regionCounts: res.regionCounts,
+    rounds: state.rounds,
+    punches,
+    satsSpent: { RAIJIN: punches.RAIJIN * cfg.zapCostSats, FUJIN: punches.FUJIN * cfg.zapCostSats },
+    refused,
+    seasonSec: state.gameMs / 1000,
   };
 }
 
 export interface Aggregate {
-  n: number;
-  raijinWins: number;
-  fujinWins: number;
-  draws: number;
+  seasons: number;
+  seasonWins: Record<TeamId | 'DRAW', number>;
+  rounds: number;
+  roundWins: Record<TeamId | 'DRAW', number>;
   koRate: number;
-  avgEndSec: number;
-  avgHpLeft: Record<TeamId, number>;
-  avgRegions: Record<TeamId, number>;
-  avgSpecials: Record<TeamId, number>;
-  rejectRate: number;
+  timeUpRate: number;
+  avgRoundSec: number;
+  p10RoundSec: number;
+  p90RoundSec: number;
+  /** Average robot HP by round number (1-based index into the array). */
+  hpByRound: number[];
+  avgPunchesPerRound: Record<TeamId, number>;
+  avgSeasonSec: number;
+  avgSatsPerSeason: Record<TeamId, number>;
 }
 
-export function aggregate(results: SimResult[]): Aggregate {
-  const n = results.length;
-  const avg = (f: (r: SimResult) => number) => results.reduce((a, r) => a + f(r), 0) / n;
-  const ok = results.reduce((a, r) => a + r.actionsOk, 0);
-  const rej = results.reduce((a, r) => a + r.actionsRejected, 0);
+const quantile = (xs: number[], q: number) => {
+  if (!xs.length) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(q * s.length))]!;
+};
+
+export function aggregate(sims: SeasonSim[]): Aggregate {
+  const seasonWins = { RAIJIN: 0, FUJIN: 0, DRAW: 0 };
+  const roundWins = { RAIJIN: 0, FUJIN: 0, DRAW: 0 };
+  const durs: number[] = [];
+  let ko = 0;
+  let timeUp = 0;
+  const hpSum: number[] = [];
+  const hpN: number[] = [];
+  const punches = { RAIJIN: 0, FUJIN: 0 };
+  const sats = { RAIJIN: 0, FUJIN: 0 };
+  let seasonSec = 0;
+  for (const s of sims) {
+    seasonWins[s.winner ?? 'DRAW']++;
+    seasonSec += s.seasonSec;
+    sats.RAIJIN += s.satsSpent.RAIJIN;
+    sats.FUJIN += s.satsSpent.FUJIN;
+    for (const r of s.rounds) {
+      roundWins[r.winnerTeamId ?? 'DRAW']++;
+      durs.push(r.durationMs / 1000);
+      if (r.endReason === 'KO') ko++;
+      else timeUp++;
+      hpSum[r.index] = (hpSum[r.index] ?? 0) + r.hpMax;
+      hpN[r.index] = (hpN[r.index] ?? 0) + 1;
+      punches.RAIJIN += r.zaps.RAIJIN;
+      punches.FUJIN += r.zaps.FUJIN;
+    }
+  }
+  const rounds = durs.length || 1;
   return {
-    n,
-    raijinWins: results.filter((r) => r.winner === 'RAIJIN').length,
-    fujinWins: results.filter((r) => r.winner === 'FUJIN').length,
-    draws: results.filter((r) => r.winner === null).length,
-    koRate: avg((r) => (r.ko ? 1 : 0)),
-    avgEndSec: avg((r) => r.endGameMs) / 1000,
-    avgHpLeft: { RAIJIN: avg((r) => r.finalHp.RAIJIN), FUJIN: avg((r) => r.finalHp.FUJIN) },
-    avgRegions: { RAIJIN: avg((r) => r.regions.RAIJIN), FUJIN: avg((r) => r.regions.FUJIN) },
-    avgSpecials: { RAIJIN: avg((r) => r.specials.RAIJIN), FUJIN: avg((r) => r.specials.FUJIN) },
-    rejectRate: rej / Math.max(1, ok + rej),
+    seasons: sims.length,
+    seasonWins,
+    rounds: durs.length,
+    roundWins,
+    koRate: ko / rounds,
+    timeUpRate: timeUp / rounds,
+    avgRoundSec: durs.reduce((a, b) => a + b, 0) / rounds,
+    p10RoundSec: quantile(durs, 0.1),
+    p90RoundSec: quantile(durs, 0.9),
+    hpByRound: hpSum.map((v, i) => v / hpN[i]!),
+    avgPunchesPerRound: { RAIJIN: punches.RAIJIN / rounds, FUJIN: punches.FUJIN / rounds },
+    avgSeasonSec: seasonSec / (sims.length || 1),
+    avgSatsPerSeason: { RAIJIN: sats.RAIJIN / (sims.length || 1), FUJIN: sats.FUJIN / (sims.length || 1) },
   };
 }

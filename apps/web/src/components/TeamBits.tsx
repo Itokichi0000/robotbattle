@@ -1,4 +1,4 @@
-import type { TeamId, TeamState } from '@sats-wars/shared';
+import type { TeamId } from '@sats-wars/shared';
 import { TEAM_META } from '@sats-wars/shared';
 
 export function teamColor(t: TeamId | null): string {
@@ -26,43 +26,54 @@ export function TeamBadge({
   );
 }
 
-/** HP + energy for one robot. `hp` may lag the server value during cinematics. */
+/**
+ * One robot's panel for the venue screen: HP, how many punches its fans still
+ * need for a KO, and the special-move countdown. `hp` is the director's value
+ * (always a number the server sent).
+ */
 export function RobotGauge({
-  team,
+  teamId,
   hp,
   hpMax,
-  energyMax,
-  specialThreshold,
+  toKo,
+  toSpecial,
+  pinch,
+  supporters,
+  regionsWon,
+  fighting,
   locale,
   size = 'md',
   align = 'left',
 }: {
-  team: TeamState;
+  teamId: TeamId;
   hp: number;
   hpMax: number;
-  energyMax: number;
-  specialThreshold: number;
+  /** Punches this team needs to KO the other robot. */
+  toKo: number;
+  toSpecial: number;
+  pinch: boolean;
+  supporters: number;
+  regionsWon: number;
+  fighting: boolean;
   locale: 'ja' | 'en';
-  size?: 'sm' | 'md' | 'xl';
+  size?: 'md' | 'xl';
   align?: 'left' | 'right';
 }) {
-  const m = TEAM_META[team.teamId];
+  const m = TEAM_META[teamId];
+  const foe = TEAM_META[teamId === 'RAIJIN' ? 'FUJIN' : 'RAIJIN'];
   const pct = Math.max(0, Math.min(100, (hp / hpMax) * 100));
-  const ePct = Math.max(0, Math.min(100, (team.energy / energyMax) * 100));
-  const ready = team.energy >= specialThreshold;
-  const hpH = size === 'xl' ? 'h-10' : size === 'md' ? 'h-5' : 'h-3';
-  const nameCls = size === 'xl' ? 'text-5xl' : size === 'md' ? 'text-xl' : 'text-base';
-  const numCls = size === 'xl' ? 'text-6xl' : size === 'md' ? 'text-2xl' : 'text-lg';
+  const hpH = size === 'xl' ? 'h-10' : 'h-5';
+  const nameCls = size === 'xl' ? 'text-5xl' : 'text-xl';
+  const numCls = size === 'xl' ? 'text-5xl' : 'text-2xl';
   const dir = align === 'right' ? 'flex-row-reverse text-right' : '';
+  const ja = locale === 'ja';
   return (
-    <div className="w-full" data-testid={`gauge-${team.teamId}`}>
+    <div className="w-full" data-testid={`gauge-${teamId}`}>
       <div className={`flex items-end justify-between gap-2 ${dir}`}>
         <div className={`sw-display font-black ${nameCls}`} style={{ color: m.color }}>
           <span aria-hidden>{m.symbol} </span>
-          {locale === 'ja' ? m.nameJa : m.nameEn}
-          <span className="ml-2 text-[0.45em] font-bold text-off/70">
-            {locale === 'ja' ? m.nameEn : m.nameJa}
-          </span>
+          {ja ? m.nameJa : m.nameEn}
+          <span className="ml-2 text-[0.42em] font-bold text-off/70">{ja ? m.nameEn : m.nameJa}</span>
         </div>
         <div className={`sw-display font-black tabular-nums ${numCls}`}>
           {hp}
@@ -78,30 +89,34 @@ export function RobotGauge({
         aria-valuemax={hpMax}
       >
         <div
-          className="absolute inset-y-0 transition-[width] duration-500 ease-out"
+          className="absolute inset-y-0 transition-[width] duration-200 ease-out"
           style={{
             width: `${pct}%`,
             [align === 'right' ? 'right' : 'left']: 0,
             background: `linear-gradient(90deg, ${m.colorDark}, ${m.color}, ${m.colorLight})`,
           }}
         />
+        {pinch && (
+          <div className="absolute inset-0 flex items-center justify-center text-[0.9em] font-black text-white drop-shadow">
+            {ja ? 'ピンチ！ パンチ1.5倍' : 'PINCH! ×1.5'}
+          </div>
+        )}
       </div>
-      <div className={`mt-1 flex items-center gap-2 ${dir}`}>
-        <div className="relative h-2.5 flex-1 overflow-hidden rounded bg-black/50 ring-1 ring-white/10">
-          <div
-            className="absolute inset-y-0 left-0 bg-yellow-300/90 transition-[width] duration-500"
-            style={{ width: `${ePct}%` }}
-          />
-          <div
-            className="absolute inset-y-0 w-0.5 bg-white/70"
-            style={{ left: `${(specialThreshold / energyMax) * 100}%` }}
-          />
-        </div>
-        <span
-          className={`text-xs font-bold tabular-nums ${ready ? 'text-yellow-300' : 'text-off/70'}`}
-        >
-          {locale === 'ja' ? 'EN' : 'EN'} {team.energy}/{energyMax}
-          {ready ? (locale === 'ja' ? ' 必殺OK' : ' SPECIAL') : ''}
+      <div className={`mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.95em] font-bold ${dir}`}>
+        {fighting && (
+          <span className="rounded bg-black/40 px-2" data-testid={`to-ko-${teamId}`}>
+            {ja ? `${foe.nameJa}KOまで あと` : `KO ${foe.nameEn} in `}
+            <span className="sw-display text-[1.5em] text-white">{toKo}</span>
+            {ja ? '発' : ''}
+          </span>
+        )}
+        {fighting && (
+          <span className="text-yellow-300">
+            {ja ? `必殺技まで${toSpecial}発` : `Special in ${toSpecial}`}
+          </span>
+        )}
+        <span className="text-off/80">
+          {ja ? `応援${supporters}人 ・ ${regionsWon}地方` : `${supporters} fans ・ ${regionsWon} regions`}
         </span>
       </div>
     </div>

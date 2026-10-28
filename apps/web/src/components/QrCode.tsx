@@ -3,7 +3,18 @@ import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 
 /** Renders a QR for a URL that comes from server configuration (never user input). */
-export function QrCode({ url, size = 220, label }: { url: string; size?: number; label?: string }) {
+export function QrCode({
+  url,
+  size = 220,
+  label,
+  caption = true,
+}: {
+  url: string;
+  size?: number;
+  label?: string;
+  /** Print the URL under the code (off for long payment requests). */
+  caption?: boolean;
+}) {
   const [svg, setSvg] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -29,9 +40,11 @@ export function QrCode({ url, size = 220, label }: { url: string; size?: number;
         // qrcode output is generated locally from a configured URL.
         dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
       />
-      <figcaption className="max-w-[260px] break-all text-center text-sm font-bold text-off/90">
-        {url.replace(/^https?:\/\//, '')}
-      </figcaption>
+      {caption && (
+        <figcaption className="max-w-[260px] break-all text-center text-sm font-bold text-off/90">
+          {url.replace(/^https?:\/\//, '')}
+        </figcaption>
+      )}
     </figure>
   );
 }

@@ -1,136 +1,81 @@
 import { z } from 'zod';
-import { DEFAULT_REGION_LAYOUT, REGION_IDS, REGION_KINDS } from './regions';
-
-export const regionLayoutSchema = z
-  .array(z.object({ regionId: z.enum(REGION_IDS), kind: z.enum(REGION_KINDS) }))
-  .length(REGION_IDS.length)
-  .refine((layout) => new Set(layout.map((r) => r.regionId)).size === layout.length, {
-    message: 'regionId must be unique',
-  });
 
 /**
- * Every balance/timing number is injected through GameConfig. A match stores a
- * frozen copy (with `version`) when it is created; edits apply to the next match only.
- * All durations are milliseconds of *game time* (pause-corrected).
+ * ZAP BATTLE rules (v3). Every balance/timing number is injected through
+ * GameConfig; a season stores a frozen copy, edits apply to the next season.
+ * Durations are milliseconds of game time (pause-corrected).
  */
 export const gameConfigSchema = z
   .object({
     version: z.string().min(1).max(64),
-    lobbyMs: z
-      .number()
-      .int()
-      .min(0)
-      .max(30 * 60_000),
-    /** Start LIVE automatically when the lobby countdown ends. */
-    autoStartAfterLobby: z.boolean(),
-    /** Main game length (LIVE + FINALIZING). */
-    matchMs: z
-      .number()
-      .int()
-      .min(10_000)
-      .max(60 * 60_000),
-    actionCloseMs: z.number().int().min(5_000),
-    clashTimesMs: z.array(z.number().int().positive()).min(1).max(50),
-    joinCloseMs: z.number().int().min(0),
-    contestWindowMs: z.number().int().min(1_000),
-    shieldDurationMs: z.number().int().min(1_000),
-    shieldMax: z.number().int().min(1).max(5),
-    hpMax: z.number().int().min(1).max(10_000),
-    energyMax: z.number().int().min(1).max(1_000),
-    chargeAmount: z.number().int().min(1),
-    baseDamage: z.number().int().min(0),
-    attackRegionBonus: z.number().int().min(0),
-    defenseRegionReduction: z.number().int().min(0),
-    energyRegionGain: z.number().int().min(0),
-    specialThreshold: z.number().int().min(1),
-    specialBonus: z.number().int().min(0),
-    specialCost: z.number().int().min(0),
-    energyBonusPer10: z.number().int().min(0),
-    energyBonusMax: z.number().int().min(0),
-    damageMin: z.number().int().min(0),
-    damageMax: z.number().int().min(1),
-    apPerParticipant: z.number().int().min(1).max(20),
-    entryFeeSats: z.number().int().min(1).max(100_000),
+    /** Season opening show before round 1. */
+    openingMs: z.number().int().min(0).max(120_000),
+    roundsPerSeason: z.number().int().min(1).max(8),
+    /** A round ends by KO or when this time runs out. */
+    roundMaxMs: z.number().int().min(10_000).max(10 * 60_000),
+    /** KO / time-up celebration and "next region" announcement. */
+    roundEndMs: z.number().int().min(1_000).max(120_000),
+    seasonEndMs: z.number().int().min(1_000).max(10 * 60_000),
+    /** Price of one punch, deducted from the player's prepaid credit. */
+    zapCostSats: z.number().int().min(1).max(100_000),
+    /** Top-up amounts offered to players (sats). */
+    topupOptionsSats: z.array(z.number().int().min(1).max(1_000_000)).min(1).max(6),
+    zapDamage: z.number().int().min(1).max(10_000),
+    /** At or below this HP ratio a robot is "in a pinch" and hits harder. */
+    pinchHpRatio: z.number().min(0).max(1),
+    pinchMultiplier: z.number().min(1).max(5),
+    /** Every Nth punch of a team in a round is a special move. */
+    specialEvery: z.number().int().min(2).max(1000),
+    specialDamage: z.number().int().min(1).max(100_000),
+    /** HP of each robot in round 1; later rounds adapt to the crowd. */
+    hpInitial: z.number().int().min(10),
+    hpMin: z.number().int().min(10),
+    hpCap: z.number().int().min(10),
+    /** Adaptive HP aims for a round of about this many seconds. */
+    targetRoundSec: z.number().min(5).max(300),
+    /** Max factor by which HP may grow/shrink from one round to the next. */
+    hpMaxChangeFactor: z.number().min(1).max(10),
+    /** Minimum gap between two punches of the same player (server-enforced). */
+    zapCooldownMs: z.number().int().min(0).max(10_000),
+    cheerCooldownMs: z.number().int().min(0).max(60_000),
+    /** Pause between seasons before the next one starts automatically. */
+    nextSeasonDelayMs: z.number().int().min(0).max(10 * 60_000),
     invoiceTtlMs: z
       .number()
       .int()
       .min(30_000)
       .max(60 * 60_000),
-    reservationTtlMs: z
-      .number()
-      .int()
-      .min(30_000)
-      .max(60 * 60_000),
-    maxParticipantsPerTeam: z.number().int().min(1).max(10_000),
-    regions: regionLayoutSchema,
   })
-  .refine((c) => c.actionCloseMs <= c.matchMs, { message: 'actionCloseMs must be <= matchMs' })
-  .refine((c) => c.joinCloseMs <= c.actionCloseMs, {
-    message: 'joinCloseMs must be <= actionCloseMs',
-  })
-  .refine((c) => c.clashTimesMs.every((t) => t <= c.actionCloseMs), {
-    message: 'clashes must happen before or at actionCloseMs',
-  })
-  .refine((c) => c.clashTimesMs.every((t, i, a) => i === 0 || t > a[i - 1]!), {
-    message: 'clashTimesMs must be strictly increasing',
-  })
-  .refine((c) => c.damageMin <= c.damageMax, { message: 'damageMin must be <= damageMax' });
+  .refine((c) => c.hpMin <= c.hpCap && c.hpInitial >= c.hpMin && c.hpInitial <= c.hpCap, {
+    message: 'hpMin <= hpInitial <= hpCap required',
+  });
 
 export type GameConfig = z.infer<typeof gameConfigSchema>;
 
-/**
- * The numbers from the original specification (balance hypothesis v1).
- * Kept so rule tests read like the spec and operators can revert to it.
- */
-export const SPEC_BASELINE_CONFIG: GameConfig = {
-  version: 'spec-baseline',
-  lobbyMs: 30_000,
-  autoStartAfterLobby: true,
-  matchMs: 300_000,
-  actionCloseMs: 270_000,
-  clashTimesMs: [45_000, 90_000, 135_000, 180_000, 225_000, 270_000],
-  joinCloseMs: 180_000,
-  contestWindowMs: 25_000,
-  shieldDurationMs: 30_000,
-  shieldMax: 1,
-  hpMax: 100,
-  energyMax: 60,
-  chargeAmount: 10,
-  baseDamage: 10,
-  attackRegionBonus: 3,
-  defenseRegionReduction: 2,
-  energyRegionGain: 5,
-  specialThreshold: 30,
-  specialBonus: 10,
-  specialCost: 30,
-  energyBonusPer10: 2,
-  energyBonusMax: 4,
-  damageMin: 2,
-  damageMax: 28,
-  apPerParticipant: 3,
-  entryFeeSats: 21,
-  invoiceTtlMs: 120_000,
-  reservationTtlMs: 180_000,
-  maxParticipantsPerTeam: 100,
-  regions: DEFAULT_REGION_LAYOUT.map((r) => ({ ...r })),
-};
-
-/**
- * Default config (mvp-2): SPEC_BASELINE tuned with the balance simulator so that
- * matches rarely end before the last clashes and attack-only play is not dominant.
- * See docs/BALANCE_REPORT.md and docs/DECISION_LOG.md (D-016).
- */
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  ...SPEC_BASELINE_CONFIG,
-  version: 'mvp-2',
-  baseDamage: 8,
-  damageMax: 20,
-  attackRegionBonus: 2,
-  defenseRegionReduction: 3,
-  energyRegionGain: 6,
-  chargeAmount: 15,
-  specialBonus: 12,
-  regions: DEFAULT_REGION_LAYOUT.map((r) => ({ ...r })),
+  version: 'zap-2',
+  openingMs: 6_000,
+  roundsPerSeason: 8,
+  roundMaxMs: 60_000,
+  roundEndMs: 8_000,
+  seasonEndMs: 20_000,
+  zapCostSats: 21,
+  topupOptionsSats: [105, 210, 525],
+  zapDamage: 10,
+  pinchHpRatio: 0.3,
+  pinchMultiplier: 1.5,
+  specialEvery: 10,
+  specialDamage: 60,
+  hpInitial: 200,
+  hpMin: 150,
+  // Large enough that 100+ people tapping still get ~half-minute rounds (BALANCE_REPORT).
+  hpCap: 100_000,
+  targetRoundSec: 35,
+  hpMaxChangeFactor: 3,
+  zapCooldownMs: 250,
+  cheerCooldownMs: 1_000,
+  nextSeasonDelayMs: 6_000,
+  invoiceTtlMs: 10 * 60_000,
 };
 
 export function parseGameConfig(input: unknown): GameConfig {
@@ -142,24 +87,7 @@ export function makeGameConfig(overrides: Partial<GameConfig> = {}): GameConfig 
   return gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...overrides });
 }
 
-/**
- * Region-kind effect text built from the match config, so UI copy never drifts
- * from the numbers the engine actually uses.
- */
-export function regionKindDescription(
-  kind: 'ATTACK' | 'DEFENSE' | 'ENERGY',
-  config: GameConfig,
-  locale: 'ja' | 'en',
-): string {
-  if (kind === 'ATTACK')
-    return locale === 'ja'
-      ? `1つにつき激突時の与ダメージ+${config.attackRegionBonus}`
-      : `+${config.attackRegionBonus} clash damage each`;
-  if (kind === 'DEFENSE')
-    return locale === 'ja'
-      ? `1つにつき激突時の被ダメージ−${config.defenseRegionReduction}`
-      : `−${config.defenseRegionReduction} damage taken each`;
-  return locale === 'ja'
-    ? `1つにつき激突後エネルギー+${config.energyRegionGain}`
-    : `+${config.energyRegionGain} energy after each clash`;
+/** Punches a credit balance can buy. */
+export function zapsFor(creditSats: number, config: Pick<GameConfig, 'zapCostSats'>): number {
+  return Math.floor(creditSats / config.zapCostSats);
 }

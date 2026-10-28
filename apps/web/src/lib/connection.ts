@@ -1,10 +1,10 @@
 import { io, type Socket } from 'socket.io-client';
 import type {
-  ActionResponse,
   ArenaStatus,
+  CheerPush,
   ClientToServerEvents,
+  CreditPush,
   GameEvent,
-  PaymentStatusPush,
   RoomRole,
   ServerNotice,
   ServerToClientEvents,
@@ -28,8 +28,8 @@ export class MatchConnection {
   rttMs = 0;
   private socket: Socket<ServerToClientEvents, ClientToServerEvents>;
   private stateListeners = new Set<Listener>();
-  private paymentListeners = new Set<(s: PaymentStatusPush) => void>();
-  private ackListeners = new Set<(a: ActionResponse) => void>();
+  private creditListeners = new Set<(c: CreditPush) => void>();
+  private cheerListeners = new Set<(c: CheerPush) => void>();
   private noticeListeners = new Set<(n: ServerNotice) => void>();
   private resyncing = false;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -64,10 +64,11 @@ export class MatchConnection {
     this.socket.on('clockTick', (tick) => {
       if (this.store.applyClock(tick) === 'gap') this.resync();
     });
-    this.socket.on('paymentStatus', (s) => this.paymentListeners.forEach((l) => l(s)));
-    this.socket.on('actionAck', (a) => this.ackListeners.forEach((l) => l(a)));
+    this.socket.on('credit', (c) => this.creditListeners.forEach((l) => l(c)));
+    this.socket.on('cheer', (c) => this.cheerListeners.forEach((l) => l(c)));
+    this.socket.on('presence', (p) => this.store.applyPresence(p));
     this.socket.on('serverNotice', (n) => this.noticeListeners.forEach((l) => l(n)));
-    // Periodic reconciliation (leaders etc. are only in snapshots).
+    // Periodic reconciliation (cheap safety net for anything a patch missed).
     this.reconcileTimer = setInterval(() => this.resync(), 15_000);
   }
 
@@ -131,16 +132,18 @@ export class MatchConnection {
       this.stateListeners.delete(l);
     };
   }
-  onPayment(l: (s: PaymentStatusPush) => void): () => void {
-    this.paymentListeners.add(l);
+  /** Balance changes for this player (top-up credited, punch charged, code redeemed). */
+  onCredit(l: (c: CreditPush) => void): () => void {
+    this.creditListeners.add(l);
     return () => {
-      this.paymentListeners.delete(l);
+      this.creditListeners.delete(l);
     };
   }
-  onAck(l: (a: ActionResponse) => void): () => void {
-    this.ackListeners.add(l);
+  /** Free cheers from anyone (shown on the big screen). */
+  onCheer(l: (c: CheerPush) => void): () => void {
+    this.cheerListeners.add(l);
     return () => {
-      this.ackListeners.delete(l);
+      this.cheerListeners.delete(l);
     };
   }
   onNotice(l: (n: ServerNotice) => void): () => void {

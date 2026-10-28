@@ -1,525 +1,349 @@
 'use client';
-import { useRef, useState } from 'react';
-import type {
-  ActionResponse,
-  ActionResult,
-  ActionType,
-  GameConfig,
-  PublicMatchSnapshot,
-  RegionId,
-  RegionState,
-} from '@sats-wars/shared';
-import {
-  ACTION_CODE_LABELS,
-  REGION_INFO,
-  REGION_KIND_META,
-  TEAM_META,
-  eventMessage,
-  formatClock,
-  otherTeam,
-  regionKindDescription,
-} from '@sats-wars/shared';
-import { JapanMap2D } from '@/components/JapanMap2D';
-import { RobotGauge, TeamBadge } from '@/components/TeamBits';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CheerEmoji, MeResponse, PublicMatchSnapshot, TeamId, ZapResponse } from '@sats-wars/shared';
+import { CHEER_EMOJIS, SATS_EXPLAINER, TEAM_META, otherTeam, zapsFor } from '@sats-wars/shared';
+import { TeamBadge } from '@/components/TeamBits';
 import { ApiError, api, newClientActionId } from '@/lib/api';
+import { battleView, teamName } from '@/lib/battle';
 import type { MatchConnection } from '@/lib/connection';
 import { useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
-import { actionHint } from './actions';
-import type { Me } from './PlayApp';
 import type { PlaySession } from './session';
+import { Topup } from './Topup';
 
-interface Pending {
-  type: ActionType;
-  regionId: RegionId | null;
+interface Flash {
+  id: number;
+  text: string;
+  tone: 'hit' | 'special' | 'ko' | 'info' | 'warn';
 }
 
+/** Client-side spacing between punches; the server enforces its own cooldown too. */
+const TAP_GAP_MS = 260;
+
+/** Screen 2: one huge button. Everything a newcomer needs is on this screen. */
 export function Controller({
   snap,
   conn,
   session,
   me,
   onMe,
+  onSession,
   refreshMe,
 }: {
   snap: PublicMatchSnapshot;
   conn: MatchConnection;
   session: PlaySession;
-  me: Me;
-  onMe: (m: Me) => void;
+  me: MeResponse | null;
+  onMe: (m: MeResponse | ((prev: MeResponse | null) => MeResponse | null)) => void;
+  onSession: (s: PlaySession) => void;
   refreshMe: () => Promise<void>;
 }) {
   const { L, locale } = useI18n();
   useTicker(250);
-  const [tab, setTab] = useState<'list' | 'map'>('list');
-  const [selected, setSelected] = useState<RegionId | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [sending, setSending] = useState(false);
-  const [last, setLast] = useState<{ result: ActionResult; error?: string } | null>(null);
-  const sendingRef = useRef(false);
-  const myTeam = session.teamId;
-  const enemy = otherTeam(myTeam);
-  const { gameMs } = conn.now();
-  const cfg = snap.config;
-  const ap = me.apRemaining;
-  const live = snap.status === 'LIVE';
-  const paused = snap.status === 'PAUSED';
-  const lobby = snap.status === 'LOBBY' || (paused && snap.pausedFrom === 'LOBBY');
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [pressed, setPressed] = useState(0);
+  const [cheerCd, setCheerCd] = useState(false);
+  const [teamMenu, setTeamMenu] = useState(false);
+  const lastTap = useRef(0);
+  const flashId = useRef(0);
 
-  // Show the newest public event as a toast line.
-  const lastEvent = snap.recentEvents[snap.recentEvents.length - 1];
-  const lastMsg = lastEvent ? eventMessage(lastEvent, locale) : null;
+  const c = snap.config;
+  const my: TeamId = me?.teamId ?? session.teamId;
+  const foe = otherTeam(my);
+  const v = battleView(snap, conn.now().clockMs);
+  const credit = me?.creditSats ?? 0;
+  const punchesLeft = zapsFor(credit, c);
+  const fighting = snap.status === 'LIVE' && snap.phase === 'ROUND';
 
-  const submit = async () => {
-    if (!pending || sendingRef.current) return;
-    sendingRef.current = true;
-    setSending(true);
-    const clientActionId = newClientActionId();
-    const body = { clientActionId, type: pending.type, regionId: pending.regionId };
+  const show = useCallback((text: string, tone: Flash['tone']) => {
+    flashId.current += 1;
+    setFlash({ id: flashId.current, text, tone });
+  }, []);
+  useEffect(() => {
+    if (!flash) return;
+    const id = setTimeout(() => setFlash((f) => (f?.id === flash.id ? null : f)), 1600);
+    return () => clearTimeout(id);
+  }, [flash]);
+
+  const sendZap = async (clientActionId: string, retry = true): Promise<void> => {
     try {
-      let res: ActionResponse | null = null;
-      // One automatic retry with the SAME clientActionId: safe because the server is idempotent.
-      for (let attempt = 0; attempt < 2 && !res; attempt++) {
-        try {
-          res = await api<ActionResponse>('/api/actions', { token: session.token, body });
-        } catch (e) {
-          if (!(e instanceof ApiError) || e.code !== 'NETWORK' || attempt === 1) throw e;
-        }
-      }
-      if (res) {
-        setLast({ result: res.result });
-        onMe({ ...me, apRemaining: res.apRemaining });
+      const r = await api<ZapResponse>('/api/zap', { token: session.token, body: { clientActionId } });
+      onMe((m) => (m ? { ...m, creditSats: r.creditSats, zapsThisSeason: m.zapsThisSeason + (r.result.ok && !r.duplicate ? 1 : 0) } : m));
+      const res = r.result;
+      if (!res.ok) {
+        show(
+          res.code === 'PAUSED'
+            ? L('一時停止中（satsは使われていません）', 'Paused (no sats used)')
+            : L('ラウンドの合間です（satsは使われていません）', 'Between rounds (no sats used)'),
+          'info',
+        );
+      } else if (res.code === 'KO') {
+        show(L('KO!! あなたのとどめ！', 'KO!! Your finishing blow!'), 'ko');
+        void refreshMe();
+      } else if (res.special) {
+        show(L(`必殺技！ ${TEAM_META[my].specialJa} −${res.damage}`, `SPECIAL! ${TEAM_META[my].specialEn} −${res.damage}`), 'special');
+      } else {
+        show(L(`命中！ −${res.damage}${res.pinch ? '（1.5倍）' : ''}`, `HIT! −${res.damage}${res.pinch ? ' (×1.5)' : ''}`), 'hit');
       }
     } catch (e) {
-      setLast({
-        result: {
-          ok: false,
-          code: 'MATCH_NOT_LIVE',
-          actionType: pending.type,
-          regionId: pending.regionId,
-          apBefore: ap,
-          apAfter: ap,
-          atGameMs: gameMs,
-        },
-        error: e instanceof ApiError ? e.message : String(e),
-      });
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-      setPending(null);
-      void refreshMe();
+      if (e instanceof ApiError && e.code === 'NETWORK' && retry) {
+        // Same clientActionId: if the first request did land, the server
+        // answers from storage and does not charge twice.
+        await new Promise((r) => setTimeout(r, 600));
+        return sendZap(clientActionId, false);
+      }
+      if (e instanceof ApiError && e.status === 402) {
+        setTopupOpen(true);
+        return;
+      }
+      if (e instanceof ApiError && e.status === 429) return; // tapping a bit too fast; harmless
+      show(e instanceof ApiError ? e.message : String(e), 'warn');
     }
   };
 
-  const nextClashIn = snap.nextClash ? snap.nextClash.atGameMs - gameMs : null;
-  const timeLeft = cfg.actionCloseMs - gameMs;
-  const region = (id: RegionId) => snap.regions.find((r) => r.regionId === id)!;
-  const chargeDisabled = !live || ap <= 0 || snap.teams[myTeam].energy >= cfg.energyMax;
+  const punch = () => {
+    if (credit < c.zapCostSats) {
+      setTopupOpen(true);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastTap.current < TAP_GAP_MS) return;
+    lastTap.current = now;
+    setPressed((n) => n + 1);
+    try {
+      navigator.vibrate?.(12);
+    } catch {
+      // vibration unsupported
+    }
+    void sendZap(newClientActionId());
+  };
+
+  const cheer = async (emoji: CheerEmoji) => {
+    if (cheerCd) return;
+    setCheerCd(true);
+    setTimeout(() => setCheerCd(false), c.cheerCooldownMs + 50);
+    try {
+      await api('/api/cheer', { token: session.token, body: { emoji } });
+      show(L(`${emoji} 応援を送りました（無料）`, `${emoji} Cheer sent (free)`), 'info');
+    } catch {
+      // cheers are best effort
+    }
+  };
+
+  const switchTeam = async (teamId: TeamId) => {
+    setTeamMenu(false);
+    try {
+      await api('/api/me/team', { token: session.token, body: { teamId } });
+      onSession({ ...session, teamId });
+      onMe((m) => (m ? { ...m, teamId } : m));
+    } catch (e) {
+      show(e instanceof ApiError ? e.message : String(e), 'warn');
+    }
+  };
+
+  // ---- button label by phase ------------------------------------------------
+  let label: React.ReactNode;
+  let sub: React.ReactNode;
+  let disabled = false;
+  if (snap.status === 'PAUSED') {
+    label = L('一時停止中', 'Paused');
+    sub = L('少し待ってね', 'Please wait');
+    disabled = true;
+  } else if (snap.status !== 'LIVE' || snap.phase === 'SEASON_END') {
+    label = L('次のシーズンまで少し待ってね', 'Next season soon');
+    sub = snap.result?.winnerTeamId
+      ? L(`${teamName(snap.result.winnerTeamId, 'ja')}が全国制覇！`, `${teamName(snap.result.winnerTeamId, 'en')} conquered Japan!`)
+      : '';
+    disabled = true;
+  } else if (snap.phase === 'OPENING' || snap.phase === 'ROUND_END') {
+    const nextJa = v.nextRegionId ? (snap.phase === 'OPENING' ? v.regionJa : '') : '';
+    label = L(`まもなく次の戦い ${v.secondsLeft ?? ''}`, `Next fight in ${v.secondsLeft ?? ''}`);
+    sub = snap.phase === 'ROUND_END' && snap.round?.winnerTeamId
+      ? L(`${teamName(snap.round.winnerTeamId, 'ja')}が${v.regionJa}をゲット！`, `${teamName(snap.round.winnerTeamId, 'en')} took ${v.regionEn}!`)
+      : nextJa;
+    disabled = true;
+  } else if (credit < c.zapCostSats) {
+    label = L('チャージしてパンチ！', 'Top up to punch!');
+    sub = L(`1発 ${c.zapCostSats} sats`, `${c.zapCostSats} sats per punch`);
+  } else {
+    label = L('パンチ！', 'PUNCH!');
+    sub = L(`1発 ${c.zapCostSats} sats ・ 残り${punchesLeft}発`, `${c.zapCostSats} sats ・ ${punchesLeft} left`);
+  }
+  const m = TEAM_META[my];
+  const mf = TEAM_META[foe];
+  const hpPct = (t: TeamId) => Math.max(0, Math.min(100, (v.hp[t] / v.hpMax) * 100));
 
   return (
-    <div className="flex flex-col gap-3 pb-24">
-      {/* Status strip */}
-      <section
-        className="sw-panel flex items-center justify-between gap-2 p-3"
-        style={{ borderColor: TEAM_META[myTeam].color }}
-      >
-        <div>
-          <TeamBadge teamId={myTeam} locale={locale} className="text-lg" />
-          <p className="mt-1 max-w-[9rem] truncate text-xs text-off/70">{me.nickname}</p>
+    <div className="flex flex-1 flex-col gap-3" data-testid="controller">
+      {/* Who am I */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <TeamBadge teamId={my} locale={locale} className="text-lg" />
+          <span className="truncate text-sm font-bold text-off/85">{me?.nickname ?? session.nickname}</span>
         </div>
-        <div className="text-center" aria-label={`AP ${ap}`}>
-          <div className="text-xs font-bold text-off/70">AP</div>
-          <div className="flex gap-1" data-testid="ap">
-            {Array.from({ length: me.apTotal }, (_, i) => (
-              <span
-                key={i}
-                className={`h-5 w-5 rounded-full border-2 ${i < ap ? 'border-yellow-300 bg-yellow-300' : 'border-white/30'}`}
-              />
-            ))}
-          </div>
-          <div className="text-xs font-black tabular-nums">
-            {ap}/{me.apTotal}
-          </div>
-        </div>
-        <div className="text-right">
-          {lobby ? (
-            <>
-              <div className="text-xs text-off/70">{L('開始まで', 'Starts in')}</div>
-              <div className="text-2xl font-black tabular-nums">
-                {snap.liveStartClock !== null ? formatClock(-gameMs) : '--:--'}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-xs text-off/70">{L('次の激突', 'Next clash')}</div>
-              <div className="text-2xl font-black tabular-nums" data-testid="next-clash">
-                {nextClashIn !== null ? formatClock(nextClashIn) : '--'}
-              </div>
-              <div className="text-[11px] text-off/60">
-                {L('残り', 'Left')} {formatClock(timeLeft)}
-              </div>
-            </>
-          )}
-        </div>
-      </section>
-
-      {paused && (
-        <div
-          className="rounded-lg bg-yellow-400/20 px-3 py-2 text-center font-bold text-yellow-200"
-          role="status"
-        >
-          {L(
-            '一時停止中です。APは失われません。再開までお待ちください。',
-            'Paused. Your AP is safe. Please wait.',
-          )}
-        </div>
-      )}
-      {lobby && (
-        <div className="sw-panel p-4 text-center" data-testid="waiting">
-          <p className="text-lg font-black">
-            {L('参加確定！まもなく試合開始', 'You are in! The match starts soon')}
-          </p>
-          <p className="mt-1 text-sm text-off/80">
-            {L(
-              '開始後に地域を選んでアクションできます。会場スクリーンを見てね。',
-              'After the start, pick regions and act. Watch the big screen!',
-            )}
-          </p>
-        </div>
-      )}
-
-      {/* Robots */}
-      <section className="sw-panel grid grid-cols-2 gap-3 p-3">
-        <RobotGauge
-          team={snap.teams.RAIJIN}
-          hp={snap.teams.RAIJIN.hp}
-          hpMax={cfg.hpMax}
-          energyMax={cfg.energyMax}
-          specialThreshold={cfg.specialThreshold}
-          locale={locale}
-          size="sm"
-        />
-        <RobotGauge
-          team={snap.teams.FUJIN}
-          hp={snap.teams.FUJIN.hp}
-          hpMax={cfg.hpMax}
-          energyMax={cfg.energyMax}
-          specialThreshold={cfg.specialThreshold}
-          locale={locale}
-          size="sm"
-          align="right"
-        />
-      </section>
-
-      {last && (
-        <div
-          className={`rounded-lg px-3 py-2 font-bold ${last.result.ok ? 'bg-ok/20 text-ok' : 'bg-danger/15 text-danger'}`}
-          role="status"
-          aria-live="assertive"
-          data-testid="last-result"
-        >
-          {last.error ?? ACTION_CODE_LABELS[last.result.code][locale]}
-          {last.result.ok && <span className="ml-2 text-off/80">AP {last.result.apAfter}</span>}
-          {!last.result.ok && !last.error && (
-            <span className="ml-2 text-xs text-off/70">
-              {L('（APは消費されていません）', '(no AP used)')}
-            </span>
-          )}
-        </div>
-      )}
-      {lastMsg && <p className="truncate text-center text-xs text-off/70">📣 {lastMsg.text}</p>}
-
-      {/* Regions */}
-      <div className="flex gap-2" role="tablist">
-        {(['list', 'map'] as const).map((t) => (
-          <button
-            key={t}
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={`sw-focus flex-1 rounded-lg py-2 font-bold ${tab === t ? 'bg-white/15' : 'bg-black/30 text-off/70'}`}
-          >
-            {t === 'list' ? L('地域リスト', 'Region list') : L('地図', 'Map')}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'map' && (
-        <div className="sw-panel p-2">
-          <JapanMap2D
-            regions={snap.regions}
-            locale={locale}
-            myTeam={myTeam}
-            selected={selected}
-            onSelect={setSelected}
-            gameMs={gameMs}
-            className="mx-auto h-[360px] w-full"
-          />
-          {selected ? (
-            <RegionRow
-              config={cfg}
-              r={region(selected)}
-              myTeam={myTeam}
-              enemy={enemy}
-              gameMs={gameMs}
-              disabled={!live || ap <= 0}
-              onPick={setPending}
-              expanded
-            />
-          ) : (
-            <p className="p-2 text-center text-sm text-off/70">
-              {L('地域をタップして選択', 'Tap a region')}
-            </p>
-          )}
-        </div>
-      )}
-
-      {tab === 'list' && (
-        <ul className="flex flex-col gap-2" data-testid="region-list">
-          {snap.regions.map((r) => (
-            <li key={r.regionId}>
-              <RegionRow
-                config={cfg}
-                r={r}
-                myTeam={myTeam}
-                enemy={enemy}
-                gameMs={gameMs}
-                disabled={!live || ap <= 0}
-                onPick={setPending}
-                expanded={selected === r.regionId}
-                onToggle={() => setSelected(selected === r.regionId ? null : r.regionId)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* Sticky charge button */}
-      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-xl bg-gradient-to-t from-navy via-navy/95 to-transparent px-3 pb-3 pt-6">
-        <button
-          className="sw-btn w-full bg-yellow-300 py-4 text-lg text-navy"
-          disabled={chargeDisabled}
-          onClick={() => setPending({ type: 'CHARGE', regionId: null })}
-          data-testid="charge"
-        >
-          ◆ {L('充電（エネルギー+10）', 'Charge (+10 energy)')}
-          <span className="ml-2 text-sm">
-            EN {snap.teams[myTeam].energy}/{cfg.energyMax}
-          </span>
+        <button type="button" className="sw-focus rounded-full border border-line px-3 py-1 text-xs font-bold" onClick={() => setTeamMenu((x) => !x)}>
+          {L('チーム変更', 'Switch team')}
         </button>
-        {ap <= 0 && live && (
-          <p className="mt-1 text-center text-xs text-off/70">
-            {L('APを使い切りました。会場で応援しよう！', 'All AP used. Cheer on your team!')}
-          </p>
+      </div>
+      {teamMenu && (
+        <div className="sw-panel flex items-center justify-between gap-2 p-2 text-sm">
+          <span>{L(`${mf.nameJa}に変更しますか？（無料）`, `Switch to ${mf.nameEn}? (free)`)}</span>
+          <button type="button" className="sw-btn px-3" style={{ background: mf.color, color: '#070D1A' }} onClick={() => void switchTeam(foe)}>
+            {mf.symbol} {L('変更', 'Switch')}
+          </button>
+        </div>
+      )}
+
+      {/* Battle status */}
+      <section className="sw-panel p-3" aria-live="polite" data-testid="battle-status">
+        <div className="flex items-baseline justify-between">
+          <div className="font-black">
+            {L(`第${v.roundNumber}戦`, `Round ${v.roundNumber}`)}
+            <span className="ml-1 text-xs text-off/60">/{v.roundsTotal}</span>
+            <span className="ml-2">⚔ {L(v.regionJa, v.regionEn)}</span>
+          </div>
+          <div className="sw-display text-2xl font-black tabular-nums" data-testid="phase-seconds">
+            {v.secondsLeft !== null ? `${v.secondsLeft}s` : '—'}
+          </div>
+        </div>
+        {([my, foe] as const).map((t) => (
+          <div key={t} className="mt-2">
+            <div className="flex justify-between text-xs font-bold">
+              <span style={{ color: TEAM_META[t].color }}>
+                {TEAM_META[t].symbol} {L(TEAM_META[t].nameJa, TEAM_META[t].nameEn)}
+                {t === my ? L('（味方）', ' (you)') : ''}
+                {v.pinch[t] && <span className="ml-1 text-yellow-300">{L('ピンチ！×1.5', 'PINCH ×1.5')}</span>}
+              </span>
+              <span className="tabular-nums">
+                HP {v.hp[t]}/{v.hpMax}
+              </span>
+            </div>
+            <div className="mt-0.5 h-4 overflow-hidden rounded bg-black/50 ring-1 ring-white/15" role="meter" aria-valuenow={v.hp[t]} aria-valuemin={0} aria-valuemax={v.hpMax} aria-label={`${TEAM_META[t].nameJa} HP`}>
+              <div className="h-full transition-[width] duration-200" style={{ width: `${hpPct(t)}%`, background: TEAM_META[t].color }} />
+            </div>
+          </div>
+        ))}
+        {fighting && (
+          <div className="mt-2 grid grid-cols-2 gap-2 text-center">
+            <div className="rounded-lg bg-black/35 p-2">
+              <div className="text-xs text-off/70">{L(`チームで${mf.nameJa}KOまで`, `Team needs to KO ${mf.nameEn}`)}</div>
+              <div className="font-black" data-testid="to-ko">
+                <span className="text-sm">{L('あと', '')}</span>
+                <span className="sw-display mx-0.5 text-3xl tabular-nums">{v.toKo[my]}</span>
+                <span className="text-sm">{L('発', ' punches')}</span>
+              </div>
+            </div>
+            <div className="rounded-lg bg-black/35 p-2">
+              <div className="text-xs text-off/70">{L('チームの必殺技まで', 'Team special in')}</div>
+              <div className="font-black text-yellow-300">
+                <span className="text-sm">{L('あと', '')}</span>
+                <span className="sw-display mx-0.5 text-3xl tabular-nums">{v.toSpecial[my]}</span>
+                <span className="text-sm">{L('発', ' punches')}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* The button */}
+      <div className="relative flex flex-col items-center py-2">
+        <button
+          type="button"
+          onClick={punch}
+          disabled={disabled}
+          className="sw-focus relative flex aspect-square w-[78%] max-w-[340px] select-none flex-col items-center justify-center rounded-full font-black transition-transform active:scale-95 disabled:opacity-45"
+          style={{
+            background: `radial-gradient(circle at 35% 30%, ${m.colorLight}, ${m.color} 45%, ${m.colorDark})`,
+            color: '#070D1A',
+            boxShadow: `0 10px 0 ${m.colorDark}, 0 0 40px ${m.color}66`,
+            touchAction: 'manipulation',
+          }}
+          data-testid="punch-button"
+        >
+          <span key={pressed} className="text-7xl leading-none" aria-hidden>
+            {m.symbol}
+          </span>
+          <span className="sw-display mt-1 px-4 text-center text-3xl leading-tight">{label}</span>
+          <span className="mt-1 px-6 text-center text-sm font-bold opacity-85">{sub}</span>
+        </button>
+        {flash && (
+          <div
+            key={flash.id}
+            role="status"
+            className={`sw-banner-in pointer-events-none absolute top-0 rounded-full px-4 py-1 text-lg font-black shadow-lg ${
+              flash.tone === 'ko'
+                ? 'bg-white text-navy'
+                : flash.tone === 'special'
+                  ? 'bg-yellow-300 text-navy'
+                  : flash.tone === 'warn'
+                    ? 'bg-danger text-white'
+                    : flash.tone === 'info'
+                      ? 'bg-black/80 text-off'
+                      : 'bg-navy-3 text-off ring-1 ring-white/30'
+            }`}
+            data-testid="punch-flash"
+          >
+            {flash.text}
+          </div>
         )}
       </div>
 
-      {pending && (
-        <ConfirmSheet
-          pending={pending}
-          sending={sending}
-          onConfirm={submit}
-          onCancel={() => setPending(null)}
-          regionLabel={
-            pending.regionId
-              ? L(REGION_INFO[pending.regionId].labelJa, REGION_INFO[pending.regionId].labelEn)
-              : null
-          }
-          hint={
-            pending.regionId && pending.type !== 'CHARGE'
-              ? actionHint(pending.type, region(pending.regionId), myTeam)
-              : null
-          }
-        />
-      )}
-    </div>
-  );
-}
-
-function RegionRow({
-  r,
-  myTeam,
-  enemy,
-  gameMs,
-  disabled,
-  onPick,
-  expanded,
-  onToggle,
-  config,
-}: {
-  config: GameConfig;
-  r: RegionState;
-  myTeam: 'RAIJIN' | 'FUJIN';
-  enemy: 'RAIJIN' | 'FUJIN';
-  gameMs: number;
-  disabled: boolean;
-  onPick: (p: Pending) => void;
-  expanded: boolean;
-  onToggle?: () => void;
-}) {
-  const { L, locale } = useI18n();
-  const info = REGION_INFO[r.regionId];
-  const kind = REGION_KIND_META[r.kind];
-  const owner = r.ownerTeamId;
-  const status =
-    owner === null
-      ? { ja: '中立', en: 'Neutral', cls: 'bg-white/15 text-off' }
-      : owner === myTeam
-        ? { ja: '味方', en: 'Ally', cls: 'text-navy' }
-        : { ja: '敵', en: 'Enemy', cls: 'text-navy' };
-  const contestLeft =
-    r.contestedUntil !== null ? Math.max(0, Math.ceil((r.contestedUntil - gameMs) / 1000)) : 0;
-  const attack = actionHint('ATTACK', r, myTeam);
-  const defend = actionHint('DEFEND', r, myTeam);
-  return (
-    <div
-      className="sw-panel overflow-hidden"
-      data-testid={`region-${r.regionId}`}
-      style={{ borderColor: owner ? TEAM_META[owner].color : undefined }}
-    >
-      <button
-        className="sw-focus flex w-full items-center gap-3 p-3 text-left"
-        onClick={onToggle}
-        aria-expanded={expanded}
-      >
-        <span className="text-2xl" aria-hidden>
-          {kind.icon}
-        </span>
-        <span className="flex-1">
-          <span className="block text-lg font-black">{L(info.labelJa, info.labelEn)}</span>
-          <span className="block text-xs text-off/70">
-            {L(kind.labelJa, kind.labelEn)}・{regionKindDescription(r.kind, config, locale)}
-          </span>
-        </span>
-        <span className="flex flex-col items-end gap-1">
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-black ${status.cls}`}
-            style={owner ? { background: TEAM_META[owner].color } : undefined}
-          >
-            {owner ? `${TEAM_META[owner].symbol} ` : ''}
-            {L(status.ja, status.en)}
-          </span>
-          {r.contestedByTeamId && (
-            <span className="rounded-full bg-yellow-300 px-2 py-0.5 text-xs font-black text-navy sw-pulse">
-              {r.contestedByTeamId === enemy
-                ? L('敵が争奪中', 'Enemy contest')
-                : L('味方が争奪中', 'Our contest')}{' '}
-              {contestLeft}s
-            </span>
+      {/* Credit */}
+      <div className="sw-panel flex items-center justify-between gap-2 p-3">
+        <div>
+          <div className="text-xs text-off/70">{L('残高', 'Balance')}</div>
+          <div className="font-black tabular-nums" data-testid="credit">
+            <span className="sw-display text-2xl">{credit}</span> <span className="text-sm">sats</span>
+            <span className="ml-2 whitespace-nowrap text-sm text-off/80">= {L(`${punchesLeft}発`, `${punchesLeft} punches`)}</span>
+          </div>
+          {me && (
+            <div className="text-xs text-off/65">
+              {L(`今シーズン ${me.zapsThisSeason}発 ・ KO ${me.kos}回`, `This season ${me.zapsThisSeason} punches ・ ${me.kos} KOs`)}
+            </div>
           )}
-          {r.shieldCharges > 0 && (
-            <span className="text-xs font-bold">🛡 {L('シールド', 'Shield')}</span>
-          )}
-        </span>
-      </button>
-      {expanded && (
-        <div className="grid grid-cols-2 gap-2 border-t border-line p-3">
-          <ActionButton
-            label={L('⚔ 攻撃', '⚔ Attack')}
-            hint={attack}
-            disabled={disabled || !attack.enabled}
-            onClick={() => onPick({ type: 'ATTACK', regionId: r.regionId })}
-            cls="bg-danger text-white"
-            testId={`attack-${r.regionId}`}
-          />
-          <ActionButton
-            label={L('🛡 防御', '🛡 Defend')}
-            hint={defend}
-            disabled={disabled || !defend.enabled}
-            onClick={() => onPick({ type: 'DEFEND', regionId: r.regionId })}
-            cls="bg-teal text-navy"
-            testId={`defend-${r.regionId}`}
-          />
         </div>
-      )}
-    </div>
-  );
-}
+        <button type="button" className="sw-btn bg-amber px-4 text-navy" onClick={() => setTopupOpen(true)} data-testid="open-topup">
+          ⚡ {L('チャージ', 'Top up')}
+        </button>
+      </div>
 
-function ActionButton({
-  label,
-  hint,
-  disabled,
-  onClick,
-  cls,
-  testId,
-}: {
-  label: string;
-  hint: { ja: string; en: string };
-  disabled: boolean;
-  onClick: () => void;
-  cls: string;
-  testId: string;
-}) {
-  const { L } = useI18n();
-  return (
-    <div className="flex flex-col gap-1">
-      <button
-        className={`sw-btn w-full py-3 text-lg ${cls}`}
-        disabled={disabled}
-        onClick={onClick}
-        data-testid={testId}
-      >
-        {label}
-      </button>
-      <span className="text-[11px] leading-tight text-off/70">{L(hint.ja, hint.en)}</span>
-    </div>
-  );
-}
-
-function ConfirmSheet({
-  pending,
-  sending,
-  onConfirm,
-  onCancel,
-  regionLabel,
-  hint,
-}: {
-  pending: Pending;
-  sending: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  regionLabel: string | null;
-  hint: { ja: string; en: string } | null;
-}) {
-  const { L } = useI18n();
-  const verb =
-    pending.type === 'ATTACK'
-      ? L('攻撃', 'Attack')
-      : pending.type === 'DEFEND'
-        ? L('防御', 'Defend')
-        : L('充電', 'Charge');
-  return (
-    <div
-      className="fixed inset-0 z-30 flex items-end justify-center bg-black/60"
-      role="dialog"
-      aria-modal="true"
-      aria-label={L('確認', 'Confirm')}
-    >
-      <div className="sw-panel m-3 w-full max-w-xl p-4">
-        <p className="text-xl font-black">
-          {regionLabel
-            ? L(`${regionLabel}を${verb}しますか？`, `${verb} ${regionLabel}?`)
-            : L(`${verb}しますか？`, `${verb}?`)}
-        </p>
-        {hint && <p className="mt-1 text-sm text-off/80">{L(hint.ja, hint.en)}</p>}
-        <p className="mt-1 text-sm text-off/70">
-          {L('成功するとAPを1消費します。', 'Uses 1 AP if it succeeds.')}
-        </p>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button className="sw-btn bg-white/10 py-3" onClick={onCancel} disabled={sending}>
-            {L('やめる', 'Cancel')}
-          </button>
-          <button
-            className="sw-btn bg-amber py-3 text-lg text-navy"
-            onClick={onConfirm}
-            disabled={sending}
-            data-testid="confirm"
-          >
-            {sending ? L('送信中…', 'Sending…') : L('実行！', 'Go!')}
-          </button>
+      {/* Free cheer */}
+      <div className="sw-panel p-3">
+        <div className="mb-2 text-xs font-bold text-off/75">
+          {L('無料で応援（会場の画面に出ます・satsは使いません）', 'Cheer for free (shown on the big screen)')}
+        </div>
+        <div className="grid grid-cols-6 gap-1">
+          {CHEER_EMOJIS.map((e) => (
+            <button
+              key={e}
+              type="button"
+              disabled={cheerCd}
+              onClick={() => void cheer(e)}
+              className="sw-focus rounded-lg bg-white/10 py-2 text-2xl disabled:opacity-40"
+              aria-label={L(`${e} で応援`, `Cheer ${e}`)}
+            >
+              {e}
+            </button>
+          ))}
         </div>
       </div>
+
+      <p className="text-center text-xs text-off/60">
+        💡 {SATS_EXPLAINER[locale]}
+        {L('。チャージした分は今日ずっと使えます（シーズンをまたいでも残ります）。', '. Your credit stays for the whole day, across seasons.')}
+      </p>
+
+      {topupOpen && (
+        <Topup
+          snap={snap}
+          conn={conn}
+          session={session}
+          creditSats={credit}
+          onClose={() => setTopupOpen(false)}
+          onCredited={(creditSats) => onMe((mm) => (mm ? { ...mm, creditSats } : mm))}
+        />
+      )}
     </div>
   );
 }

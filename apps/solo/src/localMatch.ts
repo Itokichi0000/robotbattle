@@ -1,32 +1,12 @@
-import type {
-  ActionResult,
-  ActionType,
-  GameConfig,
-  GameEvent,
-  MatchState,
-  RegionId,
-  TeamId,
-} from '@sats-wars/shared';
-import { DEFAULT_GAME_CONFIG, isClockRunning } from '@sats-wars/shared';
-import {
-  type EngineCommand,
-  type Rng,
-  type StrategyName,
-  chooseAction,
-  createMatchState,
-  mulberry32,
-  reduce,
-} from '@sats-wars/game-engine';
+import type { CheerPush, GameConfig, GameEvent, MatchState, TeamId, ZapResult } from '@sats-wars/shared';
+import { DEFAULT_GAME_CONFIG, TEAM_IDS, isClockRunning } from '@sats-wars/shared';
+import { type EngineCommand, type Rng, carryOverHp, createMatchState, mulberry32, reduce } from '@sats-wars/game-engine';
 
 export interface SoloOptions {
   nickname: string;
-  team: TeamId | 'AUTO';
-  /** Participants per team including the player (bots fill the rest). */
-  teamSize: number;
-  /** AP for the player. 3 = official rule; more is a demo convenience. */
-  playerAp: number;
-  /** Game-clock speed multiplier (2 = a 5-minute match in 2.5 minutes). */
-  speed: number;
+  team: TeamId;
+  /** Simulated people tapping per team (bots), not counting you. */
+  crowd: number;
   seed?: number;
   config?: GameConfig;
 }
@@ -34,71 +14,79 @@ export interface SoloOptions {
 interface Bot {
   id: string;
   teamId: TeamId;
-  strategy: StrategyName;
-  /** Game ms at which each remaining AP is spent. */
-  schedule: number[];
+  nickname: string;
+  /** Mean ms between taps; varies per bot so the crowd feels bursty. */
+  gapMs: number;
+  next: number;
 }
 
 const BOT_NAMES: Record<TeamId, string[]> = {
-  RAIJIN: [
-    '雷丸',
-    'イナズマ',
-    'ゴロゴロ',
-    'Volt',
-    'Bolt',
-    '太鼓番',
-    'Spark',
-    '稲光',
-    '鳴神',
-    'Amp',
-  ],
-  FUJIN: [
-    '疾風',
-    'ツムジ',
-    'そよ風',
-    'Gale',
-    'Breeze',
-    '風袋番',
-    'Zephyr',
-    '旋風',
-    '颯',
-    'Mistral',
-  ],
+  RAIJIN: ['雷丸', 'イナズマ', 'ゴロゴロ', 'Volt', 'Bolt', '太鼓番', 'Spark', '稲光', '鳴神', 'Amp'],
+  FUJIN: ['疾風', 'ツムジ', 'そよ風', 'Gale', 'Breeze', '風袋番', 'Zephyr', '旋風', '颯', 'Mistral'],
 };
 
+const CHEERS = ['📣', '🔥', '⚡', '🌀', '👏', '💪'] as const;
+
 export const PLAYER_ID = 'you';
+/** Demo credit handed out at the start, like sats handed out at the venue. */
+export const STARTING_CREDIT = 210;
+
+export type PunchOutcome = { ok: true; result: ZapResult; creditSats: number } | { ok: false; reason: 'NO_CREDIT' | 'TOO_FAST' | 'NOT_FIGHTING'; result?: ZapResult };
 
 /**
- * Stand-in for the game server inside the browser: the same deterministic
- * engine reducer, a pause-aware clock, and the same bot strategies the server
- * uses for demo bots. Nothing leaves the page and no payment exists.
+ * Stand-in for the venue server inside one browser page: the same engine
+ * reducer, a pause-aware clock, bots tapping for both teams, and a local
+ * (pretend) sats balance. Nothing leaves the page and no payment exists.
  */
 export class LocalMatch {
   state: MatchState;
-  readonly playerTeam: TeamId;
   readonly options: SoloOptions;
+  team: TeamId;
+  creditSats = STARTING_CREDIT;
+  myPunches = 0;
+  myKos = 0;
+  seasons = 1;
   version = 0;
   private bots: Bot[] = [];
   private rng: Rng;
   private baseClock = 0;
   private runningSince: number | null = null;
+  private finishedAt: number | null = null;
+  private lastPunchAt = -1e9;
   private listeners = new Set<() => void>();
   private eventListeners = new Set<(e: GameEvent) => void>();
-  private actionSeq = 0;
-  private lastWave = 0;
-  private waveIndex = 0;
+  private cheerListeners = new Set<(c: CheerPush) => void>();
 
   constructor(
     options: SoloOptions,
     private now: () => number = () => performance.now(),
   ) {
     this.options = options;
+    this.team = options.team;
     const seed = options.seed ?? Math.floor(Math.random() * 2 ** 31);
     this.rng = mulberry32(seed);
-    const config = options.config ?? { ...DEFAULT_GAME_CONFIG, lobbyMs: 6_000, version: 'solo' };
-    this.state = createMatchState(`solo-${seed}`, config, seed);
-    this.playerTeam =
-      options.team === 'AUTO' ? (this.rng() < 0.5 ? 'RAIJIN' : 'FUJIN') : options.team;
+    this.state = this.newSeason(seed);
+    // Mirror-symmetric crowd so the bots never tilt the battle; you are the difference.
+    const gaps = Array.from({ length: options.crowd }, () => 1200 + this.rng() * 2800);
+    for (const teamId of TEAM_IDS) {
+      for (let i = 0; i < options.crowd; i++) {
+        const names = BOT_NAMES[teamId];
+        this.bots.push({
+          id: `bot-${teamId}-${i}`,
+          teamId,
+          nickname: `BOT ${names[i % names.length]}${i >= names.length ? Math.floor(i / names.length) + 1 : ''}`,
+          gapMs: gaps[i]!,
+          next: 0,
+        });
+      }
+    }
+  }
+
+  private newSeason(seed: number, prev?: MatchState): MatchState {
+    const base = this.options.config ?? { ...DEFAULT_GAME_CONFIG, version: 'solo', openingMs: 4_000 };
+    // Same carry-over as the venue server: keep round-1 HP in line with the crowd.
+    const config = prev ? { ...base, hpInitial: carryOverHp(base, prev.rounds[prev.rounds.length - 1]) } : base;
+    return createMatchState(`solo-${seed}`, config, seed);
   }
 
   // ---- subscriptions --------------------------------------------------------
@@ -109,28 +97,35 @@ export class LocalMatch {
       this.listeners.delete(l);
     };
   }
-
   onEvent(l: (e: GameEvent) => void): () => void {
     this.eventListeners.add(l);
     return () => {
       this.eventListeners.delete(l);
     };
   }
+  onCheer(l: (c: CheerPush) => void): () => void {
+    this.cheerListeners.add(l);
+    return () => {
+      this.cheerListeners.delete(l);
+    };
+  }
+  private notify(): void {
+    this.version++;
+    for (const l of this.listeners) l();
+  }
 
   // ---- clock ----------------------------------------------------------------
 
-  /** Pause-corrected, speed-scaled match clock. */
+  /** Pause-corrected match clock (ms). */
   nowT(): number {
-    return this.runningSince === null
-      ? this.baseClock
-      : this.baseClock + (this.now() - this.runningSince) * this.options.speed;
+    return this.runningSince === null ? this.baseClock : this.baseClock + (this.now() - this.runningSince);
   }
 
-  /** Current game ms for countdowns (between ticks). */
-  gameMs(): number {
+  /** Seconds left in the current phase. */
+  secondsLeft(): number | null {
     const s = this.state;
-    if (!isClockRunning(s.status) || s.liveStartClock === null) return s.gameMs;
-    return this.nowT() - s.liveStartClock;
+    if (!isClockRunning(s.status) || s.phaseEndsAt === null) return null;
+    return Math.max(0, Math.ceil((s.phaseEndsAt - this.nowT()) / 1000));
   }
 
   private syncClock(): void {
@@ -149,9 +144,8 @@ export class LocalMatch {
     this.state = r.state;
     this.syncClock();
     if (r.events.length) {
-      this.version++;
       for (const e of r.events) for (const l of this.eventListeners) l(e);
-      for (const l of this.listeners) l();
+      this.notify();
     }
     return r;
   }
@@ -159,104 +153,82 @@ export class LocalMatch {
   // ---- lifecycle ------------------------------------------------------------
 
   start(): void {
-    this.dispatch({ type: 'OPEN_LOBBY', t: 0 });
-    this.dispatch({
-      type: 'ADD_PARTICIPANT',
-      t: 0,
-      participantId: PLAYER_ID,
-      teamId: this.playerTeam,
-      nickname: this.options.nickname,
-      isBot: false,
-      ap: this.options.playerAp,
-    });
-    // Equal headcount: the player's team gets one bot fewer.
-    for (const teamId of ['RAIJIN', 'FUJIN'] as TeamId[]) {
-      const n = this.options.teamSize - (teamId === this.playerTeam ? 1 : 0);
-      for (let i = 0; i < n; i++) this.addBot(teamId, 0);
-    }
+    this.dispatch({ type: 'START', t: this.nowT() });
   }
 
-  private addBot(teamId: TeamId, t: number): void {
-    const cfg = this.state.config;
-    const idx = this.bots.filter((b) => b.teamId === teamId).length;
-    const names = BOT_NAMES[teamId];
-    const id = `bot-${teamId}-${idx}`;
-    const nickname = `BOT ${names[idx % names.length]}${idx >= names.length ? Math.floor(idx / names.length) + 1 : ''}`;
-    this.dispatch({
-      type: 'ADD_PARTICIPANT',
-      t,
-      participantId: id,
-      teamId,
-      nickname,
-      isBot: true,
-      ap: cfg.apPerParticipant,
-    });
-    const from = Math.max(2_000, this.state.gameMs + 1_000);
-    const to = cfg.actionCloseMs - 2_000;
-    const schedule = Array.from(
-      { length: cfg.apPerParticipant },
-      () => from + this.rng() * Math.max(1, to - from),
-    ).sort((a, b) => a - b);
-    const strategy: StrategyName = this.rng() < 0.6 ? 'adaptive' : 'balanced';
-    this.bots.push({ id, teamId, strategy, schedule });
-  }
-
-  /** Advance timers and let bots act. Call ~10×/s. */
+  /** Advance timers, let bots tap, roll into the next season. Call ~10×/s. */
   tick(): void {
     this.dispatch({ type: 'TICK', t: this.nowT() });
     const s = this.state;
-    if (s.status !== 'LIVE') return;
-    // A couple of late joiners keep the field lively, like the venue demo bots.
-    if (
-      s.gameMs - this.lastWave >= 40_000 &&
-      s.gameMs < s.config.joinCloseMs &&
-      this.waveIndex < 3
-    ) {
-      this.lastWave = s.gameMs;
-      this.waveIndex++;
-      this.addBot('RAIJIN', this.nowT());
-      this.addBot('FUJIN', this.nowT());
+    if (s.status === 'FINISHED') {
+      const now = this.now();
+      this.finishedAt ??= now;
+      if (now - this.finishedAt >= s.config.nextSeasonDelayMs) this.nextSeason();
+      return;
     }
-    for (const bot of this.bots) {
-      while (
-        bot.schedule.length &&
-        bot.schedule[0]! <= this.state.gameMs &&
-        this.state.status === 'LIVE'
-      ) {
-        bot.schedule.shift();
-        const plan = chooseAction(this.state, bot.teamId, bot.strategy, this.rng);
-        if (!plan) continue;
-        this.dispatch({
-          type: 'ACTION',
-          t: this.nowT(),
-          participantId: bot.id,
-          clientActionId: `b${++this.actionSeq}`,
-          actionType: plan.actionType,
-          regionId: plan.regionId,
-        });
-      }
+    if (s.status !== 'LIVE' || s.phase !== 'ROUND') {
+      for (const b of this.bots) b.next = 0;
+      return;
+    }
+    const now = this.now();
+    for (const b of this.bots) {
+      if (b.next === 0) b.next = now + 400 + this.rng() * b.gapMs;
+      if (now < b.next) continue;
+      b.next = now + Math.max(260, -Math.log(1 - this.rng()) * b.gapMs);
+      if (this.state.phase !== 'ROUND') break;
+      this.dispatch({ type: 'ZAP', t: this.nowT(), participantId: b.id, nickname: b.nickname, teamId: b.teamId });
+      // Now and then a bot cheers too, so the free button is visibly a thing.
+      if (this.rng() < 0.02) this.emitCheer(b.teamId, b.nickname, CHEERS[Math.floor(this.rng() * CHEERS.length)]!);
     }
   }
 
-  /** The player's action. Validated by the engine exactly like on the server. */
-  act(actionType: ActionType, regionId: RegionId | null): ActionResult {
-    const r = this.dispatch({
-      type: 'ACTION',
-      t: this.nowT(),
-      participantId: PLAYER_ID,
-      clientActionId: `p${++this.actionSeq}`,
-      actionType,
-      regionId: actionType === 'CHARGE' ? null : regionId,
-    });
-    if (r.outcome.kind !== 'action') throw new Error('unexpected outcome');
-    // Rejected actions emit no events; still notify so the UI shows the result.
-    this.version++;
-    for (const l of this.listeners) l();
-    return r.outcome.result;
+  private nextSeason(): void {
+    this.finishedAt = null;
+    this.seasons++;
+    this.baseClock = 0;
+    this.runningSince = null;
+    this.state = this.newSeason(Math.floor(this.rng() * 2 ** 31), this.state);
+    this.notify();
+    this.start();
   }
 
-  startNow(): void {
-    if (this.state.status === 'LOBBY') this.dispatch({ type: 'START_LIVE', t: this.nowT() });
+  // ---- player ----------------------------------------------------------------
+
+  /** One tap. Same rules as the server: no credit, no punch; between rounds it's free. */
+  punch(): PunchOutcome {
+    const cfg = this.state.config;
+    if (this.creditSats < cfg.zapCostSats) return { ok: false, reason: 'NO_CREDIT' };
+    const now = this.now();
+    if (now - this.lastPunchAt < cfg.zapCooldownMs) return { ok: false, reason: 'TOO_FAST' };
+    this.lastPunchAt = now;
+    const r = this.dispatch({ type: 'ZAP', t: this.nowT(), participantId: PLAYER_ID, nickname: this.options.nickname, teamId: this.team });
+    if (r.outcome.kind !== 'zap') throw new Error('unexpected outcome');
+    const result = r.outcome.result;
+    if (!result.ok) return { ok: false, reason: 'NOT_FIGHTING', result };
+    this.creditSats -= cfg.zapCostSats;
+    this.myPunches++;
+    if (result.code === 'KO') this.myKos++;
+    this.notify();
+    return { ok: true, result, creditSats: this.creditSats };
+  }
+
+  /** Demo top-up: in the venue this is a Lightning invoice paid from a wallet. */
+  topup(amountSats: number): void {
+    this.creditSats += amountSats;
+    this.notify();
+  }
+
+  switchTeam(): void {
+    this.team = this.team === 'RAIJIN' ? 'FUJIN' : 'RAIJIN';
+    this.notify();
+  }
+
+  cheer(emoji: string): void {
+    this.emitCheer(this.team, this.options.nickname, emoji);
+  }
+
+  private emitCheer(teamId: TeamId, nickname: string, emoji: string): void {
+    for (const l of this.cheerListeners) l({ teamId, nickname, emoji });
   }
 
   pause(): void {
@@ -265,9 +237,5 @@ export class LocalMatch {
 
   resume(): void {
     this.dispatch({ type: 'RESUME', t: this.nowT() });
-  }
-
-  get player() {
-    return this.state.participants[PLAYER_ID]!;
   }
 }

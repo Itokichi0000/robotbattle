@@ -1,16 +1,9 @@
-import type {
-  GameConfig,
-  GameEvent,
-  MatchState,
-  ParticipantState,
-  TeamId,
-} from '@sats-wars/shared';
+import type { Finisher, GameConfig, GameEvent, MatchState, RoundState } from '@sats-wars/shared';
 import { isClockRunning } from '@sats-wars/shared';
 import {
   type EngineCommand,
   type ReduceResult,
   createMatchState,
-  leaders,
   reduce,
   snapshotCore,
 } from '@sats-wars/game-engine';
@@ -52,7 +45,7 @@ export class MatchRuntime {
   ) {
     this.commandIdx = commandIdx;
     this.recent = repo.recentEvents(state.matchId, RECENT_EVENTS);
-    this.hidden = new Set(repo.hiddenParticipantIds(state.matchId));
+    this.hidden = new Set(repo.hiddenPlayerIds());
     this.baseClock = state.clockMs;
     this.syncClock();
   }
@@ -147,15 +140,21 @@ export class MatchRuntime {
     const cmd = { ...input, t } as EngineCommand;
     const r = reduce(this.state, cmd);
     const isTick = cmd.type === 'TICK';
+    // A refused punch (between rounds, paused) changes nothing but the clock, so
+    // it is not logged: a stale phone mashing the button must not grow the log.
+    // Timers replay identically from the next logged command.
+    const refusedZap =
+      cmd.type === 'ZAP' && r.events.length === 0 && r.outcome.kind === 'zap' && !r.outcome.result.ok;
+    const logged = !isTick && !refusedZap;
     const now = this.wall.now();
-    if (!isTick || r.events.length > 0 || persistExtra) {
+    if (logged || r.events.length > 0 || persistExtra) {
       this.repo.tx(() => {
-        if (!isTick) this.repo.appendCommand(this.matchId, this.commandIdx, cmd, now);
+        if (logged) this.repo.appendCommand(this.matchId, this.commandIdx, cmd, now);
         this.repo.insertEvents(r.events, r.state.revision);
-        if (r.events.length > 0 || !isTick) this.repo.saveMatchProjection(r.state, now);
+        if (r.events.length > 0 || logged) this.repo.saveMatchProjection(r.state, now);
         persistExtra?.(r);
       });
-      if (!isTick) this.commandIdx++;
+      if (logged) this.commandIdx++;
     }
     this.state = r.state;
     this.syncClock();
@@ -201,27 +200,30 @@ export class MatchRuntime {
   displayName = (participantId: string, nickname: string): string =>
     this.hidden.has(participantId) ? HIDDEN_NAME : nickname;
 
-  /** Apply nickname moderation to an event before it leaves the server. */
-  presentEvent(e: GameEvent): GameEvent {
-    if (e.type === 'PARTICIPANT_JOINED' || e.type === 'ACTION_APPLIED') {
-      if (!this.hidden.has(e.data.participantId)) return e;
-      return { ...e, data: { ...e.data, nickname: HIDDEN_NAME } } as GameEvent;
-    }
-    if (e.type === 'MATCH_RESULT') {
-      const result = this.presentResult(e.data.result);
-      return { ...e, data: { result }, patch: { ...e.patch, result } } as GameEvent;
-    }
-    return e;
+  private presentFinisher(f: Finisher | null): Finisher | null {
+    return f && this.hidden.has(f.participantId) ? { ...f, nickname: HIDDEN_NAME } : f;
   }
 
-  private presentResult<T extends MatchState['result']>(result: T): T {
-    if (!result) return result;
-    const mvp = { ...result.mvp };
-    for (const teamId of ['RAIJIN', 'FUJIN'] as TeamId[]) {
-      const m = mvp[teamId];
-      if (m) mvp[teamId] = { ...m, nickname: this.displayName(m.participantId, m.nickname) };
+  private presentRound(r: RoundState | null | undefined): RoundState | null | undefined {
+    if (!r?.finisher || !this.hidden.has(r.finisher.participantId)) return r;
+    return { ...r, finisher: this.presentFinisher(r.finisher) };
+  }
+
+  /** Apply nickname moderation to an event before it leaves the server. */
+  presentEvent(e: GameEvent): GameEvent {
+    if (e.type === 'ZAP') {
+      if (!this.hidden.has(e.data.participantId)) return e;
+      return { ...e, data: { ...e.data, nickname: HIDDEN_NAME } };
     }
-    return { ...result, mvp };
+    if (e.type === 'ROUND_ENDED' && e.data.finisher && this.hidden.has(e.data.finisher.participantId)) {
+      const finisher = this.presentFinisher(e.data.finisher);
+      return {
+        ...e,
+        data: { summary: { ...e.data.summary, finisher }, finisher },
+        patch: { ...e.patch, round: this.presentRound(e.patch.round) },
+      };
+    }
+    return e;
   }
 
   snapshotBase() {
@@ -237,15 +239,8 @@ export class MatchRuntime {
       ...core,
       clockMs: core.clockMs + delta,
       gameMs: core.gameMs + delta,
-      result: this.presentResult(core.result),
-      leaders: {
-        RAIJIN: leaders(this.state, 'RAIJIN', 3, this.displayName),
-        FUJIN: leaders(this.state, 'FUJIN', 3, this.displayName),
-      },
+      round: this.presentRound(core.round) ?? null,
+      rounds: core.rounds.map((r) => ({ ...r, finisher: this.presentFinisher(r.finisher) })),
     };
-  }
-
-  participant(id: string): ParticipantState | undefined {
-    return this.state.participants[id];
   }
 }

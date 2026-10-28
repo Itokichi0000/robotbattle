@@ -10,9 +10,6 @@ export const REGION_IDS = [
 ] as const;
 export type RegionId = (typeof REGION_IDS)[number];
 
-export const REGION_KINDS = ['ATTACK', 'DEFENSE', 'ENERGY'] as const;
-export type RegionKind = (typeof REGION_KINDS)[number];
-
 export function isRegionId(value: unknown): value is RegionId {
   return typeof value === 'string' && (REGION_IDS as readonly string[]).includes(value);
 }
@@ -40,36 +37,3 @@ export const REGION_INFO: Record<RegionId, RegionInfo> = {
     shortJa: '九州',
   },
 };
-
-export const REGION_KIND_META: Record<
-  RegionKind,
-  { labelJa: string; labelEn: string; icon: string }
-> = {
-  ATTACK: {
-    labelJa: '攻撃拠点',
-    labelEn: 'Attack base',
-    icon: '⚔',
-  },
-  DEFENSE: {
-    labelJa: '防御拠点',
-    labelEn: 'Defense base',
-    icon: '🛡',
-  },
-  ENERGY: {
-    labelJa: 'エネルギー拠点',
-    labelEn: 'Energy base',
-    icon: '◆',
-  },
-};
-
-/** Default layout: 3 ATTACK, 3 DEFENSE, 2 ENERGY spread across the archipelago. */
-export const DEFAULT_REGION_LAYOUT: ReadonlyArray<{ regionId: RegionId; kind: RegionKind }> = [
-  { regionId: 'hokkaido', kind: 'DEFENSE' },
-  { regionId: 'tohoku', kind: 'ATTACK' },
-  { regionId: 'kanto', kind: 'ENERGY' },
-  { regionId: 'chubu', kind: 'DEFENSE' },
-  { regionId: 'kinki', kind: 'ATTACK' },
-  { regionId: 'chugoku', kind: 'ENERGY' },
-  { regionId: 'shikoku', kind: 'DEFENSE' },
-  { regionId: 'kyushu', kind: 'ATTACK' },
-];

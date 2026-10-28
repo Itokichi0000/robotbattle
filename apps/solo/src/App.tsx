@@ -1,84 +1,36 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ActionResult, ActionType, RegionId, RegionState, TeamId } from '@sats-wars/shared';
+import type { RoundState, TeamId } from '@sats-wars/shared';
 import {
-  ACTION_CODE_LABELS,
+  CHEER_EMOJIS,
   REGION_CENTROIDS,
   REGION_INFO,
-  REGION_KIND_META,
   REGION_OUTLINES,
-  RESULT_REASON_LABELS,
   TEAM_META,
-  eventMessage,
-  formatClock,
   mapBounds,
   otherTeam,
-  regionKindDescription,
+  zapsFor,
 } from '@sats-wars/shared';
-import { contributionScore } from '@sats-wars/game-engine';
-import {
-  ArenaDirector,
-  ArenaScene,
-  type Banner,
-  SfxEngine,
-  type SfxName,
-  cueFromEvent,
-} from '@sats-wars/three-game';
-import { LocalMatch, PLAYER_ID, type SoloOptions } from './localMatch';
+import { punchesToKo, punchesToSpecial } from '@sats-wars/game-engine';
+import { ArenaDirector, ArenaScene, type Banner, SfxEngine, type SfxName, cueFromEvent } from '@sats-wars/three-game';
+import { LocalMatch, STARTING_CREDIT, type SoloOptions } from './localMatch';
 
 const NEUTRAL = '#41506E';
 const color = (t: TeamId | null) => (t ? TEAM_META[t].color : NEUTRAL);
 
 export function App() {
   const [options, setOptions] = useState<SoloOptions | null>(null);
-  const [round, setRound] = useState(0);
-  if (!options) return <Setup onStart={(o) => setOptions(o)} />;
-  return (
-    <Game
-      key={round}
-      options={options}
-      onRestart={() => setRound((r) => r + 1)}
-      onSettings={() => setOptions(null)}
-    />
-  );
+  if (!options) return <Setup onStart={setOptions} />;
+  return <Game options={options} onSettings={() => setOptions(null)} />;
 }
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
-function Seg<T extends string | number>({
-  value,
-  onChange,
-  items,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  items: Array<{ v: T; label: string; sub?: string; cls?: string }>;
-}) {
-  return (
-    <div className="seg" role="group">
-      {items.map((it) => (
-        <button
-          key={String(it.v)}
-          type="button"
-          className={it.cls}
-          aria-pressed={value === it.v}
-          onClick={() => onChange(it.v)}
-        >
-          {it.label}
-          {it.sub && <small>{it.sub}</small>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
   const [nickname, setNickname] = useState('');
-  const [team, setTeam] = useState<SoloOptions['team']>('AUTO');
-  const [teamSize, setTeamSize] = useState(6);
-  const [playerAp, setPlayerAp] = useState(10);
-  const [speed, setSpeed] = useState(2);
+  const [crowd, setCrowd] = useState(5);
+  const go = (team: TeamId) => onStart({ nickname: nickname.trim() || 'あなた', team, crowd });
   return (
     <main className="setup">
       <section>
@@ -88,111 +40,75 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
         <div className="versus">
           <span className="raijin">雷神</span> VS <span className="fujin">風神</span>
         </div>
-        <p className="lede">
-          日本の8地方を取り合い、45秒ごとに巨大ロボットが激突するチーム戦。会場ではスマホから参加し、
-          大型スクリーンで決着を見届けます。この体験版はブラウザだけで動き、味方と敵はBOTが務めます。
+        <p className="oneline">
+          応援するロボットを選んで、satsを送るとパンチ！
+          <br />
+          先にHPを0にしたチームがその地方をゲット。
         </p>
-        <span className="tag">オフライン体験版・実際の支払いは発生しません</span>
         <ol className="steps">
           <li>
             <span className="n">1</span>
             <div>
-              <b>チームに参加してAPを受け取る</b>
-              <span>会場では21 sats（またはスポンサーパス）で3AP。体験版は支払いなしです。</span>
+              <b>ロボットを選ぶ（無料）</b>
+              <span>雷神と風神の性能はまったく同じ。違うのは見た目と演出だけ。</span>
             </div>
           </li>
           <li>
             <span className="n">2</span>
             <div>
-              <b>⚔ 攻撃 ・ 🛡 防御 ・ ◆ 充電</b>
+              <b>satsをチャージ</b>
               <span>
-                中立地は1回で占領。敵地は「争奪」を始め、25秒以内にもう1回攻撃で奪取。拠点の種類がロボットを強くします。
+                sats（サッツ）はビットコインの小さな単位。会場では配られたsatsで1回だけチャージ。体験版は{STARTING_CREDIT}{' '}
+                satsを最初から配ります。
               </span>
             </div>
           </li>
           <li>
             <span className="n">3</span>
             <div>
-              <b>45秒ごとにロボット激突</b>
-              <span>
-                攻撃拠点は与ダメージ、防御拠点は被ダメージ、エネルギー拠点と充電は必殺技に効きます。
-              </span>
+              <b>タップでパンチ！（1発 21 sats）</b>
+              <span>チーム10発ごとに必殺技。HPが30%を切るとパンチ1.5倍で逆転のチャンス。8地方を取り合って全国制覇！</span>
             </div>
           </li>
         </ol>
+        <p className="fine">
+          会場では大画面にこのバトルが映り、通りがかった人がQRコードからスマホで参加します。この体験版は「大画面」と「あなたのスマホ」を1ページで再現し、まわりの観客はBOTが務めます。
+        </p>
       </section>
 
-      <form
-        className="form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onStart({ nickname: nickname.trim() || 'あなた', team, teamSize, playerAp, speed });
-        }}
-      >
+      <form className="form" onSubmit={(e) => e.preventDefault()}>
         <div className="field">
-          <label htmlFor="nick">ニックネーム</label>
-          <input
-            id="nick"
-            maxLength={12}
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            placeholder="例：さとし"
-            autoComplete="off"
-          />
+          <label htmlFor="nick">大画面に出る名前</label>
+          <input id="nick" maxLength={12} value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="例：さとし" autoComplete="off" />
         </div>
         <div className="field">
-          <span className="lbl">チーム</span>
-          <Seg
-            value={team}
-            onChange={setTeam}
-            items={[
-              { v: 'AUTO', label: 'おまかせ', sub: '会場と同じ自動振分' },
-              { v: 'RAIJIN', label: '⚡ 雷神', sub: '橙・重装', cls: 'r' },
-              { v: 'FUJIN', label: '🌀 風神', sub: '青緑・機動', cls: 'f' },
-            ]}
-          />
+          <span className="label">会場のにぎわい（各チームのBOT観客）</span>
+          <div className="seg" role="group">
+            {[
+              { v: 2, label: 'まばら', sub: '2人' },
+              { v: 5, label: 'ふつう', sub: '5人' },
+              { v: 12, label: '大盛況', sub: '12人' },
+            ].map((it) => (
+              <button key={it.v} type="button" aria-pressed={crowd === it.v} onClick={() => setCrowd(it.v)}>
+                {it.label}
+                <small>{it.sub}</small>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="field">
-          <span className="lbl">1チームの人数（あなた＋BOT）</span>
-          <Seg
-            value={teamSize}
-            onChange={setTeamSize}
-            items={[
-              { v: 3, label: '3人', sub: '少人数' },
-              { v: 6, label: '6人', sub: '標準' },
-              { v: 15, label: '15人', sub: '大混戦' },
-            ]}
-          />
+        <span className="label">どっちを応援する？</span>
+        <div className="pick">
+          {(['RAIJIN', 'FUJIN'] as const).map((t) => (
+            <button key={t} type="button" className={`pick-btn ${t === 'RAIJIN' ? 'r' : 'f'}`} onClick={() => go(t)}>
+              <span className="sym" aria-hidden>
+                {TEAM_META[t].symbol}
+              </span>
+              <span className="nm">{TEAM_META[t].nameJa}</span>
+              <small>{TEAM_META[t].nameEn}</small>
+            </button>
+          ))}
         </div>
-        <div className="field">
-          <span className="lbl">あなたのAP</span>
-          <Seg
-            value={playerAp}
-            onChange={setPlayerAp}
-            items={[
-              { v: 3, label: '3 AP', sub: '会場ルール' },
-              { v: 10, label: '10 AP', sub: '体験用に多め' },
-            ]}
-          />
-        </div>
-        <div className="field">
-          <span className="lbl">試合の速さ</span>
-          <Seg
-            value={speed}
-            onChange={setSpeed}
-            items={[
-              { v: 1, label: '等倍', sub: '5分（本番と同じ）' },
-              { v: 2, label: '2倍速', sub: '2分30秒' },
-            ]}
-          />
-        </div>
-        <button className="go" type="submit">
-          出撃する
-        </button>
-        <p className="fine">
-          両チームの性能は同じで、違うのは見た目と演出だけです。勝敗はゲームエンジンが決め、3D映像はその結果を再生します。
-          体験版では実行前の確認を省いています（会場のスマホ版では確認画面が出ます）。
-        </p>
+        <p className="tag">オフライン体験版・実際の支払いは発生しません</p>
       </form>
     </main>
   );
@@ -219,16 +135,23 @@ function useTicker(ms: number) {
   }, [ms]);
 }
 
-function Game({
-  options,
-  onRestart,
-  onSettings,
-}: {
-  options: SoloOptions;
-  onRestart: () => void;
-  onSettings: () => void;
-}) {
-  // Start immediately so the player exists before the first render.
+interface Pop {
+  id: number;
+  teamId: TeamId;
+  text: string;
+  big: boolean;
+  mine: boolean;
+}
+interface Bubble {
+  id: number;
+  teamId: TeamId;
+  emoji: string;
+  nickname: string;
+  x: number;
+}
+
+function Game({ options, onSettings }: { options: SoloOptions; onSettings: () => void }) {
+  // Start immediately so the first render already has a running season.
   const match = useMemo(() => {
     const m = new LocalMatch(options);
     m.start();
@@ -241,33 +164,48 @@ function Game({
     () => match.version,
   );
   useTicker(250);
-  const [hp, setHp] = useState<Record<TeamId, number>>({ RAIJIN: 100, FUJIN: 100 });
+  const [hp, setHp] = useState<Record<TeamId, number>>({ RAIJIN: 200, FUJIN: 200 });
   const [banner, setBanner] = useState<Banner | null>(null);
-  const [last, setLast] = useState<ActionResult | null>(null);
-  const [selected, setSelected] = useState<RegionId | null>(null);
+  const [pops, setPops] = useState<Pop[]>([]);
+  const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [sound, setSound] = useState(false);
   const [use3d] = useState(webglAvailable);
   const [contextLost, setContextLost] = useState(false);
-  const gameMsRef = useRef(0);
-  const reducedMotion = useMemo(
-    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
-    [],
-  );
+  const ids = useRef(0);
+  const reducedMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => {
     director.settings = { reducedMotion, shakeScale: 0.7, shortSpecials: false };
-    director.syncHp({ RAIJIN: 100, FUJIN: 100 }, match.state.config.hpMax);
+    director.syncHp({ RAIJIN: 200, FUJIN: 200 }, 200);
     const offs = [
       director.onHp((h) => setHp({ ...h })),
       director.onBanner(setBanner),
       director.onSound((name) => sfx.play(name as SfxName)),
-      match.onEvent((e) => cueFromEvent(director, e)),
+      match.onEvent((e) => {
+        cueFromEvent(director, e, match.state.config.roundsPerSeason);
+        if (e.type === 'ZAP') {
+          const d = e.data;
+          const sym = TEAM_META[d.teamId].symbol;
+          const text = d.code === 'KO' ? `${d.nickname} ${sym} KO!!` : d.special ? `${d.nickname} ${sym} 必殺 −${d.damage}` : `${d.nickname} ${sym} −${d.damage}`;
+          const pop: Pop = { id: ++ids.current, teamId: d.teamId, text, big: d.special || d.code === 'KO', mine: d.participantId === 'you' };
+          // Keep at most 6 per side so a busy crowd never buries the robots.
+          setPops((p) => {
+            const side = p.filter((x) => x.teamId === d.teamId);
+            const drop = side.length >= 6 ? side[0]!.id : null;
+            return [...p.filter((x) => x.id !== drop), pop];
+          });
+          setTimeout(() => setPops((p) => p.filter((x) => x.id !== pop.id)), 2200);
+        }
+      }),
+      match.onCheer((c) => {
+        const b: Bubble = { id: ++ids.current, teamId: c.teamId, emoji: c.emoji, nickname: c.nickname, x: Math.random() };
+        setBubbles((p) => [...p.slice(-12), b]);
+        setTimeout(() => setBubbles((p) => p.filter((x) => x.id !== b.id)), 3000);
+        director.play({ kind: 'cheer', teamId: c.teamId });
+      }),
     ];
-    director.play({ kind: 'intro' });
-    const id = setInterval(() => {
-      match.tick();
-      gameMsRef.current = match.gameMs();
-    }, 100);
+    director.play({ kind: 'seasonStart' });
+    const id = setInterval(() => match.tick(), 100);
     // Without WebGL nothing drives the director clock, so do it here.
     let raf = 0;
     let prev = performance.now();
@@ -284,18 +222,14 @@ function Game({
     };
   }, [match, director, sfx, reducedMotion, use3d, contextLost]);
 
-  // If a cinematic was skipped, snap the HUD to the authoritative HP.
+  // Keep the HUD on the authoritative numbers if a cue was missed.
   const s = match.state;
   useEffect(() => {
-    if (!director.busy && (hp.RAIJIN !== s.teams.RAIJIN.hp || hp.FUJIN !== s.teams.FUJIN.hp)) {
-      director.syncHp({ RAIJIN: s.teams.RAIJIN.hp, FUJIN: s.teams.FUJIN.hp });
+    const r = s.round;
+    if (r && !director.busy && (director.hpMax !== r.hpMax || hp.RAIJIN !== r.hp.RAIJIN || hp.FUJIN !== r.hp.FUJIN)) {
+      director.syncHp(r.hp, r.hpMax);
     }
   });
-
-  const act = (type: ActionType, regionId: RegionId | null) => {
-    const r = match.act(type, regionId);
-    setLast(r);
-  };
 
   const toggleSound = async () => {
     if (!sound) {
@@ -308,63 +242,71 @@ function Game({
     }
   };
 
-  const regions = s.regionOrder.map((id) => s.regions[id]);
+  const regions = s.roundOrder.map((id) => s.regions[id]);
+  const focus = s.status === 'LIVE' && s.phase === 'ROUND' ? (s.round?.regionId ?? null) : null;
+  const pinchHp = (s.round?.hpMax ?? 0) * s.config.pinchHpRatio;
+  const glow: Record<TeamId, number> = {
+    RAIJIN: s.round && hp.RAIJIN > 0 && hp.RAIJIN <= pinchHp ? 1 : 0.15,
+    FUJIN: s.round && hp.FUJIN > 0 && hp.FUJIN <= pinchHp ? 1 : 0.15,
+  };
+
   return (
     <main className="game">
-      <section className="stage" aria-label="会場スクリーン">
+      <section className="stage" aria-label="会場の大画面">
         {use3d && !contextLost ? (
           <ArenaScene
             director={director}
             regions={regions}
-            teams={s.teams}
-            energyMax={s.config.energyMax}
-            gameMsRef={gameMsRef}
+            focusRegionId={focus}
+            glow={glow}
             quality="medium"
             reducedMotion={reducedMotion}
             locale="ja"
             onContextLost={() => setContextLost(true)}
           />
         ) : (
-          <FlatStage regions={regions} gameMs={match.gameMs()} />
+          <FlatStage match={match} focus={focus} />
         )}
-        <Hud match={match} hp={hp} banner={banner} />
-        <Covers match={match} onRestart={onRestart} onSettings={onSettings} />
+        <Hud match={match} hp={hp} banner={banner} pops={pops} bubbles={bubbles} reducedMotion={reducedMotion} />
       </section>
-      <Panel
-        match={match}
-        last={last}
-        onAct={act}
-        selected={selected}
-        onSelect={setSelected}
-        sound={sound}
-        onSound={toggleSound}
-        onRestart={onRestart}
-        onSettings={onSettings}
-      />
+      <Phone match={match} sound={sound} onSound={toggleSound} onSettings={onSettings} />
     </main>
   );
 }
 
 // ---------------------------------------------------------------------------
-// HUD over the arena
+// Big-screen HUD
 // ---------------------------------------------------------------------------
 
-function Gauge({
-  match,
-  teamId,
-  hp,
-  side,
-}: {
-  match: LocalMatch;
-  teamId: TeamId;
-  hp: number;
-  side: 'left' | 'right';
-}) {
+function roundInfo(match: LocalMatch) {
   const s = match.state;
+  const c = s.config;
+  const r: Pick<RoundState, 'hp' | 'hpMax' | 'gauge'> = s.round ?? {
+    hp: { RAIJIN: c.hpInitial, FUJIN: c.hpInitial },
+    hpMax: c.hpInitial,
+    gauge: { RAIJIN: 0, FUJIN: 0 },
+  };
+  const fighting = s.status === 'LIVE' && s.phase === 'ROUND';
+  const regionId = s.round?.regionId ?? s.roundOrder[s.roundIndex]!;
+  return {
+    fighting,
+    regionId,
+    roundNo: (s.round?.index ?? s.roundIndex) + 1,
+    hpMax: r.hpMax,
+    toKo: { RAIJIN: punchesToKo(c, r, 'RAIJIN'), FUJIN: punchesToKo(c, r, 'FUJIN') },
+    toSpecial: { RAIJIN: punchesToSpecial(c, r.gauge.RAIJIN), FUJIN: punchesToSpecial(c, r.gauge.FUJIN) },
+    pinch: {
+      RAIJIN: !!s.round && r.hp.RAIJIN > 0 && r.hp.RAIJIN <= r.hpMax * c.pinchHpRatio,
+      FUJIN: !!s.round && r.hp.FUJIN > 0 && r.hp.FUJIN <= r.hpMax * c.pinchHpRatio,
+    },
+    next: s.roundOrder[s.phase === 'OPENING' ? 0 : s.roundIndex + 1] ?? null,
+  };
+}
+
+function Gauge({ match, teamId, hp, side }: { match: LocalMatch; teamId: TeamId; hp: number; side: 'left' | 'right' }) {
+  const info = roundInfo(match);
   const m = TEAM_META[teamId];
-  const t = s.teams[teamId];
-  const cfg = s.config;
-  const ready = t.energy >= cfg.specialThreshold;
+  const foe = TEAM_META[otherTeam(teamId)];
   return (
     <div className={`gauge ${side}`}>
       <div className="gauge-head">
@@ -375,36 +317,21 @@ function Gauge({
         </div>
         <div className="gauge-hp num">
           {hp}
-          <small>/{cfg.hpMax}</small>
+          <small>/{info.hpMax}</small>
         </div>
       </div>
-      <div
-        className="bar"
-        role="meter"
-        aria-label={`${m.nameJa} HP`}
-        aria-valuenow={hp}
-        aria-valuemin={0}
-        aria-valuemax={cfg.hpMax}
-      >
-        <i
-          style={{
-            width: `${(hp / cfg.hpMax) * 100}%`,
-            background: `linear-gradient(90deg, ${m.colorDark}, ${m.color}, ${m.colorLight})`,
-          }}
-        />
+      <div className="bar" role="meter" aria-label={`${m.nameJa} HP`} aria-valuenow={hp} aria-valuemin={0} aria-valuemax={info.hpMax}>
+        <i style={{ width: `${(hp / info.hpMax) * 100}%`, background: `linear-gradient(90deg, ${m.colorDark}, ${m.color}, ${m.colorLight})` }} />
+        {info.pinch[teamId] && <span className="pinch">ピンチ！ パンチ1.5倍</span>}
       </div>
-      <div className={`en ${ready ? 'ready' : ''}`}>
-        <span className="num">
-          EN {t.energy}/{cfg.energyMax}
-          {ready ? ' 必殺OK' : ''}
-        </span>
-        <div className="bar">
-          <i style={{ width: `${(t.energy / cfg.energyMax) * 100}%` }} />
-          <span
-            className="mark"
-            style={{ left: `${(cfg.specialThreshold / cfg.energyMax) * 100}%` }}
-          />
-        </div>
+      <div className="gauge-sub">
+        {info.fighting && (
+          <span className="ko">
+            {foe.nameJa}KOまで あと<b className="num">{info.toKo[teamId]}</b>発
+          </span>
+        )}
+        {info.fighting && <span className="sp">必殺技まで{info.toSpecial[teamId]}発</span>}
+        <span className="won">{match.state.teams[teamId].regionsWon}地方</span>
       </div>
     </div>
   );
@@ -414,488 +341,337 @@ function Hud({
   match,
   hp,
   banner,
+  pops,
+  bubbles,
+  reducedMotion,
 }: {
   match: LocalMatch;
   hp: Record<TeamId, number>;
   banner: Banner | null;
+  pops: Pop[];
+  bubbles: Bubble[];
+  reducedMotion: boolean;
 }) {
   const s = match.state;
-  const g = match.gameMs();
-  const next =
-    s.status === 'LIVE' && s.clashes.length < s.config.clashTimesMs.length
-      ? s.config.clashTimesMs[s.nextClashIndex]
-      : undefined;
-  const nextIn = next !== undefined ? next - g : null;
-  const label =
-    s.status === 'LOBBY'
-      ? '参加受付中'
-      : s.status === 'LIVE'
-        ? '対戦中'
-        : s.status === 'PAUSED'
-          ? '一時停止中'
-          : s.status === 'FINALIZING'
-            ? '最終決戦'
-            : '試合終了';
-  const feed = useFeed(match);
+  const info = roundInfo(match);
+  const left = match.secondsLeft();
+  const showHp = (t: TeamId) => (s.round ? hp[t] : info.hpMax);
   return (
     <div className="hud">
       <div className="hud-top">
-        <Gauge match={match} teamId="RAIJIN" hp={hp.RAIJIN} side="left" />
+        <Gauge match={match} teamId="RAIJIN" hp={showHp('RAIJIN')} side="left" />
         <div className="clock">
-          <div className="st">{label}</div>
-          <div className="big num">
-            {s.status === 'LOBBY'
-              ? formatClock(-g)
-              : s.status === 'FINALIZING' || s.status === 'FINISHED'
-                ? 'FINAL'
-                : formatClock(s.config.actionCloseMs - g)}
+          <div className="round">
+            第{info.roundNo}戦 <small>/ {s.config.roundsPerSeason}</small>
           </div>
-          {nextIn !== null && (
-            <div className={`chip num ${nextIn < 10_000 ? 'hot' : ''}`}>
-              あと{Math.ceil(nextIn / 1000)}秒で激突！
-            </div>
-          )}
+          <div className="region">⚔ {REGION_INFO[info.regionId].labelJa}</div>
+          <div className="secs num">{info.fighting && left !== null ? left : '—'}</div>
         </div>
-        <Gauge match={match} teamId="FUJIN" hp={hp.FUJIN} side="right" />
+        <Gauge match={match} teamId="FUJIN" hp={showHp('FUJIN')} side="right" />
+      </div>
+      <div className="strip">
+        {s.roundOrder.map((id, i) => {
+          const owner = s.regions[id].ownerTeamId;
+          const current = i === s.roundIndex && (s.phase === 'ROUND' || s.phase === 'ROUND_END');
+          return (
+            <span key={id} className={`chip ${current ? 'cur' : ''}`} style={{ background: owner ? color(owner) : undefined, color: owner ? '#070D1A' : undefined }}>
+              {owner ? TEAM_META[owner].symbol : current ? '⚔' : i + 1} {REGION_INFO[id].shortJa}
+            </span>
+          );
+        })}
+      </div>
+      {(['RAIJIN', 'FUJIN'] as const).map((t) => (
+        <div key={t} className={`pops ${t === 'RAIJIN' ? 'l' : 'r'}`} aria-hidden>
+          {pops
+            .filter((p) => p.teamId === t)
+            .map((p) => (
+              <div key={p.id} className={`pop ${p.big ? 'big' : ''} ${p.mine ? 'mine' : ''}`} style={{ borderColor: TEAM_META[t].color }}>
+                {p.text}
+              </div>
+            ))}
+        </div>
+      ))}
+      <div className="cheers" aria-hidden>
+        {bubbles.map((b) => (
+          <div key={b.id} className={`bubble ${reducedMotion ? '' : 'up'}`} style={{ left: `${b.teamId === 'RAIJIN' ? 4 + b.x * 30 : 66 + b.x * 30}%` }}>
+            <span className="e">{b.emoji}</span>
+            <span className="n" style={{ color: TEAM_META[b.teamId].color }}>
+              {b.nickname}
+            </span>
+          </div>
+        ))}
       </div>
       <div className="hud-mid">
-        {banner && (
-          <div
-            className="banner"
-            key={banner.textJa + banner.until}
-            style={{ borderColor: banner.teamId ? TEAM_META[banner.teamId].color : undefined }}
-          >
-            <b style={{ color: banner.teamId ? TEAM_META[banner.teamId].color : undefined }}>
+        {banner ? (
+          <div key={banner.textJa + banner.until} className="banner" style={{ borderColor: banner.teamId ? color(banner.teamId) : '#EFF5FF' }}>
+            <div className="b1" style={{ color: banner.teamId ? color(banner.teamId) : '#EFF5FF' }}>
               {banner.textJa}
-            </b>
-            <span>{banner.textEn}</span>
-          </div>
-        )}
-      </div>
-      <div className="hud-bottom">
-        <div className="ticker" aria-live="polite">
-          {feed.slice(0, 3).map((f) => (
-            <div key={f.seq} style={{ borderLeftColor: color(f.teamId) }}>
-              {f.text}
             </div>
-          ))}
-        </div>
-        <div className="fair num">
-          <span className="raijin">
-            ⚡ {s.teams.RAIJIN.participantCount}人 AP {s.teams.RAIJIN.apRemaining}
-          </span>
-          {'  ・  '}
-          <span className="fujin">
-            🌀 {s.teams.FUJIN.participantCount}人 AP {s.teams.FUJIN.apRemaining}
-          </span>
-        </div>
+            {banner.subJa && <div className="b2">{banner.subJa}</div>}
+          </div>
+        ) : s.status === 'LIVE' && (s.phase === 'ROUND_END' || s.phase === 'OPENING') && info.next ? (
+          <div className="banner next">
+            <div className="b2">次の戦い：{REGION_INFO[info.next].labelJa}</div>
+            <div className="b1 num">{left ?? ''}</div>
+          </div>
+        ) : null}
       </div>
+      <div className="howto">
+        <b>① QRを読む ② ロボットを選ぶ ③ タップでパンチ！</b>
+        <span>1発 21 sats ・ satsはビットコインの小さな単位 ・ 体験版は支払いなし</span>
+      </div>
+      {s.status === 'PAUSED' && (
+        <div className="cover">
+          <div className="big">一時停止中</div>
+        </div>
+      )}
+      {(s.phase === 'SEASON_END' || s.status === 'FINISHED') && s.result && (
+        <div className="result-card">
+          <div>
+            雷神 {s.result.regionCounts.RAIJIN} – {s.result.regionCounts.FUJIN} 風神
+          </div>
+          <small>まもなく次のシーズン！ 残高はそのまま使えます</small>
+        </div>
+      )}
     </div>
   );
 }
 
-function useFeed(match: LocalMatch) {
-  const [feed, setFeed] = useState<Array<{ seq: number; teamId: TeamId | null; text: string }>>([]);
-  useEffect(
-    () =>
-      match.onEvent((e) => {
-        const m = eventMessage(e, 'ja');
-        if (m) setFeed((f) => [m, ...f].slice(0, 8));
-      }),
-    [match],
-  );
-  return feed;
-}
+// ---------------------------------------------------------------------------
+// "Your phone" panel
+// ---------------------------------------------------------------------------
 
-function Covers({
-  match,
-  onRestart,
-  onSettings,
-}: {
-  match: LocalMatch;
-  onRestart: () => void;
-  onSettings: () => void;
-}) {
+function Phone({ match, sound, onSound, onSettings }: { match: LocalMatch; sound: boolean; onSound: () => void; onSettings: () => void }) {
   const s = match.state;
-  if (s.status === 'LOBBY') {
-    return (
-      <div className="cover">
-        <div>
-          <div className="mid">まもなく開戦</div>
-          <div className="big num">{formatClock(-match.gameMs())}</div>
-          <button className="btn primary" type="button" onClick={() => match.startNow()}>
-            今すぐ開始
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (s.status === 'PAUSED') {
-    return (
-      <div className="cover">
-        <div>
-          <div className="mid">一時停止中</div>
-          <button className="btn primary" type="button" onClick={() => match.resume()}>
-            再開する
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (s.status === 'FINISHED' && s.result) {
-    const r = s.result;
-    const you = s.participants[PLAYER_ID]!;
-    const won = r.winnerTeamId === you.teamId;
-    return (
-      <div className="cover final" role="dialog" aria-label="試合結果">
-        <div className="result">
-          <div
-            className="mid"
-            style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}
-          >
-            {r.winnerTeamId ? `${TEAM_META[r.winnerTeamId].nameJa}の勝利！` : '引き分け'}
-          </div>
-          <div>
-            {RESULT_REASON_LABELS[r.reason].ja}
-            {r.winnerTeamId && (won ? ' ・ あなたのチームの勝ち！' : ' ・ ナイスファイト！')}
-          </div>
-          <div className="stats num">
-            <span>HP</span>
-            <span className="raijin">雷神 {r.finalHp.RAIJIN}</span>
-            <span className="fujin">風神 {r.finalHp.FUJIN}</span>
-            <span>地域</span>
-            <span className="raijin">{r.regionCounts.RAIJIN}</span>
-            <span className="fujin">{r.regionCounts.FUJIN}</span>
-            <span>MVP</span>
-            <span className="raijin">{r.mvp.RAIJIN?.nickname ?? '—'}</span>
-            <span className="fujin">{r.mvp.FUJIN?.nickname ?? '—'}</span>
-          </div>
-          <div>あなたの貢献スコア：{contributionScore(you.contribution)}</div>
-          <div className="tools">
-            <button className="btn primary" type="button" onClick={onRestart}>
-              もう一度
-            </button>
-            <button className="btn" type="button" onClick={onSettings}>
-              設定を変える
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return null;
-}
+  const c = s.config;
+  const info = roundInfo(match);
+  const my = match.team;
+  const foe = otherTeam(my);
+  const m = TEAM_META[my];
+  const [flash, setFlash] = useState<{ id: number; text: string; tone: string } | null>(null);
+  const [pressed, setPressed] = useState(0);
+  const [cheerCd, setCheerCd] = useState(false);
+  const fid = useRef(0);
+  const left = match.secondsLeft();
+  const credit = match.creditSats;
 
-// ---------------------------------------------------------------------------
-// Commander panel (the phone controller in the real game)
-// ---------------------------------------------------------------------------
+  const show = (text: string, tone: string) => {
+    const id = ++fid.current;
+    setFlash({ id, text, tone });
+    setTimeout(() => setFlash((f) => (f?.id === id ? null : f)), 1500);
+  };
 
-function hint(type: 'ATTACK' | 'DEFEND', r: RegionState, mine: TeamId): string | null {
-  const enemy = otherTeam(mine);
-  if (type === 'ATTACK') {
-    if (r.ownerTeamId === null) return '中立：1回で占領';
-    if (r.ownerTeamId === enemy) {
-      if (r.contestedByTeamId === mine) return '争奪中：攻撃で奪取';
-      if (r.shieldCharges > 0) return 'シールドを破壊';
-      return '争奪を開始';
+  const punch = () => {
+    const r = match.punch();
+    if (!r.ok) {
+      if (r.reason === 'NO_CREDIT') show('satsが足りません。下でチャージしてね', 'warn');
+      else if (r.reason === 'NOT_FIGHTING') show('ラウンドの合間です（satsは使われていません）', 'info');
+      return;
     }
-    if (r.contestedByTeamId === enemy) return '敵の争奪を阻止';
-    return null;
+    setPressed((n) => n + 1);
+    try {
+      navigator.vibrate?.(12);
+    } catch {
+      // unsupported
+    }
+    const res = r.result;
+    if (res.code === 'KO') show('KO!! あなたのとどめ！', 'ko');
+    else if (res.special) show(`必殺技！ ${m.specialJa} −${res.damage}`, 'special');
+    else show(`命中！ −${res.damage}${res.pinch ? '（1.5倍）' : ''}`, 'hit');
+  };
+
+  // Space / Enter = punch on desktop.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.code === 'Space' || e.key === 'Enter') {
+        e.preventDefault();
+        punch();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  let label = 'パンチ！';
+  let sub = `1発 ${c.zapCostSats} sats ・ 残り${zapsFor(credit, c)}発`;
+  let disabled = false;
+  if (s.status === 'PAUSED') {
+    label = '一時停止中';
+    sub = '';
+    disabled = true;
+  } else if (s.status !== 'LIVE' || s.phase === 'SEASON_END') {
+    label = '次のシーズンまで少し待ってね';
+    sub = s.result?.winnerTeamId ? `${TEAM_META[s.result.winnerTeamId].nameJa}が全国制覇！` : '';
+    disabled = true;
+  } else if (s.phase !== 'ROUND') {
+    label = `まもなく次の戦い ${left ?? ''}`;
+    sub = info.next ? `次は ${REGION_INFO[info.next].labelJa}` : '';
+    disabled = true;
+  } else if (credit < c.zapCostSats) {
+    label = 'チャージしてパンチ！';
+    sub = '下のボタンでsatsを追加';
   }
-  if (r.ownerTeamId !== mine) return null;
-  if (r.contestedByTeamId) return '争奪を解除';
-  if (r.shieldCharges > 0) return null;
-  return 'シールド30秒';
-}
 
-function Panel({
-  match,
-  last,
-  onAct,
-  selected,
-  onSelect,
-  sound,
-  onSound,
-  onRestart,
-  onSettings,
-}: {
-  match: LocalMatch;
-  last: ActionResult | null;
-  onAct: (t: ActionType, r: RegionId | null) => void;
-  selected: RegionId | null;
-  onSelect: (r: RegionId | null) => void;
-  sound: boolean;
-  onSound: () => void;
-  onRestart: () => void;
-  onSettings: () => void;
-}) {
-  const s = match.state;
-  const you = s.participants[PLAYER_ID]!;
-  const mine = you.teamId;
-  const meta = TEAM_META[mine];
-  const live = s.status === 'LIVE';
-  const canAct = live && you.apRemaining > 0;
-  const g = match.gameMs();
-  const next = live ? s.config.clashTimesMs[s.nextClashIndex] : undefined;
   return (
-    <aside className="panel" aria-label="作戦パネル" style={{ borderColor: meta.color }}>
-      <div className="me">
+    <aside className="phone" aria-label="あなたのスマホ">
+      <div className="phone-head">
+        <span className="pill">📱 あなたのスマホ</span>
+        <span className="team" style={{ color: m.color, borderColor: m.color }}>
+          {m.symbol} {m.nameJa}
+        </span>
+        <span className="who">{match.options.nickname}</span>
+      </div>
+
+      <div className="status">
+        <div className="row">
+          <b>
+            第{info.roundNo}戦 ⚔ {REGION_INFO[info.regionId].labelJa}
+          </b>
+          <span className="num">{info.fighting && left !== null ? `${left}s` : '—'}</span>
+        </div>
+        {info.fighting && (
+          <div className="twin">
+            <div>
+              <small>チームで{TEAM_META[foe].nameJa}KOまで</small>
+              <b>
+                あと<em className="num">{info.toKo[my]}</em>発
+              </b>
+            </div>
+            <div className="sp">
+              <small>チームの必殺技まで</small>
+              <b>
+                あと<em className="num">{info.toSpecial[my]}</em>発
+              </b>
+            </div>
+          </div>
+        )}
+        {info.pinch[my] && info.fighting && <div className="pinch-note">ピンチ！ 今ならパンチ1.5倍で逆転のチャンス</div>}
+      </div>
+
+      <div className="punch-wrap">
+        <button
+          type="button"
+          className="punch"
+          onClick={punch}
+          disabled={disabled}
+          style={{
+            background: `radial-gradient(circle at 35% 30%, ${m.colorLight}, ${m.color} 45%, ${m.colorDark})`,
+            boxShadow: `0 8px 0 ${m.colorDark}, 0 0 36px ${m.color}66`,
+          }}
+        >
+          <span key={pressed} className="sym" aria-hidden>
+            {m.symbol}
+          </span>
+          <span className="lbl">{label}</span>
+          <span className="sub">{sub}</span>
+        </button>
+        {flash && (
+          <div key={flash.id} className={`flash ${flash.tone}`} role="status">
+            {flash.text}
+          </div>
+        )}
+      </div>
+
+      <div className="credit">
         <div>
-          <div className="team" style={{ color: meta.color }}>
-            {meta.symbol} {meta.nameJa}チーム
-          </div>
-          <div className="who">
-            {you.nickname} ・ 必殺技「{meta.specialJa}」
-          </div>
+          <small>残高（体験版のsats）</small>
+          <b className="num">
+            {credit} <span>sats = {zapsFor(credit, c)}発</span>
+          </b>
+          <small>
+            今シーズン {match.myPunches}発 ・ KO {match.myKos}回
+          </small>
         </div>
-        <div className="ap">
-          <div className="lbl">AP</div>
-          <div className="pips" aria-label={`残りAP ${you.apRemaining}`}>
-            {Array.from({ length: you.apTotal }, (_, i) => (
-              <i key={i} className={i < you.apRemaining ? 'on' : ''} />
-            ))}
-          </div>
-          <div className="num">
-            {you.apRemaining}/{you.apTotal}
-          </div>
+        <div className="topups">
+          {c.topupOptionsSats.slice(0, 2).map((amt) => (
+            <button key={amt} type="button" onClick={() => match.topup(amt)}>
+              +{amt}
+              <small>{zapsFor(amt, c)}発</small>
+            </button>
+          ))}
         </div>
       </div>
+      <p className="note">会場ではここでLightningの請求書を1回払うだけ。あとはタップするたびに残高から21 satsずつ使います。</p>
 
-      <div className="status num">
-        <span>
-          次の激突 <b>{next !== undefined ? formatClock(next - g) : '--'}</b>
-        </span>
-        <span>
-          残り{' '}
-          <b>{live || s.status === 'PAUSED' ? formatClock(s.config.actionCloseMs - g) : '--'}</b>
-        </span>
-      </div>
-
-      {last && (
-        <div className={`toast ${last.ok ? 'ok' : 'bad'}`} role="status">
-          {ACTION_CODE_LABELS[last.code].ja}
-          {last.ok ? `（残りAP ${last.apAfter}）` : '（APは消費されていません）'}
-        </div>
-      )}
-
-      <MiniMap
-        regions={s.regionOrder.map((id) => s.regions[id])}
-        mine={mine}
-        selected={selected}
-        onSelect={onSelect}
-        gameMs={g}
-        live={live || s.status === 'PAUSED'}
-      />
-
-      <ul className="regions">
-        {s.regionOrder.map((id) => {
-          const r = s.regions[id];
-          const kind = REGION_KIND_META[r.kind];
-          const atk = hint('ATTACK', r, mine);
-          const def = hint('DEFEND', r, mine);
-          const owner = r.ownerTeamId === null ? '中立' : r.ownerTeamId === mine ? '味方' : '敵';
-          const left =
-            r.contestedUntil !== null ? Math.max(0, Math.ceil((r.contestedUntil - g) / 1000)) : 0;
-          return (
-            <li
-              key={id}
-              className={`region ${selected === id ? 'sel' : ''}`}
-              style={{ borderLeftColor: color(r.ownerTeamId) }}
-              onMouseEnter={() => onSelect(id)}
+      <div className="cheer">
+        <small>無料で応援（大画面に出ます・satsは使いません）</small>
+        <div className="emojis">
+          {CHEER_EMOJIS.map((e) => (
+            <button
+              key={e}
+              type="button"
+              disabled={cheerCd}
+              onClick={() => {
+                match.cheer(e);
+                setCheerCd(true);
+                setTimeout(() => setCheerCd(false), c.cheerCooldownMs);
+              }}
+              aria-label={`${e} で応援`}
             >
-              <div>
-                <div className="nm">
-                  {kind.icon} {REGION_INFO[id].labelJa}
-                </div>
-                <div className="sub">{regionKindDescription(r.kind, s.config, 'ja')}</div>
-                <div className="state" style={{ color: color(r.ownerTeamId) }}>
-                  {r.ownerTeamId ? TEAM_META[r.ownerTeamId].symbol : '○'} {owner}
-                  {r.shieldCharges > 0 && ' 🛡'}
-                  {r.contestedByTeamId && live && (
-                    <span style={{ color: 'var(--gold)' }}>
-                      {' '}
-                      {r.contestedByTeamId === mine ? '味方が争奪中' : '敵が争奪中'} {left}s
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="acts">
-                <button
-                  type="button"
-                  className="act atk"
-                  disabled={!canAct || !atk}
-                  title={atk ?? '攻撃できません'}
-                  onClick={() => onAct('ATTACK', id)}
-                >
-                  ⚔ 攻撃
-                </button>
-                <button
-                  type="button"
-                  className="act def"
-                  disabled={!canAct || !def}
-                  title={def ?? '防御できません'}
-                  onClick={() => onAct('DEFEND', id)}
-                >
-                  🛡 防御
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-      <button
-        type="button"
-        className="charge"
-        disabled={!canAct || s.teams[mine].energy >= s.config.energyMax}
-        onClick={() => onAct('CHARGE', null)}
-      >
-        ◆ 充電 +{s.config.chargeAmount}（EN {s.teams[mine].energy}/{s.config.energyMax}）
-      </button>
+              {e}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="tools">
-        <button className="btn" type="button" onClick={onSound} aria-pressed={sound}>
-          {sound ? '🔊 音声ON' : '🔇 音声OFF'}
+        <button type="button" onClick={() => match.switchTeam()}>
+          ⇄ {TEAM_META[foe].nameJa}に変更
         </button>
-        {live && (
-          <button className="btn" type="button" onClick={() => match.pause()}>
-            一時停止
-          </button>
-        )}
-        <button className="btn" type="button" onClick={onRestart}>
-          最初から
+        <button type="button" onClick={() => (s.status === 'PAUSED' ? match.resume() : match.pause())}>
+          {s.status === 'PAUSED' ? '▶ 再開' : '⏸ 一時停止'}
         </button>
-        <button className="btn" type="button" onClick={onSettings}>
-          設定
+        <button type="button" onClick={onSound}>
+          {sound ? '🔊 音ON' : '🔇 音OFF'}
+        </button>
+        <button type="button" onClick={onSettings}>
+          ⚙ 最初から
         </button>
       </div>
-      <p className="hint">
-        攻撃拠点⚔は与ダメージ+{s.config.attackRegionBonus}、防御拠点🛡は被ダメージ−
-        {s.config.defenseRegionReduction}、 エネルギー拠点◆は激突ごとにEN+
-        {s.config.energyRegionGain}。EN{s.config.specialThreshold}以上で必殺技が自動で出ます。
-        争奪中の地域はボーナスが止まります。
-      </p>
+      <p className="fine">体験版：BOT観客がパンチしています。スペースキーでもパンチできます。賞金・換金はありません。</p>
     </aside>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 2D maps (mini map in the panel; full stage when WebGL is unavailable)
+// No-WebGL fallback
 // ---------------------------------------------------------------------------
 
 const B = mapBounds();
-const VB = `${B.minX - 0.5} ${-B.maxY - 0.5} ${B.maxX - B.minX + 1} ${B.maxY - B.minY + 1}`;
+const PAD = 0.6;
 const PATHS = Object.fromEntries(
   Object.entries(REGION_OUTLINES).map(([id, polys]) => [
     id,
-    polys
-      .map((p) => `M${p.map((pt) => `${pt.x.toFixed(2)},${(-pt.y).toFixed(2)}`).join('L')}Z`)
-      .join(' '),
+    polys.map((poly) => `M${poly.map((p) => `${p.x.toFixed(3)},${(-p.y).toFixed(3)}`).join('L')}Z`).join(' '),
   ]),
-) as Record<RegionId, string>;
+) as Record<string, string>;
 
-function MiniMap({
-  regions,
-  mine,
-  selected,
-  onSelect,
-  gameMs,
-  big = false,
-  live = true,
-}: {
-  live?: boolean;
-  regions: RegionState[];
-  mine?: TeamId;
-  selected?: RegionId | null;
-  onSelect?: (id: RegionId) => void;
-  gameMs: number;
-  big?: boolean;
-}) {
-  const fs = big ? 0.6 : 0.75;
+function FlatStage({ match, focus }: { match: LocalMatch; focus: string | null }) {
+  const s = match.state;
   return (
-    <svg
-      viewBox={VB}
-      className={big ? undefined : 'minimap'}
-      style={big ? { width: '100%', height: '100%' } : undefined}
-      role="img"
-      aria-label="日本地図の戦況"
-    >
-      <defs>
-        {(['RAIJIN', 'FUJIN'] as const).map((t) => (
-          <pattern
-            key={t}
-            id={`h-${t}`}
-            width="0.5"
-            height="0.5"
-            patternUnits="userSpaceOnUse"
-            patternTransform="rotate(45)"
-          >
-            <line x1="0" y1="0" x2="0" y2="0.5" stroke={TEAM_META[t].color} strokeWidth="0.22" />
-          </pattern>
-        ))}
-      </defs>
-      {regions.map((r) => (
-        <g
-          key={r.regionId}
-          onClick={() => onSelect?.(r.regionId)}
-          style={{ cursor: onSelect ? 'pointer' : undefined }}
-        >
+    <div className="flat">
+      <svg viewBox={`${B.minX - PAD} ${-B.maxY - PAD} ${B.maxX - B.minX + PAD * 2} ${B.maxY - B.minY + PAD * 2}`} role="img" aria-label="日本地図">
+        {s.roundOrder.map((id) => (
           <path
-            d={PATHS[r.regionId]}
-            fill={color(r.ownerTeamId)}
-            fillOpacity={r.ownerTeamId ? 0.9 : 0.55}
-            stroke={selected === r.regionId ? '#EFF5FF' : '#070D1A'}
-            strokeWidth={selected === r.regionId ? 0.2 : 0.06}
+            key={id}
+            d={PATHS[id]}
+            fill={color(s.regions[id].ownerTeamId)}
+            fillOpacity={s.regions[id].ownerTeamId ? 0.85 : 0.5}
+            stroke={focus === id ? '#FFE27A' : '#0B1222'}
+            strokeWidth={focus === id ? 0.2 : 0.06}
           />
-          {r.contestedByTeamId && (
-            <path d={PATHS[r.regionId]} fill={`url(#h-${r.contestedByTeamId})`} />
-          )}
-        </g>
-      ))}
-      {regions.map((r) => {
-        const c = REGION_CENTROIDS[r.regionId];
-        const rel =
-          r.ownerTeamId === null
-            ? ''
-            : mine
-              ? r.ownerTeamId === mine
-                ? '味方'
-                : '敵'
-              : TEAM_META[r.ownerTeamId].symbol;
-        const left =
-          live && r.contestedUntil !== null
-            ? Math.max(0, Math.ceil((r.contestedUntil - gameMs) / 1000))
-            : null;
-        return (
-          <text
-            key={`t-${r.regionId}`}
-            x={c.x}
-            y={-c.y}
-            textAnchor="middle"
-            fontSize={fs}
-            fontWeight={700}
-            fill="#EFF5FF"
-            stroke="#070D1A"
-            strokeWidth={fs * 0.18}
-            paintOrder="stroke"
-            pointerEvents="none"
-          >
-            {REGION_KIND_META[r.kind].icon}
-            {REGION_INFO[r.regionId].shortJa}
-            {rel ? ` ${rel}` : ''}
-            {r.shieldCharges > 0 ? '🛡' : ''}
-            {left !== null && r.contestedByTeamId ? ` ${left}s` : ''}
-          </text>
-        );
-      })}
-    </svg>
-  );
-}
-
-function FlatStage({ regions, gameMs }: { regions: RegionState[]; gameMs: number }) {
-  return (
-    <div style={{ position: 'absolute', inset: '14% 22% 12%' }}>
-      <MiniMap regions={regions} gameMs={gameMs} big />
+        ))}
+        {s.roundOrder.map((id) => {
+          const c = REGION_CENTROIDS[id];
+          return (
+            <text key={`t-${id}`} x={c.x} y={-c.y} textAnchor="middle" fontSize={0.55} fontWeight={800} fill="#fff" stroke="#070D1A" strokeWidth={0.1} paintOrder="stroke">
+              {focus === id ? '⚔ ' : ''}
+              {REGION_INFO[id].shortJa}
+            </text>
+          );
+        })}
+      </svg>
     </div>
   );
 }

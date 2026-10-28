@@ -136,6 +136,9 @@ importers:
       '@react-three/fiber':
         specifier: ~9.4.0
         version: 9.4.2(@types/react@19.2.18)(react-dom@19.2.9(react@19.2.9))(react@19.2.9)(three@0.181.2)
+      '@sats-wars/game-engine':
+        specifier: workspace:*
+        version: link:../../packages/game-engine
       '@sats-wars/shared':
         specifier: workspace:*
         version: link:../../packages/shared

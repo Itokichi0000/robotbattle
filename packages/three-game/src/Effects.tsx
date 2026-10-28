@@ -176,6 +176,14 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
             seed: e.id * 7919,
           });
         switch (e.kind) {
+          case 'impact':
+            // One punch landing on the other robot: small, fast, attacker-coloured.
+            if (e.teamId) {
+              const at = robotPos(otherTeam(e.teamId), 0.45).setY(2.4);
+              spawn(Math.round(14 * e.intensity), at, '#FFFFFF', 7, 0.45, { gravity: -8 });
+              spawn(Math.round(18 * e.intensity), at, TEAM_COLORS[e.teamId], 6, 0.6, { gravity: -6 });
+            }
+            break;
           case 'sparks':
             spawn(Math.round(90 * e.intensity), CLASH_POINT, '#FFFFFF', 9, 0.9, { gravity: -9 });
             spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.RAIJIN, 7, 1.0, {

@@ -21,7 +21,7 @@ import {
   saveArenaSettings,
   webglAvailable,
 } from './settings';
-import { PREVIEW_HELP, handlePreviewKey } from './preview';
+import { PREVIEW_HELP, handlePreviewKey, newPreviewState } from './preview';
 import { SettingsPanel } from './SettingsPanel';
 
 const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
@@ -47,11 +47,9 @@ export function ArenaApp() {
   const [robotModels, setRobotModels] = useState<Partial<Record<TeamId, string>> | null>(null);
   const [modelError, setModelError] = useState(false);
   const [preview, setPreview] = useState(false);
-  const previewCounter = useRef({ n: 0 });
+  const previewState = useRef(newPreviewState());
   const previewRef = useRef(false);
   previewRef.current = preview;
-  const gameMsRef = useRef(0);
-  const introPlayedFor = useRef<string | null>(null);
 
   useEffect(() => {
     setSettings(loadArenaSettings());
@@ -84,7 +82,6 @@ export function ArenaApp() {
         thunder: 'thunder',
         wind: 'wind',
         capture: 'capture',
-        shield: 'shield',
         charge: 'charge',
         special: 'special',
         victory: 'victory',
@@ -101,27 +98,30 @@ export function ArenaApp() {
     };
   }, [director, sfx]);
 
-  // Event stream -> cues.
+  // Event stream -> cues. Cheers only add a little aura (the HUD shows them).
   useEffect(() => {
     if (!conn) return;
-    return conn.store.onEvent((e) => cueFromEvent(director, e));
+    const offs = [
+      conn.store.onEvent((e) => cueFromEvent(director, e, conn.store.snapshot?.config.roundsPerSeason)),
+      conn.onCheer((c) => director.play({ kind: 'cheer', teamId: c.teamId })),
+    ];
+    return () => offs.forEach((o) => o());
   }, [conn, director]);
 
-  // Snapshot (initial load / resync / next match): align the director with authoritative state.
+  // Snapshot (initial load / resync / next season): align the director with authoritative state.
   const lastMatch = useRef<string | null>(null);
   const syncToSnapshot = useCallback(
     (s: PublicMatchSnapshot) => {
-      const hp = { RAIJIN: s.teams.RAIJIN.hp, FUJIN: s.teams.FUJIN.hp };
-      director.hpMax = s.config.hpMax;
+      const r = s.round;
+      const hpMax = r?.hpMax ?? s.config.hpInitial;
+      const hp = r ? r.hp : { RAIJIN: hpMax, FUJIN: hpMax };
       if (lastMatch.current !== s.matchId) {
         lastMatch.current = s.matchId;
-        director.syncHp(hp, s.config.hpMax);
-        if ((s.status === 'LOBBY' || s.status === 'LIVE') && introPlayedFor.current !== s.matchId) {
-          introPlayedFor.current = s.matchId;
-          director.play({ kind: 'intro' });
+        if (s.status === 'LIVE' && s.phase === 'ROUND') director.enterRound(hp, hpMax);
+        else director.syncHp(hp, hpMax);
+        if (s.phase === 'SEASON_END' && s.result) {
+          director.play({ kind: 'seasonEnd', winner: s.result.winnerTeamId, regionCounts: s.result.regionCounts });
         }
-        if ((s.status === 'FINALIZING' || s.status === 'FINISHED') && s.result)
-          director.play({ kind: 'result', winner: s.result.winnerTeamId });
         if (s.status === 'CREATED') {
           director.robots.RAIJIN = { clip: 'Idle', start: director.time, advance: 0 };
           director.robots.FUJIN = { clip: 'Idle', start: director.time, advance: 0 };
@@ -131,9 +131,9 @@ export function ArenaApp() {
       } else if (
         !previewRef.current &&
         !director.busy &&
-        (director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)
+        (director.hpMax !== hpMax || director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)
       ) {
-        director.syncHp(hp);
+        director.syncHp(hp, hpMax);
       }
     },
     [director],
@@ -142,16 +142,6 @@ export function ArenaApp() {
     if (snap) syncToSnapshot(snap);
   }, [snap, syncToSnapshot]);
 
-  // Keep the game clock ref fresh for 3D labels; report status for operators.
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      if (conn) gameMsRef.current = conn.now().gameMs;
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [conn]);
   const use3d = !!settings && settings.renderer !== '2d' && webgl === true && !contextLost;
   useEffect(() => {
     if (!conn || !settings) return;
@@ -176,7 +166,7 @@ export function ArenaApp() {
           : document.documentElement.requestFullscreen?.());
       if (e.key === 's' || e.key === 'S') setPanelOpen((v) => !v);
       if (e.key === 'm' || e.key === 'M') setSettings((s) => (s ? { ...s, muted: !s.muted } : s));
-      if (preview) handlePreviewKey(e.key, director, previewCounter.current);
+      if (preview) handlePreviewKey(e.key, director, previewState.current);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -196,6 +186,13 @@ export function ArenaApp() {
     );
   }
 
+  // Robots glow brighter in a pinch (low HP = punches ×1.5).
+  const pinchHp = (snap.round?.hpMax ?? 0) * snap.config.pinchHpRatio;
+  const glow: Record<TeamId, number> = {
+    RAIJIN: snap.round && displayHp.RAIJIN > 0 && displayHp.RAIJIN <= pinchHp ? 1 : 0.15,
+    FUJIN: snap.round && displayHp.FUJIN > 0 && displayHp.FUJIN <= pinchHp ? 1 : 0.15,
+  };
+
   return (
     <div
       className="relative h-dvh w-full overflow-hidden bg-navy"
@@ -207,9 +204,8 @@ export function ArenaApp() {
         <ArenaScene
           director={director}
           regions={snap.regions}
-          teams={snap.teams}
-          energyMax={snap.config.energyMax}
-          gameMsRef={gameMsRef}
+          focusRegionId={snap.status === 'LIVE' && snap.phase === 'ROUND' ? (snap.round?.regionId ?? null) : null}
+          glow={glow}
           quality={settings.quality}
           reducedMotion={settings.reducedMotion}
           locale={locale}
@@ -221,7 +217,7 @@ export function ArenaApp() {
           onModelError={() => setModelError(true)}
         />
       ) : (
-        <Arena2D snap={snap} displayHp={displayHp} director={director} gameMsRef={gameMsRef} />
+        <Arena2D snap={snap} director={director} />
       )}
       <ArenaHud
         snap={snap}
@@ -232,12 +228,13 @@ export function ArenaApp() {
         stats={settings.showStats ? stats : null}
         renderer={use3d ? 'webgl' : '2d'}
         contextLost={contextLost}
+        reducedMotion={settings.reducedMotion}
         preview={preview}
       />
       {!audioOn && !settings.muted && (
         <button
           onClick={enableAudio}
-          className="absolute left-[1.2vw] top-[24%] z-30 rounded-full bg-black/70 px-4 py-2 text-base font-bold text-off ring-1 ring-white/30"
+          className="absolute left-1/2 top-[29%] z-30 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-base font-bold text-off ring-1 ring-white/30"
         >
           🔊 クリックで音声ON / Click to enable sound
         </button>

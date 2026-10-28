@@ -1,91 +1,69 @@
-import type { ClashRecord, TeamId } from '@sats-wars/shared';
+import type { RegionId, TeamId } from '@sats-wars/shared';
+import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 
 /**
- * Rehearsal preview (/arena?preview=1): plays synthetic cinematics locally so
- * operators, the MC and artists can check camera/VFX without a running match.
- * Never sends anything to the server and never changes game state.
+ * Rehearsal preview (/arena?preview=1): plays synthetic cues locally so
+ * operators, the MC and artists can check camera/VFX without a running
+ * season. Never sends anything to the server and never changes game state.
  */
-export function previewClash(
-  index: number,
-  opts: { special?: TeamId[]; ko?: TeamId[]; hp: Record<TeamId, number> },
-): ClashRecord {
-  const mk = (teamId: TeamId, special: boolean, dmg: number, hpAfter: number) => ({
-    teamId,
-    damageDealt: dmg,
-    special,
-    energyBonus: 0,
-    hpAfter,
-    energyAfter: 0,
-  });
-  const sR = opts.special?.includes('RAIJIN') ?? false;
-  const sF = opts.special?.includes('FUJIN') ?? false;
-  const dR = sR ? 20 : 12;
-  const dF = sF ? 20 : 10;
-  const hpR = opts.ko?.includes('RAIJIN') ? 0 : Math.max(1, opts.hp.RAIJIN - dF);
-  const hpF = opts.ko?.includes('FUJIN') ? 0 : Math.max(1, opts.hp.FUJIN - dR);
-  const snap = (teamId: TeamId) => ({
-    teamId,
-    hpBefore: opts.hp[teamId],
-    energyBefore: 0,
-    activeAttackRegions: 0,
-    activeDefenseRegions: 0,
-    activeEnergyRegions: 0,
-  });
-  return {
-    clashIndex: index,
-    atGameMs: 45_000 * (index + 1),
-    snapshot: { RAIJIN: snap('RAIJIN'), FUJIN: snap('FUJIN') },
-    outcome: { RAIJIN: mk('RAIJIN', sR, dR, hpR), FUJIN: mk('FUJIN', sF, dF, hpF) },
-    ko: opts.ko ?? [],
-    isFinal: !!opts.ko?.length,
-  };
+export const PREVIEW_HELP =
+  'PREVIEW: 1 ラウンド開始 / 2 雷神パンチ連打 / 3 風神パンチ連打 / 4 雷神必殺 / 5 KO / 6 時間切れ引分 / 7 全国制覇 / 8 開幕 / 0 リセット / [ ] 速度';
+
+interface PreviewState {
+  n: number;
+  hpMax: number;
+  hp: Record<TeamId, number>;
+  region: RegionId;
 }
 
-export const PREVIEW_HELP =
-  'PREVIEW: 1 激突 / 2 雷神必殺 / 3 風神必殺 / 4 同時必殺 / 5 KO→勝利 / 6 登場 / 7 占領 / 0 リセット / [ ] 速度';
+export function newPreviewState(): PreviewState {
+  return { n: 0, hpMax: 200, hp: { RAIJIN: 200, FUJIN: 200 }, region: 'kanto' };
+}
 
-export function handlePreviewKey(
-  key: string,
-  director: ArenaDirector,
-  counter: { n: number },
-): boolean {
-  const hp = director.displayHp;
-  const i = counter.n++ % 6;
+function punch(director: ArenaDirector, st: PreviewState, teamId: TeamId, special = false): void {
+  const foe: TeamId = teamId === 'RAIJIN' ? 'FUJIN' : 'RAIJIN';
+  const pinch = st.hp[teamId] <= st.hpMax * 0.3;
+  const damage = Math.round((special ? 60 : 10) * (pinch ? 1.5 : 1));
+  st.hp = { ...st.hp, [foe]: Math.max(0, st.hp[foe] - damage) };
+  director.play({ kind: 'zap', teamId, nickname: special ? 'プレビュー' : `ゲスト${(st.n % 9) + 1}`, damage, special, pinch, ko: st.hp[foe] === 0, hp: st.hp });
+}
+
+export function handlePreviewKey(key: string, director: ArenaDirector, st: PreviewState): boolean {
+  st.n++;
   switch (key) {
     case '1':
-      director.play({ kind: 'clash', clash: previewClash(i, { hp }) });
+      st.region = REGION_IDS[st.n % REGION_IDS.length]!;
+      st.hp = { RAIJIN: st.hpMax, FUJIN: st.hpMax };
+      director.play({ kind: 'roundStart', roundIndex: st.n % 8, roundsTotal: 8, regionId: st.region, hpMax: st.hpMax, hp: st.hp });
       return true;
     case '2':
-      director.play({ kind: 'clash', clash: previewClash(i, { hp, special: ['RAIJIN'] }) });
+    case '3': {
+      const t: TeamId = key === '2' ? 'RAIJIN' : 'FUJIN';
+      for (let i = 0; i < 5; i++) setTimeout(() => punch(director, st, t), i * 180);
       return true;
-    case '3':
-      director.play({ kind: 'clash', clash: previewClash(i, { hp, special: ['FUJIN'] }) });
-      return true;
+    }
     case '4':
-      director.play({
-        kind: 'clash',
-        clash: previewClash(i, { hp, special: ['RAIJIN', 'FUJIN'] }),
-      });
+      punch(director, st, 'RAIJIN', true);
       return true;
-    case '5':
-      director.play({
-        kind: 'clash',
-        clash: previewClash(5, { hp, special: ['RAIJIN'], ko: ['FUJIN'] }),
-      });
-      director.play({ kind: 'result', winner: 'RAIJIN' });
+    case '5': {
+      st.hp = { ...st.hp, FUJIN: 0 };
+      director.play({ kind: 'zap', teamId: 'RAIJIN', nickname: 'プレビュー', damage: 10, special: false, pinch: false, ko: true, hp: st.hp });
+      director.play({ kind: 'roundEnd', winner: 'RAIJIN', reason: 'KO', regionId: st.region, finisher: 'プレビュー' });
       return true;
+    }
     case '6':
-      director.play({ kind: 'intro' });
+      director.play({ kind: 'roundEnd', winner: null, reason: 'DRAW', regionId: st.region, finisher: null });
       return true;
     case '7':
-      director.play({ kind: 'capture', regionId: 'kanto', teamId: 'RAIJIN' });
-      director.play({ kind: 'charge', teamId: 'FUJIN' });
+      director.play({ kind: 'seasonEnd', winner: 'FUJIN', regionCounts: { RAIJIN: 3, FUJIN: 5 } });
+      return true;
+    case '8':
+      director.play({ kind: 'seasonStart' });
       return true;
     case '0':
-      director.syncHp({ RAIJIN: 100, FUJIN: 100 });
-      director.robots.RAIJIN = { clip: 'Idle', start: director.time, advance: 0 };
-      director.robots.FUJIN = { clip: 'Idle', start: director.time, advance: 0 };
+      st.hp = { RAIJIN: st.hpMax, FUJIN: st.hpMax };
+      director.enterRound(st.hp, st.hpMax);
       director.camera = { preset: 'overview', since: director.time };
       return true;
     case '[':

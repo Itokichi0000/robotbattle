@@ -9,8 +9,9 @@ import type { Services } from '../services';
 const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.enum(ADMIN_LIFECYCLE_COMMANDS), reason: z.string().max(200).optional() }),
   z.object({ command: z.literal('SET_PAYMENTS_ENABLED'), enabled: z.boolean() }),
-  z.object({ command: z.literal('SET_DEMO_BOTS'), perTeam: z.number().int().min(0).max(200) }),
-  /** Emergency stop: pause the match AND stop accepting payments in one click. */
+  z.object({ command: z.literal('SET_AUTO_LOOP'), enabled: z.boolean() }),
+  z.object({ command: z.literal('SET_DEMO_BOTS'), perTeam: z.number().int().min(0).max(100) }),
+  /** Emergency stop: pause the season, stop accepting payments, stop auto-loop — one click. */
   z.object({ command: z.literal('EMERGENCY_STOP') }),
 ]);
 
@@ -19,37 +20,25 @@ export function registerAdminRoutes(
   services: Services,
   deps: { isAllowedOrigin: (o: string | undefined) => boolean; realtimeStats: () => RealtimeStats },
 ): void {
-  const { manager, join, repo, adminAuth, bots, wall, env } = services;
+  const { manager, players, repo, adminAuth, bots, wall, env } = services;
 
   const requireAdmin = (req: FastifyRequest): string => {
     const origin = req.headers.origin;
-    if (origin && !deps.isAllowedOrigin(origin))
-      throw new AppError('FORBIDDEN', 'origin not allowed');
+    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
     const session = adminAuth.verify(extractBearer(req.headers.authorization));
     if (!session) throw new AppError('UNAUTHORIZED', 'admin login required');
     return session.actor;
   };
 
-  app.post(
-    '/api/admin/login',
-    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
-    async (req) => {
-      const origin = req.headers.origin;
-      if (origin && !deps.isAllowedOrigin(origin))
-        throw new AppError('FORBIDDEN', 'origin not allowed');
-      const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
-      const token = adminAuth.login(password);
-      repo.audit(
-        'admin',
-        token ? 'LOGIN' : 'LOGIN_FAILED',
-        null,
-        { ip: req.ip.replace(/\d+$/, 'x') },
-        wall.now(),
-      );
-      if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
-      return { token };
-    },
-  );
+  app.post('/api/admin/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const origin = req.headers.origin;
+    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
+    const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
+    const token = adminAuth.login(password);
+    repo.audit('admin', token ? 'LOGIN' : 'LOGIN_FAILED', null, { ip: req.ip.replace(/\d+$/, 'x') }, wall.now());
+    if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
+    return { token };
+  });
 
   app.post('/api/admin/logout', async (req) => {
     adminAuth.logout(extractBearer(req.headers.authorization));
@@ -59,21 +48,16 @@ export function registerAdminRoutes(
   app.get('/api/admin/overview', async (req) => {
     requireAdmin(req);
     const rt = manager.current();
-    const participants = repo.listParticipants(rt.matchId);
-    const byStatus: Record<string, number> = {};
-    for (const p of participants) byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
     return {
       snapshot: manager.snapshot(),
       paymentMode: env.PAYMENT_MODE,
       paymentsEnabled: manager.paymentsEnabled,
+      autoLoop: manager.autoLoop,
       demoBotsPerTeam: bots.enabledPerTeam,
-      participantsByStatus: byStatus,
-      invoices: {
-        currentMatch: repo.invoiceSummary(rt.matchId),
-        allTime: repo.invoiceSummary(null),
-      },
+      zaps: repo.zapStats(rt.matchId),
+      credit: repo.creditTotals(),
+      invoices: repo.invoiceSummary(),
       passes: repo.passSummary(),
-      actions: repo.actionCounts(rt.matchId),
       realtime: deps.realtimeStats(),
       server: {
         uptimeSec: Math.round(process.uptime()),
@@ -92,14 +76,16 @@ export function registerAdminRoutes(
       case 'SET_PAYMENTS_ENABLED':
         manager.setPaymentsEnabled(cmd.enabled, actor);
         break;
+      case 'SET_AUTO_LOOP':
+        manager.setAutoLoop(cmd.enabled, actor);
+        break;
       case 'SET_DEMO_BOTS':
         bots.setPerTeam(cmd.perTeam, actor);
         break;
       case 'EMERGENCY_STOP': {
         manager.setPaymentsEnabled(false, actor);
-        const st = manager.current().state.status;
-        if (st === 'LOBBY' || st === 'LIVE' || st === 'FINALIZING')
-          manager.command('PAUSE', actor, 'EMERGENCY_STOP');
+        manager.setAutoLoop(false, actor);
+        if (manager.current().state.status === 'LIVE') manager.command('PAUSE', actor, 'EMERGENCY_STOP');
         repo.audit(actor, 'EMERGENCY_STOP', manager.current().matchId, null, wall.now());
         break;
       }
@@ -120,53 +106,58 @@ export function registerAdminRoutes(
     return { config: manager.setNextConfig(body.config, actor) };
   });
 
-  app.get('/api/admin/participants', async (req) => {
+  app.get('/api/admin/players', async (req) => {
     requireAdmin(req);
-    const rt = manager.current();
     return {
-      participants: repo.listParticipants(rt.matchId).map((p) => ({
+      players: repo.listPlayers(300).map((p) => ({
         id: p.id,
         teamId: p.team_id,
-        nickname: p.nickname_sanitized,
+        nickname: p.nickname,
         nicknameHidden: p.nickname_hidden === 1,
-        source: p.source,
-        status: p.status,
-        joinedAt: p.joined_at,
-        apRemaining: rt.participant(p.id)?.apRemaining ?? 0,
-        apTotal: p.ap_total,
+        creditSats: p.credit_sats,
+        zapsTotal: p.zaps_total,
+        kos: p.kos,
+        createdAt: p.created_at,
+        lastSeenAt: p.last_seen_at,
       })),
     };
   });
 
-  app.post('/api/admin/participants/:id/nickname-visibility', async (req) => {
+  app.post('/api/admin/players/:id/nickname-visibility', async (req) => {
     const actor = requireAdmin(req);
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
     const { hidden } = z.object({ hidden: z.boolean() }).parse(req.body ?? {});
-    const p = repo.getParticipant(id);
-    if (!p) throw new AppError('NOT_FOUND', 'participant not found');
+    if (!repo.getPlayer(id)) throw new AppError('NOT_FOUND', 'player not found');
     repo.setNicknameHidden(id, hidden);
     manager.current().setNicknameHidden(id, hidden);
     repo.audit(actor, hidden ? 'HIDE_NICKNAME' : 'SHOW_NICKNAME', id, null, wall.now());
     return { ok: true };
   });
 
+  /** Manual credit fix (e.g. a payment that LNbits confirms but we missed). Always audit-logged. */
+  app.post('/api/admin/players/:id/credit', async (req) => {
+    const actor = requireAdmin(req);
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const body = z
+      .object({ deltaSats: z.number().int().min(-100_000).max(100_000), note: z.string().min(1).max(300) })
+      .parse(req.body ?? {});
+    return { creditSats: players.adjustCredit(id, body.deltaSats, body.note, actor) };
+  });
+
   app.get('/api/admin/invoices', async (req) => {
     requireAdmin(req);
     return {
-      invoices: repo.listInvoices(null, 200).map((i) => ({
+      invoices: repo.listInvoices(200).map((i) => ({
         id: i.id,
-        matchId: i.match_id,
-        participantId: i.participant_id,
+        playerId: i.player_id,
         amountSats: i.amount_sats,
         status: i.status,
         provider: i.provider,
         createdAt: i.created_at,
         expiresAt: i.expires_at,
         verifiedAt: i.verified_at,
-        fulfillmentAt: i.fulfillment_at,
+        creditedAt: i.credited_at,
         checkFailures: i.check_failures,
-        lateDisposition: i.late_payment_disposition,
-        lateNote: i.late_payment_note,
         // Shortened hash only: enough to reconcile with LNbits, nothing more.
         paymentHashPrefix: i.payment_hash.slice(0, 12),
       })),
@@ -176,61 +167,42 @@ export function registerAdminRoutes(
   app.post('/api/admin/invoices/:id/recheck', async (req) => {
     const actor = requireAdmin(req);
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
-    const status = await join.checkInvoice(id);
+    const status = await players.checkInvoice(id);
     repo.audit(actor, 'INVOICE_RECHECK', id, { status }, wall.now());
     return { status };
   });
 
-  app.post('/api/admin/invoices/:id/disposition', async (req) => {
-    const actor = requireAdmin(req);
-    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
-    const body = z
-      .object({
-        disposition: z.enum(['CARRY_OVER', 'REFUND_REQUESTED', 'RESOLVED']),
-        note: z.string().max(500).default(''),
-      })
-      .parse(req.body ?? {});
-    const inv = join.setLateDisposition(id, body.disposition, body.note, actor);
-    return { ok: true, disposition: inv.late_payment_disposition };
-  });
-
   app.post('/api/admin/passes', async (req) => {
     const actor = requireAdmin(req);
+    const cfg = manager.liveConfig;
     const body = z
       .object({
-        count: z.number().int().min(1).max(200),
+        count: z.number().int().min(1).max(500),
+        amountSats: z.number().int().min(cfg.zapCostSats).max(10_000).default(cfg.topupOptionsSats[0]!),
         expiresInMinutes: z
           .number()
           .int()
           .min(5)
           .max(7 * 24 * 60)
-          .default(180),
+          .default(12 * 60),
         label: z.string().max(60).default('sponsored'),
-        currentMatchOnly: z.boolean().default(false),
       })
       .parse(req.body ?? {});
-    const codes = join.issuePasses(
-      body.count,
-      body.expiresInMinutes * 60_000,
-      body.label,
-      actor,
-      body.currentMatchOnly ? manager.current().matchId : null,
-    );
-    return { codes };
+    const codes = players.issuePasses(body.count, body.amountSats, body.expiresInMinutes * 60_000, body.label, actor);
+    return { codes, amountSats: body.amountSats };
   });
 
   app.get('/api/admin/passes', async (req) => {
     requireAdmin(req);
     return {
-      passes: repo.listPasses(200).map((p) => ({
+      passes: repo.listPasses(300).map((p) => ({
         idPrefix: p.id_hash.slice(0, 10),
         label: p.label,
-        kind: p.kind,
+        amountSats: p.amount_sats,
         status: p.status,
         issuedAt: p.issued_at,
         expiresAt: p.expires_at,
         redeemedAt: p.redeemed_at,
-        matchId: p.match_id,
       })),
     };
   });
@@ -252,9 +224,7 @@ export function registerAdminRoutes(
 
   app.get('/api/admin/events', async (req) => {
     requireAdmin(req);
-    const { afterSeq } = z
-      .object({ afterSeq: z.coerce.number().int().min(0).default(0) })
-      .parse(req.query);
+    const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(req.query);
     return { events: repo.loadEvents(manager.current().matchId, afterSeq, 500) };
   });
 }

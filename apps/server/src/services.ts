@@ -3,17 +3,17 @@ import type { MonoClock, WallClock } from './clock';
 import type { Repo } from './db/repo';
 import type { DemoBots } from './demo/bots';
 import type { Env } from './env';
-import type { ActionService } from './match/actions';
+import type { ZapService } from './match/zaps';
 import type { MatchManager } from './match/manager';
 import type { PaymentAdapter } from './payments/adapter';
-import type { JoinService } from './payments/join';
+import type { PlayerService } from './payments/players';
 
 export interface Services {
   env: Env;
   repo: Repo;
   manager: MatchManager;
-  join: JoinService;
-  actions: ActionService;
+  players: PlayerService;
+  zaps: ZapService;
   bots: DemoBots;
   adminAuth: AdminAuth;
   adapter: PaymentAdapter;

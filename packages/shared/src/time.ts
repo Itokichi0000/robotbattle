@@ -1,7 +1,7 @@
 import type { MatchStatus } from './state';
 
 export function isClockRunning(status: MatchStatus): boolean {
-  return status === 'LOBBY' || status === 'LIVE' || status === 'FINALIZING';
+  return status === 'LIVE';
 }
 
 /** mm:ss for non-negative ms (rounds up so "0:01" is shown until the last ms). */

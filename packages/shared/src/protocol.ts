@@ -1,30 +1,22 @@
 import { z } from 'zod';
 import type { GameConfig } from './config';
 import type { GameEvent } from './events';
-import { REGION_IDS } from './regions';
 import type {
-  ActionResult,
-  ClashRecord,
-  Contribution,
-  MatchResult,
   MatchStatus,
-  RegionState,
+  Phase,
+  RegionPaint,
+  RoundState,
+  RoundSummary,
+  SeasonResult,
   TeamState,
+  ZapResult,
 } from './state';
-import { ACTION_TYPES } from './state';
-import type { TeamId } from './teams';
+import { TEAM_IDS, type TeamId } from './teams';
+import type { RegionId } from './regions';
 
 // ---------------------------------------------------------------------------
-// Public snapshot (safe to show on the venue screen: no payment data, no IDs
-// beyond opaque participant ids, nicknames already moderated).
+// Public snapshot (safe for the venue screen: no payment data, nicknames moderated)
 // ---------------------------------------------------------------------------
-
-export interface LeaderEntry {
-  participantId: string;
-  nickname: string;
-  score: number;
-  isBot: boolean;
-}
 
 export interface PublicMatchSnapshot {
   matchId: string;
@@ -36,19 +28,23 @@ export interface PublicMatchSnapshot {
   clockMs: number;
   gameMs: number;
   liveStartClock: number | null;
-  /** True when the clock is advancing (not PAUSED / CREATED / FINISHED / CANCELLED). */
+  /** True while the game clock advances. */
   running: boolean;
   /** Server epoch ms when this snapshot was produced. */
   serverTime: number;
+  phase: Phase;
+  phaseEndsAt: number | null;
+  roundOrder: RegionId[];
+  roundIndex: number;
+  round: RoundState | null;
+  rounds: RoundSummary[];
+  regions: RegionPaint[];
   teams: Record<TeamId, TeamState>;
-  regions: RegionState[];
-  nextClash: { index: number; atGameMs: number } | null;
-  clashes: ClashRecord[];
-  result: MatchResult | null;
+  result: SeasonResult | null;
   lastSeq: number;
   recentEvents: GameEvent[];
-  leaders: Record<TeamId, LeaderEntry[]>;
-  joinOpen: boolean;
+  /** Players currently cheering for each team (joined, recently active). */
+  supporters: Record<TeamId, number>;
   paymentsEnabled: boolean;
   paymentMode: PaymentMode;
   playUrl: string;
@@ -75,102 +71,84 @@ export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
 export const NICKNAME_MAX_LENGTH = 12;
 
-export const reserveRequestSchema = z.object({
+export const joinRequestSchema = z.object({
+  teamId: z.enum(TEAM_IDS),
   nickname: z.string().max(64).optional().default(''),
-  /** Optional pre-existing device token to prevent duplicate entries. */
+  /** Random per-device id; limits duplicate players per device. */
   deviceId: z.string().min(8).max(128).optional(),
 });
-export type ReserveRequest = z.infer<typeof reserveRequestSchema>;
+export type JoinRequest = z.infer<typeof joinRequestSchema>;
 
-export interface ReserveResponse {
-  matchId: string;
-  participantId: string;
-  reservationId: string;
-  teamId: TeamId;
-  nickname: string;
-  /** Bearer token for this participant. Store client-side; sent as Authorization header. */
+export interface JoinResponse {
+  playerId: string;
+  /** Bearer token. Store client-side; sent as Authorization header. */
   token: string;
-  reservationExpiresAt: number;
-  entryFeeSats: number;
-  apPerParticipant: number;
+  nickname: string;
+  teamId: TeamId;
+  creditSats: number;
 }
 
-export const invoiceRequestSchema = z.object({ reservationId: z.string().min(1).max(64) });
+export const teamChangeSchema = z.object({ teamId: z.enum(TEAM_IDS) });
+export const nicknameChangeSchema = z.object({ nickname: z.string().max(64) });
+
+export const topupRequestSchema = z.object({ amountSats: z.number().int().positive() });
+
+export const INVOICE_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELLED'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 export interface InvoiceResponse {
   invoiceId: string;
   amountSats: number;
+  zaps: number;
   bolt11: string;
   expiresAt: number;
+  status: InvoiceStatus;
   paymentMode: PaymentMode;
   payeeDescription: string;
   memo: string;
 }
 
-export const INVOICE_STATUSES = [
-  'PENDING',
-  'PAID',
-  'EXPIRED',
-  'FAILED',
-  'LATE_PAID',
-  'CANCELLED',
-] as const;
-export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
-
-export const PARTICIPANT_STATUSES = [
-  'RESERVED',
-  'PENDING_PAYMENT',
-  'ACTIVE',
-  'EXPIRED',
-  'CANCELLED',
-] as const;
-export type ParticipantStatus = (typeof PARTICIPANT_STATUSES)[number];
-
-export interface PaymentStatusResponse {
-  reservationId: string;
-  participantStatus: ParticipantStatus;
-  invoiceStatus: InvoiceStatus | null;
-  apRemaining: number;
+export interface TopupStatusResponse {
+  invoiceId: string;
+  status: InvoiceStatus;
+  creditSats: number;
 }
 
-export const redeemPassRequestSchema = z.object({
-  reservationId: z.string().min(1).max(64),
-  code: z.string().min(4).max(64),
-});
-
-export const actionRequestSchema = z.object({
-  clientActionId: z.string().min(8).max(64),
-  type: z.enum(ACTION_TYPES),
-  regionId: z.enum(REGION_IDS).optional().nullable(),
-});
-export type ActionRequest = z.infer<typeof actionRequestSchema>;
-
-export interface ActionResponse {
-  result: ActionResult;
-  apRemaining: number;
+export const redeemPassRequestSchema = z.object({ code: z.string().min(4).max(64) });
+export interface RedeemPassResponse {
+  addedSats: number;
+  creditSats: number;
 }
+
+export const zapRequestSchema = z.object({ clientActionId: z.string().min(8).max(64) });
+export type ZapRequest = z.infer<typeof zapRequestSchema>;
+
+export interface ZapResponse {
+  result: ZapResult;
+  creditSats: number;
+  /** True when this clientActionId was already processed (no second charge). */
+  duplicate: boolean;
+}
+
+export const CHEER_EMOJIS = ['📣', '🔥', '⚡', '🌀', '👏', '💪'] as const;
+export type CheerEmoji = (typeof CHEER_EMOJIS)[number];
+export const cheerRequestSchema = z.object({ emoji: z.enum(CHEER_EMOJIS).optional() });
 
 export interface MeResponse {
-  matchId: string;
-  participantId: string;
-  reservationId: string;
-  teamId: TeamId;
+  playerId: string;
   nickname: string;
-  status: ParticipantStatus;
-  invoiceStatus: InvoiceStatus | null;
-  apTotal: number;
-  apRemaining: number;
-  contribution: Contribution | null;
-  lastResults: ActionResult[];
+  teamId: TeamId;
+  creditSats: number;
+  zapsThisSeason: number;
+  zapsTotal: number;
+  kos: number;
+  pendingInvoice: InvoiceResponse | null;
+  lastResults: ZapResult[];
 }
 
 export interface ApiError {
   error: string;
   message: string;
-}
-
-export interface CurrentMatchResponse {
-  snapshot: PublicMatchSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,19 +179,26 @@ export interface ServerNotice {
   messageEn: string;
 }
 
-export interface PaymentStatusPush {
-  reservationId: string;
-  participantStatus: ParticipantStatus;
+export interface CheerPush {
+  teamId: TeamId;
+  nickname: string;
+  emoji: string;
+}
+
+export interface CreditPush {
+  creditSats: number;
+  invoiceId: string | null;
   invoiceStatus: InvoiceStatus | null;
-  apRemaining: number;
+  addedSats: number;
 }
 
 export interface ServerToClientEvents {
   matchSnapshot: (snapshot: PublicMatchSnapshot) => void;
   matchEvent: (event: GameEvent) => void;
   clockTick: (tick: ClockTick) => void;
-  actionAck: (ack: ActionResponse) => void;
-  paymentStatus: (status: PaymentStatusPush) => void;
+  cheer: (cheer: CheerPush) => void;
+  presence: (supporters: Record<TeamId, number>) => void;
+  credit: (credit: CreditPush) => void;
   serverNotice: (notice: ServerNotice) => void;
 }
 

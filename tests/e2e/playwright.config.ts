@@ -36,7 +36,7 @@ export default defineConfig({
         ADMIN_PASSWORD: E2E_ADMIN_PASSWORD,
         DATABASE_PATH: join(dbDir, 'e2e.db'),
         PAYMENT_MODE: 'mock',
-        LOBBY_MS: '600000',
+        OPENING_MS: '3000',
         LOG_LEVEL: 'warn',
         PUBLIC_PLAY_URL: 'http://localhost:3000/play',
       },

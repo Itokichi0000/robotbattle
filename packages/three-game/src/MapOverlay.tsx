@@ -2,22 +2,16 @@ import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import type { RegionId, RegionState, TeamId } from '@sats-wars/shared';
-import {
-  REGION_CENTROIDS,
-  REGION_INFO,
-  REGION_KIND_META,
-  REGION_OUTLINES,
-  TEAM_META,
-} from '@sats-wars/shared';
+import type { RegionId, RegionPaint, TeamId } from '@sats-wars/shared';
+import { REGION_CENTROIDS, REGION_INFO, REGION_OUTLINES, TEAM_META } from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect } from './director';
 import { MAP_TRANSFORM, TEAM_COLORS } from './layout';
 
 export interface MapOverlayProps {
-  regions: RegionState[];
+  regions: RegionPaint[];
+  /** Region being fought over right now (highlighted), if any. */
+  focusRegionId: RegionId | null;
   director: ArenaDirector;
-  /** Current game ms (for contest countdown labels). */
-  gameMsRef: { current: number };
   reducedMotion: boolean;
   locale: 'ja' | 'en';
 }
@@ -35,13 +29,7 @@ interface RegionVisual {
 }
 
 /** Floating hologram of Japan's 8 regions. Colours/markers mirror server state only. */
-export function MapOverlay({
-  regions,
-  director,
-  gameMsRef,
-  reducedMotion,
-  locale,
-}: MapOverlayProps) {
+export function MapOverlay({ regions, focusRegionId, director, reducedMotion, locale }: MapOverlayProps) {
   const visuals = useMemo(() => {
     const out = {} as Record<RegionId, RegionVisual>;
     for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<
@@ -119,14 +107,13 @@ export function MapOverlay({
       const base = new THREE.Color(ownerColor(r.ownerTeamId));
       v.material.color.copy(base);
       v.material.emissive.copy(base);
-      if (r.contestedByTeamId) {
-        // ≤ 2 Hz alternation; steady half-mix in reduced-motion mode (photosensitivity).
-        const mix = reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 1.5);
-        const c = base.clone().lerp(new THREE.Color(ownerColor(r.contestedByTeamId)), mix);
-        v.material.color.copy(c);
-        v.material.emissive.copy(c);
-        v.material.emissiveIntensity = 0.6;
-        v.edge.color.set(ownerColor(r.contestedByTeamId));
+      if (r.regionId === focusRegionId) {
+        // The prize of the current round: gentle 1 Hz glow (steady with reduced motion).
+        const glow = reducedMotion ? 0.8 : 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2));
+        v.material.color.copy(base.clone().lerp(new THREE.Color('#FFFFFF'), 0.25));
+        v.material.emissive.copy(base.clone().lerp(new THREE.Color('#FFFFFF'), 0.35));
+        v.material.emissiveIntensity = glow;
+        v.edge.color.set('#FFE27A');
       } else {
         v.material.emissiveIntensity = r.ownerTeamId ? 0.55 : 0.2;
         v.edge.color.set(r.ownerTeamId ? '#FFFFFF' : '#9FB3D9');
@@ -188,7 +175,7 @@ export function MapOverlay({
         return (
           <group key={id} name={`region-${id}`}>
             {meshes}
-            {r && <RegionMarker region={r} gameMsRef={gameMsRef} locale={locale} />}
+            {r && <RegionMarker region={r} focus={id === focusRegionId} locale={locale} />}
           </group>
         );
       })}
@@ -203,71 +190,34 @@ export function MapOverlay({
   );
 }
 
-function RegionMarker({
-  region,
-  gameMsRef,
-  locale,
-}: {
-  region: RegionState;
-  gameMsRef: { current: number };
-  locale: 'ja' | 'en';
-}) {
+function RegionMarker({ region, focus, locale }: { region: RegionPaint; focus: boolean; locale: 'ja' | 'en' }) {
   const c = REGION_CENTROIDS[region.regionId];
-  const kind = REGION_KIND_META[region.kind];
   const info = REGION_INFO[region.regionId];
   const markerRef = useRef<THREE.Mesh>(null);
-  const labelRef = useRef<HTMLSpanElement>(null);
   const color = ownerColor(region.ownerTeamId);
 
   useFrame((_, dt) => {
-    if (markerRef.current) markerRef.current.rotation.z += dt * 0.8;
-    if (labelRef.current) {
-      if (region.contestedByTeamId && region.contestedUntil !== null) {
-        const left = Math.ceil((region.contestedUntil - gameMsRef.current) / 1000);
-        // Timers freeze once actions close; don't show a stale "0s".
-        labelRef.current.textContent =
-          left <= 0 ? '' : locale === 'ja' ? `争奪中 ${left}秒` : `CONTESTED ${left}s`;
-      } else {
-        labelRef.current.textContent = '';
-      }
-    }
+    if (markerRef.current) markerRef.current.rotation.z += dt * (focus ? 2 : 0.8);
   });
 
   const owner = region.ownerTeamId ? TEAM_META[region.ownerTeamId] : null;
   return (
     <group position={[c.x, c.y, EXTRUDE_DEPTH]}>
-      <mesh ref={markerRef} position={[0, 0, 0.45]}>
-        {region.kind === 'ATTACK' ? (
-          <coneGeometry args={[0.28, 0.6, 4]} />
-        ) : region.kind === 'DEFENSE' ? (
-          <cylinderGeometry args={[0.3, 0.3, 0.2, 6]} />
-        ) : (
-          <octahedronGeometry args={[0.3]} />
-        )}
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.9} />
-      </mesh>
-      {region.shieldCharges > 0 && (
-        <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <sphereGeometry args={[0.95, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <meshBasicMaterial color={color} wireframe transparent opacity={0.7} />
+      {(owner || focus) && (
+        <mesh ref={markerRef} position={[0, 0, 0.45]}>
+          {focus ? <coneGeometry args={[0.32, 0.7, 4]} /> : <octahedronGeometry args={[0.28]} />}
+          <meshStandardMaterial
+            color={focus ? '#FFE27A' : color}
+            emissive={focus ? '#FFE27A' : color}
+            emissiveIntensity={0.9}
+          />
         </mesh>
       )}
-      <Html
-        position={[0, -0.55, 0.3]}
-        center
-        zIndexRange={[10, 0]}
-        style={{ pointerEvents: 'none' }}
-      >
-        <div
-          className={`sw-map-label ${region.contestedByTeamId ? 'is-contested' : ''}`}
-          data-owner={region.ownerTeamId ?? 'NEUTRAL'}
-        >
-          <span className="sw-map-label-name">
-            {kind.icon} {locale === 'ja' ? info.shortJa : info.labelEn}
-          </span>
+      <Html position={[0, -0.55, 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+        <div className={`sw-map-label ${focus ? 'is-focus' : ''}`} data-owner={region.ownerTeamId ?? 'NEUTRAL'}>
+          {focus && <span className="sw-map-label-focus">⚔</span>}
+          <span className="sw-map-label-name">{locale === 'ja' ? info.shortJa : info.labelEn}</span>
           {owner && <span className="sw-map-label-owner">{owner.symbol}</span>}
-          {region.shieldCharges > 0 && <span className="sw-map-label-shield">🛡</span>}
-          <span ref={labelRef} className="sw-map-label-contest" />
         </div>
       </Html>
     </group>

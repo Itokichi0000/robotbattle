@@ -9,8 +9,8 @@ export function LandingHeader() {
     <div className="flex flex-col gap-4">
       <p className="text-lg text-off/90">
         {L(
-          'スマホで参加する日本列島の陣取り × 会場の大型スクリーンで激突する3Dロボットバトル。あなたの作戦が雷神と風神の戦況を動かす！',
-          'Fight over Japan from your phone while giant robots clash on the venue screen. Your strategy moves the battle!',
+          '応援するロボットを選んで、satsを送るとパンチ！ 会場の大画面で雷神と風神が殴り合い、先にHPを0にしたチームがその地方をゲット。ビットコインを知らなくても、タップするだけで遊べます。',
+          'Pick a robot and send sats to punch! RAIJIN and FUJIN slug it out on the big screen; knock out the rival to win the region. No bitcoin knowledge needed — just tap.',
         )}
       </p>
       <div className="flex flex-wrap gap-3">
@@ -20,9 +20,6 @@ export function LandingHeader() {
           data-testid="cta-play"
         >
           {L('スマホで参加する', 'Join from your phone')}
-        </a>
-        <a href="/play" className="sw-btn flex items-center border border-line px-6 text-lg">
-          {L('観戦する（無料）', 'Watch (free)')}
         </a>
         <a href="/arena" className="sw-btn flex items-center border border-line px-6 text-lg">
           {L('会場スクリーン', 'Arena screen')}
@@ -39,24 +36,24 @@ export function LandingRules() {
     <div className="grid gap-4 md:grid-cols-3">
       {[
         [
-          L('5分間の対戦', '5-minute matches'),
+          L('ルールはひとつ', 'One rule'),
           L(
-            '2チーム・日本の8地方で陣取り。45秒ごとにロボットが激突し、最後にHPが多いチームの勝ち。',
-            'Two teams fight over 8 regions. Robots clash every 45s; most HP at the end wins.',
+            '1タップ＝1パンチ（21 sats）。相手のHPを先に0にしたチームが、その地方をゲット。1ラウンド最長60秒。',
+            'One tap = one punch (21 sats). Knock the rival to 0 HP first to win the region. Rounds last up to 60s.',
           ),
         ],
         [
-          L('3つのアクション', '3 actions'),
+          L('盛り上がる仕掛け', 'Built for hype'),
           L(
-            '⚔攻撃（占領・争奪）、🛡防御（シールド）、◆充電（必殺技エネルギー）。参加1回で3AP。',
-            '⚔ Attack (capture/contest), 🛡 Defend (shield), ◆ Charge (special energy). 3 AP per entry.',
+            'チーム10発ごとに必殺技。HPが減るとパンチ1.5倍で逆転のチャンス。パンチした人の名前が大画面に出ます。',
+            'Every 10th team punch is a special. Low HP hits ×1.5 for comebacks. Your name pops up on the big screen.',
           ),
         ],
         [
-          L('公平なルール', 'Fair by design'),
+          L('8地方で全国制覇', 'Conquer Japan'),
           L(
-            '雷神と風神の性能は同じ。勝敗はサーバーが確定し、映像はその結果を演出します。金額で強くなることはありません。',
-            'RAIJIN and FUJIN have identical stats. The server decides results; paying more never makes you stronger.',
+            '8ラウンドで多くの地方を取ったチームが全国制覇。シーズンは自動で繰り返し、残高はずっと使えます。',
+            'Win the most of 8 regions to conquer Japan. Seasons loop automatically; your credit carries over.',
           ),
         ],
       ].map(([title, body]) => (
@@ -85,14 +82,14 @@ export function LandingTerms() {
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>
           {L(
-            '参加費はイベント内のゲーム参加（行動権）の対価です。賞金・換金・抽選による金銭的景品はありません。',
-            'The entry fee buys in-game actions only. No prizes, cash-out or lotteries.',
+            'チャージしたsatsはゲーム内のパンチにだけ使えます。賞金・換金・払い戻し・抽選による景品はありません。',
+            'Topped-up sats can only be used for in-game punches. No prizes, cash-out, refunds or lotteries.',
           )}
         </li>
         <li>
           {L(
-            '支払先はイベント運営者です。支払い後に試合へ参加できなかった場合は、運営が繰越等で対応します。',
-            'Payments go to the organisers. If you paid but could not play, staff will carry it over.',
+            '支払先はイベント運営者です。支払いが遅れて届いた場合も没収せず残高に加算します。残高は当日中ずっと使えます。',
+            'Payments go to the organisers. Late payments are never forfeited; they are added to your balance for the day.',
           )}
         </li>
         <li>
@@ -109,8 +106,8 @@ export function LandingTerms() {
         </li>
         <li>
           {L(
-            '子どもの参加は保護者・運営の方針に従ってください。無料のスポンサーパスで参加できます。',
-            'Children should follow guardian/organiser guidance; free sponsored passes are available.',
+            '子どもの参加は保護者・運営の方針に従ってください。応援（📣）は無料、運営配布のコードでもパンチできます。',
+            'Children should follow guardian/organiser guidance; cheering is free and staff codes also work.',
           )}
         </li>
       </ul>

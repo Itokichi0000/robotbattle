@@ -1,38 +1,39 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  actionRequestSchema,
-  invoiceRequestSchema,
+  cheerRequestSchema,
+  joinRequestSchema,
+  nicknameChangeSchema,
   redeemPassRequestSchema,
-  reserveRequestSchema,
+  teamChangeSchema,
+  topupRequestSchema,
+  zapRequestSchema,
 } from '@sats-wars/shared';
 import { extractBearer } from '../auth/tokens';
-import type { ParticipantRow } from '../db/repo';
+import type { PlayerRow } from '../db/repo';
 import { AppError } from '../errors';
 import type { Services } from '../services';
 
 export function registerPublicRoutes(app: FastifyInstance, services: Services): void {
-  const { manager, join, actions, repo, env } = services;
+  const { manager, players, zaps, repo, env } = services;
 
-  const requireParticipant = (authorization: string | undefined): ParticipantRow => {
-    const p = join.authenticate(extractBearer(authorization));
-    if (!p) throw new AppError('UNAUTHORIZED', '参加情報が見つかりません / Unknown participant');
+  const requirePlayer = (authorization: string | undefined): PlayerRow => {
+    const p = players.authenticate(extractBearer(authorization));
+    if (!p) throw new AppError('UNAUTHORIZED', 'プレイヤー情報が見つかりません / Unknown player');
     return p;
   };
 
   app.get('/health', async () => ({ ok: true }));
 
   app.get('/ready', async (_req, reply) => {
-    const dbOk = (() => {
-      try {
-        return repo.ping();
-      } catch {
-        return false;
-      }
-    })();
-    const ok = dbOk && !!manager.current();
-    return reply.code(ok ? 200 : 503).send({
-      ok,
+    let dbOk = false;
+    try {
+      dbOk = repo.ping();
+    } catch {
+      dbOk = false;
+    }
+    return reply.code(dbOk ? 200 : 503).send({
+      ok: dbOk,
       db: dbOk,
       matchId: manager.current()?.matchId ?? null,
       paymentMode: env.PAYMENT_MODE,
@@ -59,75 +60,79 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
     return { snapshot: JSON.parse(row.final_snapshot_json) };
   });
 
-  // ---- join flow ----------------------------------------------------------
+  // ---- players ---------------------------------------------------------------
 
-  app.post(
-    '/api/join/reserve',
-    { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
-    async (req) => {
-      const body = reserveRequestSchema.parse(req.body ?? {});
-      return join.reserve(body);
-    },
-  );
-
-  app.post('/api/join/invoice', async (req) => {
-    const p = requireParticipant(req.headers.authorization);
-    const { reservationId } = invoiceRequestSchema.parse(req.body ?? {});
-    return join.createInvoice(p, reservationId);
+  app.post('/api/players', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
+    return players.join(joinRequestSchema.parse(req.body ?? {}));
   });
 
-  app.get('/api/join/payment-status/:reservationId', async (req) => {
-    const p = requireParticipant(req.headers.authorization);
-    const { reservationId } = z
-      .object({ reservationId: z.string().min(1).max(64) })
-      .parse(req.params);
-    const res = repo.getReservation(reservationId);
-    if (!res || res.participant_id !== p.id)
-      throw new AppError('NOT_FOUND', 'reservation not found');
-    // Opportunistically re-verify the pending invoice (covers missing webhooks).
-    const inv = repo.latestInvoiceForReservation(res.id);
-    if (inv?.status === 'PENDING') await join.checkInvoice(inv.id);
-    return join.paymentStatus(repo.getParticipant(p.id)!);
+  app.get('/api/me', async (req) => players.me(requirePlayer(req.headers.authorization)));
+
+  app.post('/api/me/team', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { teamId } = teamChangeSchema.parse(req.body ?? {});
+    players.changeTeam(p, teamId);
+    return { teamId };
   });
 
-  app.post(
-    '/api/join/redeem-pass',
-    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
-    async (req) => {
-      const p = requireParticipant(req.headers.authorization);
-      const { reservationId, code } = redeemPassRequestSchema.parse(req.body ?? {});
-      return join.redeemPass(p, reservationId, code);
-    },
-  );
-
-  app.get('/api/me', async (req) => {
-    const p = requireParticipant(req.headers.authorization);
-    return join.me(p);
+  app.post('/api/me/nickname', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { nickname } = nicknameChangeSchema.parse(req.body ?? {});
+    return { nickname: players.changeNickname(p, nickname) };
   });
 
-  app.post('/api/actions', async (req) => {
-    const p = requireParticipant(req.headers.authorization);
-    const body = actionRequestSchema.parse(req.body ?? {});
-    return actions.submit(p, body);
+  // ---- credit -------------------------------------------------------------------
+
+  app.post('/api/topups', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { amountSats } = topupRequestSchema.parse(req.body ?? {});
+    return players.createTopup(p, amountSats);
   });
 
-  // ---- payments -----------------------------------------------------------
+  app.get('/api/topups/:invoiceId', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { invoiceId } = z.object({ invoiceId: z.string().min(1).max(64) }).parse(req.params);
+    // Opportunistically re-verify (covers missing webhooks).
+    const inv = repo.getInvoice(invoiceId);
+    if (inv?.player_id === p.id && inv.status === 'PENDING') await players.checkInvoice(inv.id);
+    return players.topupStatus(p, invoiceId);
+  });
+
+  app.post('/api/codes/redeem', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { code } = redeemPassRequestSchema.parse(req.body ?? {});
+    return players.redeemPass(p, code);
+  });
+
+  // ---- battle -------------------------------------------------------------------
+
+  app.post('/api/zap', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    return zaps.zap(p, zapRequestSchema.parse(req.body ?? {}));
+  });
+
+  app.post('/api/cheer', async (req) => {
+    const p = requirePlayer(req.headers.authorization);
+    const { emoji } = cheerRequestSchema.parse(req.body ?? {});
+    zaps.cheer(p, emoji);
+    return { ok: true };
+  });
+
+  // ---- payments -------------------------------------------------------------------
 
   if (env.PAYMENT_MODE === 'mock') {
     // Test-only virtual payment. Not registered at all in lnbits mode.
     app.post('/api/dev/mock-pay', async (req) => {
-      const p = requireParticipant(req.headers.authorization);
-      const { invoiceId } = z
-        .object({ invoiceId: z.string().min(1).max(64) })
-        .parse(req.body ?? {});
-      const status = await join.mockPay(p, invoiceId);
-      return { ...join.paymentStatus(repo.getParticipant(p.id)!), invoiceStatus: status };
+      const p = requirePlayer(req.headers.authorization);
+      const { invoiceId } = z.object({ invoiceId: z.string().min(1).max(64) }).parse(req.body ?? {});
+      const status = await players.mockPay(p, invoiceId);
+      return { status, creditSats: repo.getPlayer(p.id)!.credit_sats };
     });
   }
 
   /**
    * LNbits webhook. The body is only a hint: we look up our own invoice by
-   * payment_hash and re-query LNbits before granting anything. Always 200 so
+   * payment_hash and re-query LNbits before crediting anything. Always 200 so
    * the endpoint does not leak which hashes exist.
    */
   app.post(
@@ -142,7 +147,7 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
         .object({ payment_hash: z.string().regex(/^[0-9a-fA-F]{64}$/) })
         .passthrough()
         .safeParse(req.body);
-      if (body.success) await join.handleWebhook(body.data.payment_hash.toLowerCase());
+      if (body.success) await players.handleWebhook(body.data.payment_hash.toLowerCase());
       return { ok: true };
     },
   );

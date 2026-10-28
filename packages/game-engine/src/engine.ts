@@ -1,26 +1,23 @@
 import type {
-  ActionErrorCode,
-  ActionOkCode,
-  ActionResult,
-  ActionType,
-  ClashRecord,
   EventPatch,
+  Finisher,
   GameConfig,
   GameEvent,
   MatchState,
   MatchStatus,
+  Phase,
   RegionId,
-  RegionState,
+  RegionPaint,
+  RoundEndReason,
+  RoundState,
   TeamId,
   TeamState,
+  ZapErrorCode,
+  ZapResult,
 } from '@sats-wars/shared';
-import { TEAM_IDS, TEAM_META, otherTeam } from '@sats-wars/shared';
-import {
-  decideResult,
-  emptyContribution,
-  resolveClashOutcome,
-  snapshotTeamForClash,
-} from './rules';
+import { REGION_IDS, TEAM_META, otherTeam } from '@sats-wars/shared';
+import { mulberry32, shuffle } from './random';
+import { decideSeason, nextRoundHp, zapOutcome } from './rules';
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -28,33 +25,16 @@ import {
 
 /** Every command carries the pause-corrected match clock `t` (ms). */
 export type EngineCommand =
-  | { type: 'OPEN_LOBBY'; t: number }
-  | { type: 'START_LIVE'; t: number }
+  | { type: 'START'; t: number }
   | { type: 'TICK'; t: number }
-  | {
-      type: 'ADD_PARTICIPANT';
-      t: number;
-      participantId: string;
-      teamId: TeamId;
-      nickname: string;
-      isBot: boolean;
-      ap: number;
-    }
-  | {
-      type: 'ACTION';
-      t: number;
-      participantId: string;
-      clientActionId: string;
-      actionType: ActionType;
-      regionId: RegionId | null;
-    }
+  | { type: 'ZAP'; t: number; participantId: string; nickname: string; teamId: TeamId }
   | { type: 'PAUSE'; t: number; reason: string }
   | { type: 'RESUME'; t: number }
   | { type: 'CANCEL'; t: number; reason: string };
 
 export type CommandOutcome =
   | { kind: 'none' }
-  | { kind: 'action'; result: ActionResult }
+  | { kind: 'zap'; result: ZapResult }
   | { kind: 'rejected'; reason: string };
 
 export interface ReduceResult {
@@ -68,30 +48,16 @@ export interface ReduceResult {
 // ---------------------------------------------------------------------------
 
 export function createMatchState(matchId: string, config: GameConfig, seed = 1): MatchState {
-  const regions = {} as Record<RegionId, RegionState>;
-  for (const { regionId, kind } of config.regions) {
-    regions[regionId] = {
-      regionId,
-      kind,
-      ownerTeamId: null,
-      contestedByTeamId: null,
-      contestedUntil: null,
-      shieldCharges: 0,
-      shieldExpiresAt: null,
-      updatedAt: 0,
-      revision: 0,
-    };
-  }
   const team = (teamId: TeamId): TeamState => ({
     teamId,
     robotId: TEAM_META[teamId].robotId,
-    hp: config.hpMax,
-    energy: 0,
-    participantCount: 0,
-    apRemaining: 0,
-    apTotal: 0,
-    actionCount: 0,
+    regionsWon: 0,
+    zapsTotal: 0,
+    specialsTotal: 0,
+    kos: 0,
   });
+  const regions = {} as Record<RegionId, RegionPaint>;
+  for (const regionId of REGION_IDS) regions[regionId] = { regionId, ownerTeamId: null, roundIndex: null };
   return {
     matchId,
     config: structuredClone(config),
@@ -100,17 +66,17 @@ export function createMatchState(matchId: string, config: GameConfig, seed = 1):
     pausedFrom: null,
     pauseReason: null,
     clockMs: 0,
-    lobbyOpenedAtClock: null,
     liveStartClock: null,
     gameMs: 0,
-    teams: { RAIJIN: team('RAIJIN'), FUJIN: team('FUJIN') },
+    phase: 'OPENING',
+    phaseEndsAt: null,
+    // A different running order every season keeps rounds feeling fresh.
+    roundOrder: shuffle(REGION_IDS, mulberry32(seed)).slice(0, config.roundsPerSeason),
+    roundIndex: 0,
+    round: null,
+    rounds: [],
     regions,
-    regionOrder: config.regions.map((r) => r.regionId),
-    participants: {},
-    processedActions: {},
-    nextClashIndex: 0,
-    clashes: [],
-    finalizingStartGameMs: null,
+    teams: { RAIJIN: team('RAIJIN'), FUJIN: team('FUJIN') },
     result: null,
     seq: 0,
     revision: 0,
@@ -123,9 +89,9 @@ export function createMatchState(matchId: string, config: GameConfig, seed = 1):
 
 /**
  * Pure reducer: (state, command) -> (newState, events, outcome).
- * The input state is never mutated. Every command first advances the clock to
- * `t`, resolving any scheduled timers (contest/shield expiry, clashes, phase
- * changes) in deterministic order, then applies itself.
+ * The input is never mutated. Every command first advances the clock to `t`,
+ * resolving phase timers in order, then applies itself. Punches arriving at
+ * exactly a phase boundary see the boundary first (server time decides).
  */
 export function reduce(prev: MatchState, cmd: EngineCommand): ReduceResult {
   const ctx = new Ctx(structuredClone(prev));
@@ -134,17 +100,11 @@ export function reduce(prev: MatchState, cmd: EngineCommand): ReduceResult {
   switch (cmd.type) {
     case 'TICK':
       break;
-    case 'OPEN_LOBBY':
-      outcome = openLobby(ctx);
+    case 'START':
+      outcome = start(ctx);
       break;
-    case 'START_LIVE':
-      outcome = startLiveCommand(ctx);
-      break;
-    case 'ADD_PARTICIPANT':
-      outcome = addParticipant(ctx, cmd);
-      break;
-    case 'ACTION':
-      outcome = { kind: 'action', result: applyAction(ctx, cmd) };
+    case 'ZAP':
+      outcome = { kind: 'zap', result: zap(ctx, cmd) };
       break;
     case 'PAUSE':
       outcome = pause(ctx, cmd.reason);
@@ -161,7 +121,7 @@ export function reduce(prev: MatchState, cmd: EngineCommand): ReduceResult {
   return { state: ctx.state, events: ctx.events, outcome };
 }
 
-/** Replay a full command log from scratch. Used for recovery and verification. */
+/** Replay a full command log from scratch (recovery and verification). */
 export function replay(
   matchId: string,
   config: GameConfig,
@@ -202,11 +162,6 @@ class Ctx {
     return event;
   }
 
-  touchRegion(region: RegionState): void {
-    region.updatedAt = this.state.gameMs;
-    region.revision += 1;
-  }
-
   setStatus(to: MatchStatus, reason: string | null): void {
     const from = this.state.status;
     this.state.status = to;
@@ -217,195 +172,170 @@ class Ctx {
         status: to,
         pausedFrom: this.state.pausedFrom,
         liveStartClock: this.state.liveStartClock,
+        phase: this.state.phase,
+        phaseEndsAt: this.state.phaseEndsAt,
       },
     );
   }
-}
 
-// ---------------------------------------------------------------------------
-// Clock advance and scheduled items
-// ---------------------------------------------------------------------------
-
-type Scheduled =
-  | { at: number; prio: 0; kind: 'CONTEST_EXPIRY'; regionId: RegionId; order: number }
-  | { at: number; prio: 1; kind: 'SHIELD_EXPIRY'; regionId: RegionId; order: number }
-  | { at: number; prio: 2; kind: 'CLASH'; order: 0 }
-  | { at: number; prio: 3; kind: 'ACTION_CLOSE'; order: 0 }
-  | { at: number; prio: 4; kind: 'FINISH'; order: 0 };
-
-function endingMs(config: GameConfig): number {
-  return config.matchMs - config.actionCloseMs;
-}
-
-function nextScheduled(state: MatchState): Scheduled | null {
-  const items: Scheduled[] = [];
-  if (state.status === 'LIVE') {
-    state.regionOrder.forEach((id, order) => {
-      const r = state.regions[id];
-      if (r.contestedUntil !== null)
-        items.push({ at: r.contestedUntil, prio: 0, kind: 'CONTEST_EXPIRY', regionId: id, order });
-      if (r.shieldExpiresAt !== null)
-        items.push({ at: r.shieldExpiresAt, prio: 1, kind: 'SHIELD_EXPIRY', regionId: id, order });
-    });
-    const clashAt = state.config.clashTimesMs[state.nextClashIndex];
-    if (clashAt !== undefined) items.push({ at: clashAt, prio: 2, kind: 'CLASH', order: 0 });
-    items.push({ at: state.config.actionCloseMs, prio: 3, kind: 'ACTION_CLOSE', order: 0 });
-  } else if (state.status === 'FINALIZING' && state.finalizingStartGameMs !== null) {
-    items.push({
-      at: state.finalizingStartGameMs + endingMs(state.config),
-      prio: 4,
-      kind: 'FINISH',
-      order: 0,
-    });
+  setPhase(phase: Phase, durationMs: number | null): void {
+    this.state.phase = phase;
+    this.state.phaseEndsAt = durationMs === null ? null : this.state.gameMs + durationMs;
   }
-  items.sort((a, b) => a.at - b.at || a.prio - b.prio || a.order - b.order);
-  return items[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Clock and phases
+// ---------------------------------------------------------------------------
 
 function advanceTo(ctx: Ctx, rawT: number): void {
   const s = ctx.state;
-  // The clock only moves while running, and never backwards.
-  if (s.status !== 'LOBBY' && s.status !== 'LIVE' && s.status !== 'FINALIZING') return;
+  if (s.status !== 'LIVE' || s.liveStartClock === null) return;
   const t = Math.max(s.clockMs, rawT);
-  // Guard against runaway loops on malformed state.
-  for (let guard = 0; guard < 10_000; guard++) {
-    if (s.status === 'LOBBY') {
-      if (s.liveStartClock !== null && s.liveStartClock <= t) {
-        s.clockMs = s.liveStartClock;
-        startLive(ctx, 'LOBBY_COUNTDOWN_ENDED');
-        continue;
-      }
-      s.clockMs = t;
-      s.gameMs = s.liveStartClock !== null ? s.clockMs - s.liveStartClock : 0;
-      return;
+  const target = t - s.liveStartClock;
+  for (let guard = 0; guard < 1000; guard++) {
+    if (s.status !== 'LIVE') return;
+    if (s.phaseEndsAt !== null && s.phaseEndsAt <= target) {
+      s.gameMs = Math.max(s.gameMs, s.phaseEndsAt);
+      s.clockMs = s.liveStartClock + s.gameMs;
+      endPhase(ctx);
+      continue;
     }
-    if (s.status === 'LIVE' || s.status === 'FINALIZING') {
-      const liveStart = s.liveStartClock ?? 0;
-      const targetGameMs = t - liveStart;
-      const next = nextScheduled(s);
-      if (next && next.at <= targetGameMs) {
-        s.gameMs = Math.max(s.gameMs, next.at);
-        s.clockMs = liveStart + s.gameMs;
-        processScheduled(ctx, next);
-        continue;
-      }
-      s.gameMs = targetGameMs;
-      s.clockMs = t;
-      return;
-    }
+    s.gameMs = target;
+    s.clockMs = t;
     return;
   }
-  throw new Error('advanceTo: scheduler did not converge');
+  throw new Error('advanceTo: phases did not converge');
 }
 
-function processScheduled(ctx: Ctx, item: Scheduled): void {
+function endPhase(ctx: Ctx): void {
   const s = ctx.state;
-  switch (item.kind) {
-    case 'CONTEST_EXPIRY': {
-      const r = s.regions[item.regionId];
-      r.contestedByTeamId = null;
-      r.contestedUntil = null;
-      ctx.touchRegion(r);
-      ctx.emit(
-        'CONTEST_EXPIRED',
-        { regionId: r.regionId, ownerTeamId: r.ownerTeamId },
-        { regions: [r] },
-      );
+  switch (s.phase) {
+    case 'OPENING':
+      startRound(ctx, 0);
       return;
-    }
-    case 'SHIELD_EXPIRY': {
-      const r = s.regions[item.regionId];
-      r.shieldCharges = 0;
-      r.shieldExpiresAt = null;
-      ctx.touchRegion(r);
-      ctx.emit('SHIELD_EXPIRED', { regionId: r.regionId }, { regions: [r] });
+    case 'ROUND':
+      endRound(ctx, 'TIME', null, null);
       return;
-    }
-    case 'CLASH':
-      resolveClash(ctx);
+    case 'ROUND_END':
+      if (s.roundIndex + 1 < s.roundOrder.length) startRound(ctx, s.roundIndex + 1);
+      else startSeasonEnd(ctx);
       return;
-    case 'ACTION_CLOSE':
-      enterFinalizing(ctx, false);
-      return;
-    case 'FINISH':
-      ctx.setStatus('FINISHED', 'ENDING_COMPLETE');
+    case 'SEASON_END':
+      ctx.setPhase('SEASON_END', null);
+      ctx.setStatus('FINISHED', 'SEASON_COMPLETE');
       return;
   }
 }
 
-function resolveClash(ctx: Ctx): void {
+function startRound(ctx: Ctx, index: number): void {
   const s = ctx.state;
-  const clashIndex = s.nextClashIndex;
-  const snapshot = {
-    RAIJIN: snapshotTeamForClash(s, 'RAIJIN'),
-    FUJIN: snapshotTeamForClash(s, 'FUJIN'),
+  const c = s.config;
+  const hpMax = nextRoundHp(c, s.rounds[s.rounds.length - 1]);
+  s.roundIndex = index;
+  ctx.setPhase('ROUND', c.roundMaxMs);
+  const round: RoundState = {
+    index,
+    regionId: s.roundOrder[index]!,
+    hpMax,
+    hp: { RAIJIN: hpMax, FUJIN: hpMax },
+    gauge: { RAIJIN: 0, FUJIN: 0 },
+    zaps: { RAIJIN: 0, FUJIN: 0 },
+    startedAt: s.gameMs,
+    endsAt: s.phaseEndsAt!,
+    endedAt: null,
+    winnerTeamId: null,
+    endReason: null,
+    finisher: null,
   };
-  const outcome = resolveClashOutcome(snapshot, s.config);
-  for (const teamId of TEAM_IDS) {
-    s.teams[teamId].hp = outcome[teamId].hpAfter;
-    s.teams[teamId].energy = outcome[teamId].energyAfter;
+  s.round = round;
+  ctx.emit(
+    'ROUND_STARTED',
+    { round },
+    { phase: s.phase, phaseEndsAt: s.phaseEndsAt, roundIndex: index, round },
+  );
+}
+
+function endRound(
+  ctx: Ctx,
+  reason: RoundEndReason,
+  koWinner: TeamId | null,
+  finisher: Finisher | null,
+): void {
+  const s = ctx.state;
+  const r = s.round!;
+  let winner: TeamId | null = koWinner;
+  let endReason = reason;
+  if (reason === 'TIME') {
+    winner = r.hp.RAIJIN === r.hp.FUJIN ? null : r.hp.RAIJIN > r.hp.FUJIN ? 'RAIJIN' : 'FUJIN';
+    if (!winner) endReason = 'DRAW';
   }
-  const ko = TEAM_IDS.filter((id) => s.teams[id].hp <= 0);
-  const isLast = clashIndex === s.config.clashTimesMs.length - 1;
-  const clash: ClashRecord = {
-    clashIndex,
-    atGameMs: s.gameMs,
-    snapshot,
-    outcome,
-    ko,
-    isFinal: isLast || ko.length > 0,
+  r.endedAt = s.gameMs;
+  r.winnerTeamId = winner;
+  r.endReason = endReason;
+  r.finisher = finisher;
+  const changedRegions: RegionPaint[] = [];
+  if (winner) {
+    s.regions[r.regionId] = { regionId: r.regionId, ownerTeamId: winner, roundIndex: r.index };
+    changedRegions.push(s.regions[r.regionId]);
+    s.teams[winner].regionsWon += 1;
+    if (endReason === 'KO') s.teams[winner].kos += 1;
+  }
+  const summary = {
+    index: r.index,
+    regionId: r.regionId,
+    hpMax: r.hpMax,
+    winnerTeamId: winner,
+    endReason,
+    durationMs: s.gameMs - r.startedAt,
+    zaps: { ...r.zaps },
+    finisher,
   };
-  s.clashes.push(clash);
-  s.nextClashIndex += 1;
-  ctx.emit('CLASH_RESOLVED', { clash }, { teams: [s.teams.RAIJIN, s.teams.FUJIN] });
-  if (ko.length > 0) enterFinalizing(ctx, true);
+  s.rounds.push(summary);
+  ctx.setPhase('ROUND_END', s.config.roundEndMs);
+  ctx.emit(
+    'ROUND_ENDED',
+    { summary, finisher },
+    {
+      phase: s.phase,
+      phaseEndsAt: s.phaseEndsAt,
+      round: r,
+      regions: changedRegions,
+      teams: [s.teams.RAIJIN, s.teams.FUJIN],
+    },
+  );
 }
 
-function enterFinalizing(ctx: Ctx, ko: boolean): void {
+function startSeasonEnd(ctx: Ctx): void {
   const s = ctx.state;
-  if (s.status !== 'LIVE') return;
-  // Contests in progress simply end; ownership does not change.
-  s.finalizingStartGameMs = s.gameMs;
-  s.result = decideResult(s, ko);
-  ctx.setStatus('FINALIZING', ko ? 'KO' : 'ACTIONS_CLOSED');
-  ctx.emit('MATCH_RESULT', { result: s.result }, { result: s.result });
-}
-
-function startLive(ctx: Ctx, reason: string): void {
-  const s = ctx.state;
-  s.liveStartClock = s.clockMs;
-  s.gameMs = 0;
-  ctx.setStatus('LIVE', reason);
+  s.result = decideSeason(s);
+  ctx.setPhase('SEASON_END', s.config.seasonEndMs);
+  ctx.emit(
+    'SEASON_ENDED',
+    { result: s.result },
+    { phase: s.phase, phaseEndsAt: s.phaseEndsAt, result: s.result },
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Lifecycle commands
 // ---------------------------------------------------------------------------
 
-function openLobby(ctx: Ctx): CommandOutcome {
+function start(ctx: Ctx): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'CREATED')
-    return { kind: 'rejected', reason: `cannot open lobby from ${s.status}` };
-  s.lobbyOpenedAtClock = s.clockMs;
-  s.liveStartClock = s.config.autoStartAfterLobby ? s.clockMs + s.config.lobbyMs : null;
-  s.gameMs = s.liveStartClock !== null ? s.clockMs - s.liveStartClock : 0;
-  ctx.setStatus('LOBBY', 'LOBBY_OPENED');
-  return { kind: 'none' };
-}
-
-function startLiveCommand(ctx: Ctx): CommandOutcome {
-  const s = ctx.state;
-  if (s.status !== 'LOBBY' && s.status !== 'CREATED')
-    return { kind: 'rejected', reason: `cannot start from ${s.status}` };
-  if (s.status === 'CREATED') s.lobbyOpenedAtClock = s.clockMs;
-  startLive(ctx, 'ADMIN_START');
+  if (s.status !== 'CREATED') return { kind: 'rejected', reason: `cannot start from ${s.status}` };
+  s.liveStartClock = s.clockMs;
+  s.gameMs = 0;
+  ctx.setPhase('OPENING', s.config.openingMs);
+  ctx.setStatus('LIVE', 'SEASON_START');
+  // A zero-length opening goes straight into round 1.
+  advanceTo(ctx, s.clockMs);
   return { kind: 'none' };
 }
 
 function pause(ctx: Ctx, reason: string): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'LOBBY' && s.status !== 'LIVE' && s.status !== 'FINALIZING')
-    return { kind: 'rejected', reason: `cannot pause from ${s.status}` };
+  if (s.status !== 'LIVE') return { kind: 'rejected', reason: `cannot pause from ${s.status}` };
   s.pausedFrom = s.status;
   s.pauseReason = reason;
   ctx.setStatus('PAUSED', reason);
@@ -431,188 +361,78 @@ function cancel(ctx: Ctx, reason: string): CommandOutcome {
   s.result = {
     winnerTeamId: null,
     reason: 'CANCELLED',
+    regionCounts: { RAIJIN: s.teams.RAIJIN.regionsWon, FUJIN: s.teams.FUJIN.regionsWon },
     decidedAtGameMs: s.gameMs,
-    finalHp: { RAIJIN: s.teams.RAIJIN.hp, FUJIN: s.teams.FUJIN.hp },
-    regionCounts: { RAIJIN: 0, FUJIN: 0 },
-    mvp: { RAIJIN: null, FUJIN: null },
   };
+  ctx.setPhase(s.phase, null);
   ctx.setStatus('CANCELLED', reason);
-  ctx.emit('MATCH_RESULT', { result: s.result }, { result: s.result });
+  ctx.emit('SEASON_ENDED', { result: s.result }, { result: s.result });
   return { kind: 'none' };
 }
 
 // ---------------------------------------------------------------------------
-// Participants
+// Punch
 // ---------------------------------------------------------------------------
 
-function canAddParticipant(s: MatchState): boolean {
-  const effective = s.status === 'PAUSED' ? s.pausedFrom : s.status;
-  return effective === 'LOBBY' || effective === 'LIVE' || effective === 'CREATED';
-}
-
-function addParticipant(
-  ctx: Ctx,
-  cmd: Extract<EngineCommand, { type: 'ADD_PARTICIPANT' }>,
-): CommandOutcome {
+function zap(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'ZAP' }>): ZapResult {
   const s = ctx.state;
-  if (s.participants[cmd.participantId]) return { kind: 'none' }; // idempotent
-  if (!canAddParticipant(s))
-    return { kind: 'rejected', reason: `cannot add participant in ${s.status}` };
-  const ap = Math.max(0, Math.floor(cmd.ap));
-  s.participants[cmd.participantId] = {
-    participantId: cmd.participantId,
-    teamId: cmd.teamId,
-    nickname: cmd.nickname,
-    isBot: cmd.isBot,
-    apTotal: ap,
-    apRemaining: ap,
-    joinedAtGameMs: Math.max(0, s.gameMs),
-    contribution: emptyContribution(),
-  };
-  const team = s.teams[cmd.teamId];
-  team.participantCount += 1;
-  team.apRemaining += ap;
-  team.apTotal += ap;
-  ctx.emit(
-    'PARTICIPANT_JOINED',
-    {
-      participantId: cmd.participantId,
-      teamId: cmd.teamId,
-      nickname: cmd.nickname,
-      isBot: cmd.isBot,
-    },
-    { teams: [team] },
-  );
-  return { kind: 'none' };
-}
-
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
-function applyAction(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'ACTION' }>): ActionResult {
-  const s = ctx.state;
-  const key = `${cmd.participantId}:${cmd.clientActionId}`;
-  const cached = s.processedActions[key];
-  if (cached) return { ...cached, duplicate: true };
-
-  const p = s.participants[cmd.participantId];
-  const ap = p?.apRemaining ?? 0;
-  const fail = (code: ActionErrorCode): ActionResult => ({
+  const fail = (code: ZapErrorCode): ZapResult => ({
     ok: false,
     code,
-    actionType: cmd.actionType,
-    regionId: cmd.regionId,
-    apBefore: ap,
-    apAfter: ap,
+    teamId: cmd.teamId,
+    damage: 0,
+    special: false,
+    pinch: false,
     atGameMs: s.gameMs,
+    roundIndex: s.round?.index ?? null,
   });
+  if (s.status === 'PAUSED') return fail('PAUSED');
+  if (s.status !== 'LIVE') return fail('NOT_LIVE');
+  if (s.phase !== 'ROUND' || !s.round) return fail('ROUND_NOT_ACTIVE');
 
-  if (!p) return fail('UNKNOWN_PARTICIPANT');
-  if (s.status === 'PAUSED') return fail('MATCH_PAUSED');
-  if (s.status === 'FINALIZING' || s.status === 'FINISHED') return fail('ACTIONS_CLOSED');
-  if (s.status !== 'LIVE') return fail('MATCH_NOT_LIVE');
-  if (s.gameMs >= s.config.actionCloseMs) return fail('ACTIONS_CLOSED');
-  if (p.apRemaining <= 0) return fail('NO_AP');
-
-  const myTeam = p.teamId;
-  const team = s.teams[myTeam];
-  let code: ActionOkCode;
-  const changedRegions: RegionState[] = [];
-
-  if (cmd.actionType === 'CHARGE') {
-    if (team.energy >= s.config.energyMax) return fail('ENERGY_FULL');
-    team.energy = Math.min(s.config.energyMax, team.energy + s.config.chargeAmount);
-    p.contribution.charges += 1;
-    code = 'CHARGED';
-  } else {
-    if (cmd.regionId === null) return fail('REGION_REQUIRED');
-    const r = s.regions[cmd.regionId];
-    if (!r) return fail('INVALID_REGION');
-    if (cmd.actionType === 'ATTACK') {
-      if (r.ownerTeamId === null) {
-        capture(r, myTeam);
-        p.contribution.captures += 1;
-        code = 'CAPTURED';
-      } else if (r.ownerTeamId === myTeam) {
-        if (r.contestedByTeamId === null) return fail('OWN_REGION_NOT_CONTESTED');
-        clearContest(r);
-        p.contribution.breaks += 1;
-        code = 'CONTEST_BROKEN';
-      } else if (r.contestedByTeamId === myTeam) {
-        capture(r, myTeam);
-        p.contribution.captures += 1;
-        code = 'CAPTURED';
-      } else if (r.shieldCharges > 0) {
-        r.shieldCharges -= 1;
-        if (r.shieldCharges === 0) r.shieldExpiresAt = null;
-        p.contribution.shieldBreaks += 1;
-        code = 'SHIELD_BROKEN';
-      } else {
-        r.contestedByTeamId = myTeam;
-        r.contestedUntil = s.gameMs + s.config.contestWindowMs;
-        p.contribution.contests += 1;
-        code = 'CONTEST_STARTED';
-      }
-    } else {
-      // DEFEND
-      if (r.ownerTeamId !== myTeam) return fail('NOT_OWN_REGION');
-      if (r.contestedByTeamId !== null) {
-        clearContest(r);
-        p.contribution.breaks += 1;
-        code = 'CONTEST_BROKEN';
-      } else if (r.shieldCharges >= s.config.shieldMax) {
-        return fail('SHIELD_ALREADY_ACTIVE');
-      } else {
-        r.shieldCharges += 1;
-        r.shieldExpiresAt = s.gameMs + s.config.shieldDurationMs;
-        p.contribution.shields += 1;
-        code = 'SHIELD_PLACED';
-      }
-    }
-    ctx.touchRegion(r);
-    changedRegions.push(r);
-  }
-
-  const apBefore = p.apRemaining;
-  p.apRemaining -= 1;
-  team.apRemaining -= 1;
-  team.actionCount += 1;
+  const r = s.round;
+  const me = cmd.teamId;
+  const foe = otherTeam(me);
+  r.zaps[me] += 1;
+  r.gauge[me] += 1;
+  const o = zapOutcome(s.config, r.hp[me], r.hpMax, r.gauge[me]);
+  if (o.special) r.gauge[me] = 0;
+  r.hp[foe] = Math.max(0, r.hp[foe] - o.damage);
+  s.teams[me].zapsTotal += 1;
+  if (o.special) s.teams[me].specialsTotal += 1;
+  const ko = r.hp[foe] === 0;
+  const code = ko ? 'KO' : o.special ? 'SPECIAL' : 'HIT';
   const event = ctx.emit(
-    'ACTION_APPLIED',
+    'ZAP',
     {
-      participantId: p.participantId,
-      nickname: p.nickname,
-      teamId: myTeam,
-      actionType: cmd.actionType,
-      regionId: cmd.actionType === 'CHARGE' ? null : cmd.regionId,
+      participantId: cmd.participantId,
+      nickname: cmd.nickname,
+      teamId: me,
       code,
+      damage: o.damage,
+      special: o.special,
+      pinch: o.pinch,
+      hp: { ...r.hp },
     },
-    { regions: changedRegions, teams: [team, s.teams[otherTeam(myTeam)]] },
+    { round: r, teams: [s.teams[me]] },
   );
-  const result: ActionResult = {
+  const result: ZapResult = {
     ok: true,
     code,
-    actionType: cmd.actionType,
-    regionId: cmd.actionType === 'CHARGE' ? null : cmd.regionId,
-    apBefore,
-    apAfter: p.apRemaining,
+    teamId: me,
+    damage: o.damage,
+    special: o.special,
+    pinch: o.pinch,
     atGameMs: s.gameMs,
+    roundIndex: r.index,
     eventSeq: event.seq,
   };
-  s.processedActions[key] = result;
+  if (ko) {
+    endRound(ctx, 'KO', me, {
+      participantId: cmd.participantId,
+      nickname: cmd.nickname,
+      teamId: me,
+    });
+  }
   return result;
-}
-
-function capture(r: RegionState, teamId: TeamId): void {
-  r.ownerTeamId = teamId;
-  r.contestedByTeamId = null;
-  r.contestedUntil = null;
-  r.shieldCharges = 0;
-  r.shieldExpiresAt = null;
-}
-
-function clearContest(r: RegionState): void {
-  r.contestedByTeamId = null;
-  r.contestedUntil = null;
 }

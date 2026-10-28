@@ -35,7 +35,7 @@ https://api.game.example.com    → server :4000（WebSocket Upgrade を通す�
 ## 会場LAN（インターネットなし）
 
 - 会場PCで `pnpm start`。スマホは `http://<会場PCのIP>:3000/play`。`PUBLIC_PLAY_URL` をそのURLに。
-- 実決済は使わない（mock/スポンサーパスのみ）。画面に「DEMO MODE（実決済なし）」が表示され、実決済と混同しない。
+- 実決済は使わない（mock/配布コードのみ）。画面に「DEMO MODE（実決済なし）」が表示され、実決済と混同しない。
 
 ## Docker
 

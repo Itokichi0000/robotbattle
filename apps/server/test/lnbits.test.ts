@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LnbitsPaymentAdapter } from '../src/payments/lnbits';
-import { type TestServer, admin, auth, makeServer, reserve } from './helpers';
+import { type TestServer, auth, joinTeam, makeServer, topup } from './helpers';
 
 interface FakeInvoice {
   paid: boolean;
@@ -161,26 +161,26 @@ describe('server with LNbits adapter', () => {
         ALLOW_REAL_PAYMENTS: 'true',
       },
     });
-    const token = await s.adminToken();
-    await admin(s, token, { command: 'OPEN_LOBBY' });
-    const r = (await reserve(s)).json();
-    const res = await s.inject({
-      method: 'POST',
-      url: '/api/join/invoice',
-      headers: auth(r.token),
-      payload: { reservationId: r.reservationId },
-    });
+    const r = await joinTeam(s, 'RAIJIN');
+    const res = await topup(s, r.token, 210);
     expect(res.statusCode).toBe(200);
     const row = s.services.repo.getInvoice(res.json().invoiceId)!;
     return { s, lnbits, r, row, invoice: res.json() };
   }
 
   it('registers the webhook URL with the secret and never exposes the key', async () => {
-    const { lnbits, invoice } = await setup();
+    const { s: srv, lnbits, invoice } = await setup();
     const created = [...lnbits.invoices.values()][0]!;
     expect(created.webhook).toBe('https://game.example/api/webhooks/lnbits/whsec-test-0001');
     expect(invoice.paymentMode).toBe('lnbits');
     expect(JSON.stringify(invoice)).not.toContain(lnbits.key);
+    // The fake-payment shortcut is not even registered with a real provider.
+    const mock = await srv.inject({ method: 'POST', url: '/api/dev/mock-pay', payload: {} });
+    expect(mock.statusCode).toBe(404);
+    // Only receive invoices were ever requested.
+    for (const req of lnbits.requests.filter((x) => x.method === 'POST')) {
+      expect((req.body as { out: boolean }).out).toBe(false);
+    }
   });
 
   it('forged webhook (LNbits says unpaid) grants nothing; real payment grants once', async () => {
@@ -196,22 +196,22 @@ describe('server with LNbits adapter', () => {
     lnbits.invoices.get(row.payment_hash)!.paid = true;
     await Promise.all([hook(), hook(), hook()]);
     const me = (await s.inject({ url: '/api/me', headers: auth(r.token) })).json();
-    expect(me).toMatchObject({ status: 'ACTIVE', apRemaining: 3, invoiceStatus: 'PAID' });
-    expect(s.services.manager.snapshot().teams[r.teamId as 'RAIJIN'].apTotal).toBe(3);
+    expect(me).toMatchObject({ creditSats: 210, pendingInvoice: null });
+    expect(s.services.repo.getInvoice(row.id)!.status).toBe('PAID');
   });
 
   it('provider 5xx during verification keeps the invoice pending and retries later', async () => {
     const { s, lnbits, r, row } = await setup();
     lnbits.invoices.get(row.payment_hash)!.paid = true;
     lnbits.failNext = 1;
-    await s.services.join.pollPending();
+    await s.services.players.pollPending();
     expect(s.services.repo.getInvoice(row.id)).toMatchObject({
       status: 'PENDING',
       check_failures: 1,
     });
-    await s.services.join.pollPending();
+    await s.services.players.pollPending();
     const me = (await s.inject({ url: '/api/me', headers: auth(r.token) })).json();
-    expect(me.status).toBe('ACTIVE');
+    expect(me.creditSats).toBe(210);
   });
 
   it('refuses to start lnbits mode without explicit approval', async () => {

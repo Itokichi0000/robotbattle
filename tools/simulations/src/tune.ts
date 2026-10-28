@@ -1,121 +1,36 @@
-/** Parameter sweep helper: pnpm --filter @sats-wars/simulations exec tsx src/tune.ts */
+/**
+ * Parameter sweep helper:
+ *   pnpm --filter @sats-wars/simulations exec tsx src/tune.ts [seasons]
+ * Compares candidate configs on pacing (round length, KO rate) and on how
+ * often a smaller crowd (10 vs 6) still takes rounds.
+ */
 import type { GameConfig, TeamId } from '@sats-wars/shared';
-import { makeGameConfig } from '@sats-wars/shared';
-import type { StrategyName } from '@sats-wars/game-engine';
-import { aggregate, simulateMatch } from './simulate';
+import { aggregate, simulateSeason } from './simulate';
 
-const N = Number(process.argv[2] ?? 120);
-const F: Partial<GameConfig> = {
-  baseDamage: 8,
-  damageMax: 20,
-  defenseRegionReduction: 3,
-  attackRegionBonus: 2,
-  specialBonus: 8,
-  energyRegionGain: 6,
-};
-const candidates: Array<[string, Partial<GameConfig>]> =
-  process.argv[3] === 'charge'
-    ? [
-        ['F', F],
-        ['F charge15', { ...F, chargeAmount: 15 }],
-        ['F charge15 sp12', { ...F, chargeAmount: 15, specialBonus: 12 }],
-        [
-          'F charge15 sp12 enBonus3',
-          { ...F, chargeAmount: 15, specialBonus: 12, energyBonusPer10: 3, energyBonusMax: 6 },
-        ],
-        ['F contest20', { ...F, contestWindowMs: 20_000 }],
-      ]
-    : [
-        ['default', {}],
-        ['A base8 max22', { baseDamage: 8, damageMax: 22 }],
-        ['B base8 max22 def3', { baseDamage: 8, damageMax: 22, defenseRegionReduction: 3 }],
-        [
-          'C base8 max22 def3 atk2',
-          { baseDamage: 8, damageMax: 22, defenseRegionReduction: 3, attackRegionBonus: 2 },
-        ],
-        [
-          'D base7 max20 def3 atk2 sp8',
-          {
-            baseDamage: 7,
-            damageMax: 20,
-            defenseRegionReduction: 3,
-            attackRegionBonus: 2,
-            specialBonus: 8,
-          },
-        ],
-        [
-          'E base8 max22 def3 atk2 shield45',
-          {
-            baseDamage: 8,
-            damageMax: 22,
-            defenseRegionReduction: 3,
-            attackRegionBonus: 2,
-            shieldDurationMs: 45_000,
-          },
-        ],
-        [
-          'F base8 max20 def3 atk2 sp8 en6',
-          {
-            baseDamage: 8,
-            damageMax: 20,
-            defenseRegionReduction: 3,
-            attackRegionBonus: 2,
-            specialBonus: 8,
-            energyRegionGain: 6,
-          },
-        ],
-      ];
-const vs = (cfg: GameConfig, a: StrategyName, b: StrategyName, players: number) => {
-  let w = 0;
-  for (let i = 0; i < N; i++) {
-    const sides: Array<[TeamId, TeamId]> = i % 2 ? [['RAIJIN', 'FUJIN']] : [['FUJIN', 'RAIJIN']];
-    const [ta, tb] = sides[0]!;
-    const r = simulateMatch({
-      config: cfg,
-      playersPerTeam: { RAIJIN: players, FUJIN: players },
-      strategy: { [ta]: a, [tb]: b } as Record<TeamId, StrategyName>,
-      seed: 77 + i * 7919,
-    });
-    w += r.winner === ta ? 1 : r.winner === null ? 0.5 : 0;
-  }
-  return w / N;
-};
-for (const [name, over] of candidates) {
-  const cfg = makeGameConfig(over);
-  const parts: string[] = [];
-  for (const players of [10, 30]) {
-    const a = aggregate(
-      Array.from({ length: N }, (_, i) =>
-        simulateMatch({
-          config: cfg,
-          playersPerTeam: { RAIJIN: players, FUJIN: players },
-          strategy: { RAIJIN: 'balanced', FUJIN: 'balanced' },
-          seed: 5 + i * 31,
-        }),
-      ),
-    );
-    parts.push(
-      `p${players}: KO ${(a.koRate * 100).toFixed(0)}% end ${a.avgEndSec.toFixed(0)}s draw ${((a.draws / a.n) * 100).toFixed(0)}%`,
-    );
-  }
-  parts.push(`aggr>bal ${(vs(cfg, 'aggressive', 'balanced', 10) * 100).toFixed(0)}%`);
-  parts.push(`def>aggr ${(vs(cfg, 'defensive', 'aggressive', 10) * 100).toFixed(0)}%`);
-  parts.push(`chg>bal ${(vs(cfg, 'charger', 'balanced', 10) * 100).toFixed(0)}%`);
-  parts.push(`adapt>aggr ${(vs(cfg, 'adaptive', 'aggressive', 10) * 100).toFixed(0)}%`);
-  parts.push(`adapt>aggr@30 ${(vs(cfg, 'adaptive', 'aggressive', 30) * 100).toFixed(0)}%`);
-  parts.push(`10v11 ${((1 - vsSize(cfg)) * 100) | 0}%small`);
-  console.log(name.padEnd(36), parts.join(' | '));
-}
-function vsSize(cfg: GameConfig) {
-  let bigWins = 0;
-  for (let i = 0; i < N; i++) {
-    const r = simulateMatch({
-      config: cfg,
-      playersPerTeam: { RAIJIN: 10, FUJIN: 11 },
-      strategy: { RAIJIN: 'balanced', FUJIN: 'balanced' },
-      seed: 3 + i * 17,
-    });
-    bigWins += r.winner === 'FUJIN' ? 1 : r.winner === null ? 0.5 : 0;
-  }
-  return bigWins / N;
+const N = Number(process.argv[2] ?? 30);
+const candidates: Array<[string, Partial<GameConfig>]> = [
+  ['default', {}],
+  ['cap100k x3', { hpCap: 100_000, hpMaxChangeFactor: 3 }],
+  ['cap100k x3 pinch40%', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchHpRatio: 0.4 }],
+  ['cap100k x3 pinch×2', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchMultiplier: 2 }],
+  ['cap100k x3 pinch40% ×2', { hpCap: 100_000, hpMaxChangeFactor: 3, pinchHpRatio: 0.4, pinchMultiplier: 2 }],
+  ['cap100k x4 pinch40% ×2', { hpCap: 100_000, hpMaxChangeFactor: 4, pinchHpRatio: 0.4, pinchMultiplier: 2 }],
+];
+
+const run = (players: Record<TeamId, number>, config: Partial<GameConfig>) =>
+  aggregate(Array.from({ length: N }, (_, i) => simulateSeason({ playersPerTeam: players, seed: 500 + i * 101, config })));
+
+console.log(`seasons per cell: ${N}`);
+console.log('candidate | 10v10 round s / KO% | 30v30 round s | 100v100 round s | 10v8 underdog | 10v6 underdog | 2v2 round s');
+for (const [name, cfg] of candidates) {
+  const even = run({ RAIJIN: 10, FUJIN: 10 }, cfg);
+  const big = run({ RAIJIN: 30, FUJIN: 30 }, cfg);
+  const huge = run({ RAIJIN: 100, FUJIN: 100 }, cfg);
+  const u8 = run({ RAIJIN: 10, FUJIN: 8 }, cfg);
+  const u6 = run({ RAIJIN: 10, FUJIN: 6 }, cfg);
+  const tiny = run({ RAIJIN: 2, FUJIN: 2 }, cfg);
+  const pct = (a: typeof u8) => `${((a.roundWins.FUJIN / a.rounds) * 100).toFixed(1)}%`;
+  console.log(
+    `${name} | ${even.avgRoundSec.toFixed(1)} / ${(even.koRate * 100).toFixed(0)} | ${big.avgRoundSec.toFixed(1)} | ${huge.avgRoundSec.toFixed(1)} | ${pct(u8)} | ${pct(u6)} | ${tiny.avgRoundSec.toFixed(1)}`,
+  );
 }

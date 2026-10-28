@@ -41,7 +41,7 @@ export function createRealtime(
     maxHttpBufferSize: 16_384,
     connectionStateRecovery: undefined,
   });
-  const { manager, join, actions, adminAuth, wall } = services;
+  const { manager, players, zaps, adminAuth, wall } = services;
   const arenaStatus = new Map<string, ArenaStatus & { socketId: string; updatedAt: number }>();
 
   io.on('connection', (socket) => {
@@ -58,7 +58,7 @@ export function createRealtime(
         void socket.join('admin');
       }
       if (role === 'player') {
-        const p = join.authenticate(token ?? null);
+        const p = players.authenticate(token ?? null);
         if (!p) return ack?.({ ok: false, error: 'UNAUTHORIZED' });
         socket.data.participantId = p.id;
         void socket.join(`p:${p.id}`);
@@ -97,12 +97,24 @@ export function createRealtime(
   manager.onMatchChanged(() => {
     io.to('public').emit('matchSnapshot', manager.snapshot());
   });
-  join.onPaymentStatus((participantId, status) => {
-    io.to(`p:${participantId}`).emit('paymentStatus', status);
+  players.onCredit((playerId, push) => {
+    io.to(`p:${playerId}`).emit('credit', push);
   });
-  actions.onAck((participantId, ack) => {
-    io.to(`p:${participantId}`).emit('actionAck', ack);
+  zaps.onCredit((playerId, creditSats) => {
+    io.to(`p:${playerId}`).emit('credit', { creditSats, invoiceId: null, invoiceStatus: null, addedSats: 0 });
   });
+  zaps.onCheer((cheer) => {
+    io.to('public').emit('cheer', cheer);
+  });
+  // Supporter counts change on join/team switch; broadcast at most once a second.
+  let lastPresence = '';
+  const broadcastPresence = () => {
+    const s = manager.supporters();
+    const key = `${s.RAIJIN}:${s.FUJIN}`;
+    if (key === lastPresence) return;
+    lastPresence = key;
+    io.to('public').emit('presence', s);
+  };
 
   const broadcastClock = () => {
     const rt = manager.current();
@@ -138,7 +150,7 @@ export function createRealtime(
     io.to('public').emit('serverNotice', n);
   };
 
-  return { io, broadcastClock, stats, notice };
+  return { io, broadcastClock, broadcastPresence, stats, notice };
 }
 
 export type Realtime = ReturnType<typeof createRealtime>;

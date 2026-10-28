@@ -96,16 +96,13 @@ body.sw-large-text {
 .sw-map-label[data-owner='FUJIN'] {
   border-color: var(--color-teal);
 }
-.sw-map-label.is-contested {
-  border-style: dashed;
-  border-width: 2px;
+.sw-map-label.is-focus {
+  border: 2px solid #ffe27a;
+  color: #ffe27a;
+  font-size: 18px;
 }
-.sw-map-label-contest:empty {
-  display: none;
-}
-.sw-map-label-contest {
-  color: #ffe08a;
-  font-size: 13px;
+.sw-map-label-focus {
+  color: #ffe27a;
 }
 
 @keyframes sw-banner-in {
@@ -135,13 +132,56 @@ body.sw-large-text {
   animation: sw-pulse 1.2s ease-in-out infinite;
 }
 
+/* Name pop-up for each punch on the venue screen. */
+@keyframes sw-pop-in {
+  0% {
+    transform: translateY(8px) scale(0.9);
+    opacity: 0;
+  }
+  15% {
+    transform: none;
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.sw-pop-in {
+  animation: sw-pop-in 2.2s ease-out both;
+}
+
+/* Free cheers float upwards. */
+@keyframes sw-cheer-up {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-260%);
+    opacity: 0;
+  }
+}
+.sw-cheer-up {
+  animation: sw-cheer-up 3s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sw-banner-in,
-  .sw-pulse {
+  .sw-pulse,
+  .sw-pop-in,
+  .sw-cheer-up {
     animation: none;
   }
 }
 .sw-reduced-motion .sw-banner-in,
-.sw-reduced-motion .sw-pulse {
+.sw-reduced-motion .sw-pulse,
+.sw-reduced-motion .sw-pop-in,
+.sw-reduced-motion .sw-cheer-up {
   animation: none;
 }

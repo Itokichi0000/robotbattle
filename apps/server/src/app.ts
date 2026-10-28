@@ -12,12 +12,12 @@ import { Repo } from './db/repo';
 import { DemoBots } from './demo/bots';
 import type { Env } from './env';
 import { AppError } from './errors';
-import { ActionService } from './match/actions';
 import { MatchManager } from './match/manager';
+import { ZapService } from './match/zaps';
 import type { PaymentAdapter } from './payments/adapter';
-import { JoinService } from './payments/join';
 import { LnbitsPaymentAdapter } from './payments/lnbits';
 import { MockPaymentAdapter } from './payments/mock';
+import { PlayerService } from './payments/players';
 import { type Realtime, createRealtime } from './realtime/socket';
 import { registerAdminRoutes } from './routes/admin';
 import { registerPublicRoutes } from './routes/public';
@@ -65,7 +65,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     (env.PAYMENT_MODE === 'lnbits'
       ? new LnbitsPaymentAdapter(env.LNBITS_URL, env.LNBITS_INVOICE_KEY)
       : new MockPaymentAdapter(wall));
-  const configOverrides = env.LOBBY_MS !== undefined ? { lobbyMs: env.LOBBY_MS } : {};
+  const configOverrides = env.OPENING_MS !== undefined ? { openingMs: env.OPENING_MS } : {};
   const manager = new MatchManager({
     repo,
     mono,
@@ -78,7 +78,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     env.PAYMENT_MODE === 'lnbits' && env.SERVER_PUBLIC_URL && env.LNBITS_WEBHOOK_SECRET
       ? `${env.SERVER_PUBLIC_URL.replace(/\/+$/, '')}/api/webhooks/lnbits/${env.LNBITS_WEBHOOK_SECRET}`
       : undefined;
-  const join = new JoinService({
+  const players = new PlayerService({
     repo,
     manager,
     adapter,
@@ -87,9 +87,10 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     webhookUrl,
     log: app.log,
   });
-  const actions = new ActionService(repo, manager, wall);
+  const zaps = new ZapService(repo, manager, wall);
   const bots = new DemoBots(repo, manager, wall);
-  if (env.DEMO_BOTS_PER_TEAM > 0) bots.setPerTeam(env.DEMO_BOTS_PER_TEAM, 'env');
+  const botsPerTeam = env.DEMO_BOTS_PER_TEAM || (env.DEMO_AUTOPILOT ? 4 : 0);
+  if (botsPerTeam > 0) bots.setPerTeam(botsPerTeam, 'env');
   const adminAuth = new AdminAuth(env.ADMIN_PASSWORD, wall);
 
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
@@ -100,8 +101,8 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     env,
     repo,
     manager,
-    join,
-    actions,
+    players,
+    zaps,
     bots,
     adminAuth,
     adapter,
@@ -191,7 +192,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     if (polling) return;
     polling = true;
     try {
-      await join.pollPending();
+      await players.pollPending();
     } catch (err) {
       app.log.warn({ err }, 'payment poll failed');
     } finally {
@@ -203,8 +204,8 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   if (opts.startLoops !== false) {
     timers.push(setInterval(tick, 100));
     timers.push(setInterval(() => realtime.broadcastClock(), 2000));
+    timers.push(setInterval(() => realtime.broadcastPresence(), 1000));
     timers.push(setInterval(() => void poll(), 2000));
-    if (env.DEMO_AUTOPILOT) timers.push(setInterval(() => autopilot(services), 1000));
   }
 
   return {
@@ -223,23 +224,4 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
       db.close();
     },
   };
-}
-
-/**
- * Unattended demo loop: open the lobby when a match is created, start bots,
- * and roll to the next match 20s after the previous one finished.
- */
-let finishedAt: number | null = null;
-function autopilot(services: Services): void {
-  const { manager, bots, wall } = services;
-  const st = manager.current().state.status;
-  if (bots.enabledPerTeam === 0) bots.setPerTeam(4, 'autopilot');
-  if (st === 'CREATED') manager.command('OPEN_LOBBY', 'autopilot');
-  if (st === 'FINISHED' || st === 'CANCELLED') {
-    finishedAt ??= wall.now();
-    if (wall.now() - finishedAt > 20_000) {
-      finishedAt = null;
-      manager.command('NEXT_MATCH', 'autopilot');
-    }
-  }
 }

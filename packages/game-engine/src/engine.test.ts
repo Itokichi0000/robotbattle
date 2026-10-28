@@ -1,19 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { ActionType, GameConfig, MatchState, RegionId, TeamId } from '@sats-wars/shared';
-import { SPEC_BASELINE_CONFIG as DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
-
-/** Rule tests use the spec's baseline numbers so expectations match the written spec. */
-const makeGameConfig = (o: Partial<GameConfig> = {}) =>
-  gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...o });
+import type { GameConfig, MatchState, TeamId } from '@sats-wars/shared';
+import { DEFAULT_GAME_CONFIG, REGION_IDS, makeGameConfig } from '@sats-wars/shared';
 import { type EngineCommand, createMatchState, reduce, replay } from './engine';
-import { computeDamage, decideResult } from './rules';
+import { averageZapDamage, carryOverHp, nextRoundHp, punchesToKo, punchesToSpecial, zapOutcome } from './rules';
 
-/** Small harness that keeps state + command log, like the server does. */
+const C = DEFAULT_GAME_CONFIG;
+const OPEN = C.openingMs; // round 1 starts here
+const ROUND_END = (startedAt: number) => startedAt + C.roundMaxMs;
+
 class Harness {
   state: MatchState;
   log: EngineCommand[] = [];
-  n = 0;
-  constructor(public config: GameConfig = DEFAULT_GAME_CONFIG) {
+  constructor(public config: GameConfig = C) {
     this.state = createMatchState('m1', config, 42);
   }
   run(cmd: EngineCommand) {
@@ -22,527 +20,282 @@ class Harness {
     this.state = r.state;
     return r;
   }
-  /** Open lobby at t=0 and start LIVE immediately (gameMs 0 == clock 0). */
-  live() {
-    this.run({ type: 'OPEN_LOBBY', t: 0 });
-    this.run({ type: 'START_LIVE', t: 0 });
+  start() {
+    this.run({ type: 'START', t: 0 });
     return this;
-  }
-  join(id: string, teamId: TeamId, ap = 3) {
-    return this.run({
-      type: 'ADD_PARTICIPANT',
-      t: this.state.clockMs,
-      participantId: id,
-      teamId,
-      nickname: id,
-      isBot: false,
-      ap,
-    });
-  }
-  /** Act at game time `gameMs` (LIVE started at clock 0). */
-  act(
-    id: string,
-    actionType: ActionType,
-    regionId: RegionId | null,
-    gameMs?: number,
-    cid?: string,
-  ) {
-    const t = gameMs ?? this.state.clockMs;
-    const r = this.run({
-      type: 'ACTION',
-      t,
-      participantId: id,
-      clientActionId: cid ?? `c${++this.n}`,
-      actionType,
-      regionId,
-    });
-    if (r.outcome.kind !== 'action') throw new Error('expected action outcome');
-    return r.outcome.result;
   }
   tick(t: number) {
     return this.run({ type: 'TICK', t });
   }
-  region(id: RegionId) {
-    return this.state.regions[id];
+  zap(teamId: TeamId, t: number, who = teamId === 'RAIJIN' ? 'r1' : 'f1') {
+    const r = this.run({ type: 'ZAP', t, participantId: who, nickname: who, teamId });
+    if (r.outcome.kind !== 'zap') throw new Error('expected zap');
+    return r.outcome.result;
+  }
+  /** Advance until the next round has started; returns its start time. */
+  nextRound(): number {
+    const idx = this.state.round ? this.state.round.index + 1 : 0;
+    if (this.state.phase === 'ROUND' && this.state.round) this.tick(this.state.round.endsAt);
+    this.tick(this.state.phaseEndsAt!);
+    if (this.state.round?.index !== idx) throw new Error('round did not start');
+    return this.state.round.startedAt;
+  }
+  /** n punches spread 10ms apart starting at t. */
+  zaps(teamId: TeamId, n: number, t: number) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(this.zap(teamId, t + i * 10));
+    return out;
   }
 }
 
-function teamsWithPlayers(cfg?: GameConfig) {
-  const h = new Harness(cfg).live();
-  h.join('r1', 'RAIJIN', 20);
-  h.join('r2', 'RAIJIN', 20);
-  h.join('f1', 'FUJIN', 20);
-  h.join('f2', 'FUJIN', 20);
-  return h;
-}
-
-describe('lifecycle', () => {
-  it('goes CREATED -> LOBBY -> LIVE automatically after lobbyMs', () => {
-    const h = new Harness();
-    h.run({ type: 'OPEN_LOBBY', t: 0 });
-    expect(h.state.status).toBe('LOBBY');
-    expect(h.state.gameMs).toBe(-30_000);
-    h.tick(29_999);
-    expect(h.state.status).toBe('LOBBY');
-    h.tick(30_500);
-    expect(h.state.status).toBe('LIVE');
-    expect(h.state.liveStartClock).toBe(30_000);
-    expect(h.state.gameMs).toBe(500);
-  });
-
-  it('waits for admin start when autoStartAfterLobby is false', () => {
-    const h = new Harness(makeGameConfig({ autoStartAfterLobby: false }));
-    h.run({ type: 'OPEN_LOBBY', t: 0 });
-    h.tick(100_000);
-    expect(h.state.status).toBe('LOBBY');
-    h.run({ type: 'START_LIVE', t: 100_000 });
-    expect(h.state.status).toBe('LIVE');
-    expect(h.state.liveStartClock).toBe(100_000);
-  });
-
-  it('runs all 6 clashes then FINALIZING at 270s and FINISHED at 300s', () => {
-    const h = new Harness().live();
-    h.tick(269_999);
-    expect(h.state.clashes).toHaveLength(5);
-    expect(h.state.status).toBe('LIVE');
-    h.tick(270_000);
-    expect(h.state.clashes).toHaveLength(6);
-    expect(h.state.status).toBe('FINALIZING');
-    expect(h.state.result?.reason).toBe('DRAW'); // symmetric with no actions
-    h.tick(299_999);
-    expect(h.state.status).toBe('FINALIZING');
-    h.tick(300_000);
+describe('season lifecycle', () => {
+  it('opens, runs rounds and ends the season', () => {
+    const h = new Harness().start();
+    expect(h.state).toMatchObject({ status: 'LIVE', phase: 'OPENING', phaseEndsAt: OPEN });
+    h.tick(OPEN - 1);
+    expect(h.state.round).toBeNull();
+    h.tick(OPEN);
+    expect(h.state).toMatchObject({ phase: 'ROUND', roundIndex: 0 });
+    expect(h.state.round).toMatchObject({ hpMax: C.hpInitial, hp: { RAIJIN: 200, FUJIN: 200 } });
+    // Nobody punches: time-up draw, region stays unpainted.
+    h.tick(ROUND_END(OPEN));
+    expect(h.state.phase).toBe('ROUND_END');
+    expect(h.state.rounds[0]).toMatchObject({ endReason: 'DRAW', winnerTeamId: null });
+    expect(Object.values(h.state.regions).every((r) => r.ownerTeamId === null)).toBe(true);
+    h.tick(ROUND_END(OPEN) + C.roundEndMs);
+    expect(h.state).toMatchObject({ phase: 'ROUND', roundIndex: 1 });
+    // Fast-forward the rest of the season.
+    h.tick(10_000_000);
     expect(h.state.status).toBe('FINISHED');
+    expect(h.state.rounds).toHaveLength(8);
+    expect(h.state.result).toMatchObject({ winnerTeamId: null, reason: 'DRAW' });
   });
 
-  it('clash timing does not depend on tick granularity', () => {
-    const a = new Harness().live();
-    a.tick(300_000);
-    const b = new Harness().live();
-    for (let t = 0; t <= 300_000; t += 777) b.tick(t);
-    b.tick(300_000);
-    expect(b.state.clashes).toEqual(a.state.clashes);
+  it('plays every region once in a seeded random order', () => {
+    const a = createMatchState('a', C, 7).roundOrder;
+    expect([...a].sort()).toEqual([...REGION_IDS].sort());
+    expect(createMatchState('b', C, 7).roundOrder).toEqual(a);
+    expect(createMatchState('c', C, 8).roundOrder).not.toEqual(a);
+  });
+
+  it('rejects punches before start, between rounds and while paused (no effect)', () => {
+    const h = new Harness();
+    expect(h.zap('RAIJIN', 0).code).toBe('NOT_LIVE');
+    h.start();
+    expect(h.zap('RAIJIN', 100).code).toBe('ROUND_NOT_ACTIVE');
+    h.tick(OPEN);
+    h.run({ type: 'PAUSE', t: OPEN + 100, reason: 'x' });
+    const p = h.zap('RAIJIN', OPEN + 200);
+    expect(p).toMatchObject({ ok: false, code: 'PAUSED' });
+    expect(h.state.round!.hp.FUJIN).toBe(200);
+  });
+
+  it('PAUSE freezes the round timer and RESUME continues', () => {
+    const h = new Harness().start();
+    h.tick(OPEN + 10_000);
+    h.run({ type: 'PAUSE', t: OPEN + 10_000, reason: 'ADMIN' });
+    h.tick(OPEN + 500_000);
+    expect(h.state.gameMs).toBe(OPEN + 10_000);
+    expect(h.state.phase).toBe('ROUND');
+    h.run({ type: 'RESUME', t: OPEN + 10_000 });
+    h.tick(ROUND_END(OPEN));
+    expect(h.state.phase).toBe('ROUND_END');
+  });
+
+  it('CANCEL ends the season without a winner', () => {
+    const h = new Harness().start();
+    h.run({ type: 'CANCEL', t: 1000, reason: 'ADMIN' });
+    expect(h.state.status).toBe('CANCELLED');
+    expect(h.state.result).toMatchObject({ winnerTeamId: null, reason: 'CANCELLED' });
+    expect(h.zap('RAIJIN', 2000).code).toBe('NOT_LIVE');
+  });
+});
+
+describe('punches', () => {
+  it('each punch deals 10; every 10th of a team is a 60-damage special', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    const r = h.zaps('RAIJIN', 10, OPEN + 100);
+    expect(r.slice(0, 9).every((z) => z.code === 'HIT' && z.damage === 10)).toBe(true);
+    expect(r[9]).toMatchObject({ code: 'SPECIAL', damage: 60, special: true });
+    expect(h.state.round!.hp.FUJIN).toBe(200 - 90 - 60);
+    expect(h.state.round!.gauge.RAIJIN).toBe(0);
+    expect(h.state.teams.RAIJIN).toMatchObject({ zapsTotal: 10, specialsTotal: 1 });
+    // The other team's gauge is independent; FUJIN is now at 25% HP, so its punch is boosted.
+    expect(h.zap('FUJIN', OPEN + 1000)).toMatchObject({ damage: 15, pinch: true, special: false });
+  });
+
+  it('a robot in a pinch (≤30% HP) hits 1.5× harder', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    h.zaps('FUJIN', 9, OPEN + 100); // RAIJIN 200 -> 110
+    h.zap('FUJIN', OPEN + 200); // special: 110 -> 50 (25%)
+    expect(h.state.round!.hp.RAIJIN).toBe(50);
+    expect(h.zap('RAIJIN', OPEN + 300)).toMatchObject({ damage: 15, pinch: true });
+    expect(h.zap('FUJIN', OPEN + 400)).toMatchObject({ damage: 10, pinch: false });
+  });
+
+  it('KO ends the round, paints the region and records the finisher', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    const region = h.state.round!.regionId;
+    const all = h.zaps('RAIJIN', 20, OPEN + 100); // 9×10+60 = 150, then 50 more needed
+    const ko = all.find((z) => z.code === 'KO')!;
+    expect(ko).toBeDefined();
+    expect(all.indexOf(ko)).toBe(14); // 150 + 5×10 = 200 on the 15th punch
+    expect(h.state.phase).toBe('ROUND_END');
+    expect(h.state.regions[region]).toMatchObject({ ownerTeamId: 'RAIJIN', roundIndex: 0 });
+    expect(h.state.rounds[0]).toMatchObject({ endReason: 'KO', winnerTeamId: 'RAIJIN', finisher: { participantId: 'r1' } });
+    expect(h.state.teams.RAIJIN).toMatchObject({ regionsWon: 1, kos: 1 });
+    // Punches after the KO are rejected and cost nothing.
+    expect(all.slice(15).every((z) => z.code === 'ROUND_NOT_ACTIVE')).toBe(true);
+  });
+
+  it('time-up: more HP wins; equal HP is a draw', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    h.zap('FUJIN', OPEN + 100);
+    h.tick(ROUND_END(OPEN));
+    expect(h.state.rounds[0]).toMatchObject({ endReason: 'TIME', winnerTeamId: 'FUJIN' });
+    expect(h.state.teams.FUJIN.kos).toBe(0);
+  });
+
+  it('a punch exactly at the time limit arrives too late', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    expect(h.zap('RAIJIN', ROUND_END(OPEN)).code).toBe('ROUND_NOT_ACTIVE');
+  });
+});
+
+describe('adaptive HP', () => {
+  const prev = (hpMax: number, zR: number, zF: number, durationMs: number) => ({
+    index: 0,
+    regionId: 'kanto' as const,
+    hpMax,
+    winnerTeamId: null,
+    endReason: 'TIME' as const,
+    durationMs,
+    zaps: { RAIJIN: zR, FUJIN: zF },
+    finisher: null,
+  });
+
+  it('starts at hpInitial and shrinks when nobody plays', () => {
+    expect(nextRoundHp(C, undefined)).toBe(200);
+    // Shrinks by at most hpMaxChangeFactor (×3) per round, floored at hpMin.
+    expect(nextRoundHp(C, prev(900, 0, 0, 60_000))).toBe(300);
+    expect(nextRoundHp(C, prev(200, 0, 0, 60_000))).toBe(C.hpMin);
+  });
+
+  it('grows for a busy crowd, at most ×3 per round and never above the cap', () => {
+    // 40 punches/s for 5 s: target would be huge; limited to 3× of 200.
+    expect(nextRoundHp(C, prev(200, 200, 30, 5_000))).toBe(600);
+    expect(nextRoundHp(C, prev(60_000, 20_000, 0, 10_000))).toBe(C.hpCap);
+  });
+
+  it('the next season starts from half the adapted HP, never below hpInitial', () => {
+    expect(carryOverHp(C, undefined)).toBe(C.hpInitial);
+    // 50 punches/s → target 26 250, limited to 3× 6 000 = 18 000 → halved.
+    expect(carryOverHp(C, prev(6_000, 1_500, 900, 30_000))).toBe(9_000);
+    expect(carryOverHp(C, prev(200, 3, 1, 60_000))).toBe(C.hpInitial);
+  });
+
+  it('targets about targetRoundSec of punching for the busier team', () => {
+    // 1 punch/s → 35 s × 15 avg damage = 525 → limited to 2× 300 = 600 → 530 after rounding? No: 525 → 530.
+    const hp = nextRoundHp(C, prev(300, 60, 10, 60_000));
+    expect(hp).toBe(Math.round((1 * C.targetRoundSec * averageZapDamage(C)) / 10) * 10);
+  });
+
+  it('round 2 uses the adapted HP for both robots', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    h.zaps('RAIJIN', 15, OPEN + 100); // KO at ~OPEN+240
+    h.tick(OPEN + 1000 + C.roundEndMs);
+    const r = h.state.round!;
+    expect(r.index).toBe(1);
+    expect(r.hp.RAIJIN).toBe(r.hp.FUJIN);
+    expect(r.hpMax).toBe(C.hpInitial * C.hpMaxChangeFactor); // very fast KO → grows by the max factor
+  });
+
+  it('zapOutcome is symmetric and pure', () => {
+    expect(zapOutcome(C, 200, 200, 1)).toEqual({ damage: 10, special: false, pinch: false });
+    expect(zapOutcome(C, 60, 200, 10)).toEqual({ damage: 90, special: true, pinch: true });
+  });
+});
+
+describe('season result', () => {
+  it('the team with more regions conquers Japan', () => {
+    const h = new Harness(makeGameConfig({ roundsPerSeason: 3 })).start();
+    const t1 = h.nextRound();
+    h.zaps('RAIJIN', 15, t1 + 100); // KO
+    const t2 = h.nextRound();
+    h.zaps('FUJIN', 40, t2 + 100); // HP doubled to 400; still enough for a KO
+    expect(h.state.rounds[1]).toMatchObject({ winnerTeamId: 'FUJIN', endReason: 'KO' });
+    const t3 = h.nextRound();
+    h.zaps('RAIJIN', 60, t3 + 100);
+    h.tick(10_000_000);
+    expect(h.state.status).toBe('FINISHED');
+    expect(h.state.result).toMatchObject({ winnerTeamId: 'RAIJIN', reason: 'REGIONS', regionCounts: { RAIJIN: 2, FUJIN: 1 } });
+  });
+});
+
+describe('determinism and fairness', () => {
+  it('replaying the command log reproduces the state', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
+    h.zaps('RAIJIN', 7, OPEN + 100);
+    h.zaps('FUJIN', 12, OPEN + 2000);
+    h.tick(200_000);
+    h.zap('FUJIN', 200_100);
+    h.tick(1_000_000);
+    const cmds: EngineCommand[] = h.log.filter((c) => c.type !== 'TICK');
+    cmds.push({ type: 'TICK', t: 1_000_000 });
+    expect(replay('m1', h.config, 42, cmds).state).toEqual(h.state);
+  });
+
+  it('tick granularity does not change outcomes', () => {
+    const a = new Harness().start();
+    a.tick(1_000_000);
+    const b = new Harness().start();
+    for (let t = 0; t <= 1_000_000; t += 333) b.tick(t);
+    b.tick(1_000_000);
+    expect(b.state.rounds).toEqual(a.state.rounds);
     expect(b.state.seq).toBe(a.state.seq);
   });
 
-  it('PAUSE freezes the clock and RESUME continues from the same point', () => {
-    const h = new Harness().live();
-    h.tick(40_000);
-    h.run({ type: 'PAUSE', t: 40_000, reason: 'ADMIN' });
-    expect(h.state.status).toBe('PAUSED');
-    // Even if a later t arrives while paused, the game does not advance.
-    h.tick(90_000);
-    expect(h.state.gameMs).toBe(40_000);
-    expect(h.state.clashes).toHaveLength(0);
-    h.run({ type: 'RESUME', t: 40_000 });
-    expect(h.state.status).toBe('LIVE');
-    h.tick(45_000);
-    expect(h.state.clashes).toHaveLength(1);
-  });
-
-  it('CANCEL ends the match with no winner', () => {
-    const h = new Harness().live();
-    h.run({ type: 'CANCEL', t: 1000, reason: 'ADMIN' });
-    expect(h.state.status).toBe('CANCELLED');
-    expect(h.state.result?.reason).toBe('CANCELLED');
-    expect(h.state.result?.winnerTeamId).toBeNull();
-  });
-
-  it('rejects invalid lifecycle transitions without events', () => {
-    const h = new Harness();
-    const r = h.run({ type: 'RESUME', t: 0 });
-    expect(r.outcome.kind).toBe('rejected');
-    expect(r.events).toHaveLength(0);
-  });
-});
-
-describe('ATTACK / DEFEND / CHARGE rules', () => {
-  it('captures a neutral region in one attack', () => {
-    const h = teamsWithPlayers();
-    const r = h.act('r1', 'ATTACK', 'kanto', 1000);
-    expect(r).toMatchObject({ ok: true, code: 'CAPTURED', apBefore: 20, apAfter: 19 });
-    expect(h.region('kanto').ownerTeamId).toBe('RAIJIN');
-  });
-
-  it('breaks an enemy shield without progressing capture', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('r1', 'DEFEND', 'kanto', 2000);
-    expect(h.region('kanto').shieldCharges).toBe(1);
-    const r = h.act('f1', 'ATTACK', 'kanto', 3000);
-    expect(r.code).toBe('SHIELD_BROKEN');
-    expect(h.region('kanto')).toMatchObject({
-      ownerTeamId: 'RAIJIN',
-      shieldCharges: 0,
-      contestedByTeamId: null,
-    });
-  });
-
-  it('starts a 25s contest on an unshielded enemy region; second attack captures', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    expect(h.act('f1', 'ATTACK', 'kanto', 2000).code).toBe('CONTEST_STARTED');
-    expect(h.region('kanto')).toMatchObject({ contestedByTeamId: 'FUJIN', contestedUntil: 27_000 });
-    expect(h.act('f2', 'ATTACK', 'kanto', 26_999).code).toBe('CAPTURED');
-    expect(h.region('kanto')).toMatchObject({ ownerTeamId: 'FUJIN', contestedByTeamId: null });
-  });
-
-  it('contest expires after 25s and the owner keeps the region', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('f1', 'ATTACK', 'kanto', 2000);
-    const tick = h.tick(27_000);
-    expect(tick.events.map((e) => e.type)).toContain('CONTEST_EXPIRED');
-    expect(h.region('kanto')).toMatchObject({ ownerTeamId: 'RAIJIN', contestedByTeamId: null });
-    // After expiry a new attack only restarts the contest.
-    expect(h.act('f2', 'ATTACK', 'kanto', 27_001).code).toBe('CONTEST_STARTED');
-  });
-
-  it('an action exactly at contestedUntil sees the expiry first', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('f1', 'ATTACK', 'kanto', 2000);
-    expect(h.act('f2', 'ATTACK', 'kanto', 27_000).code).toBe('CONTEST_STARTED');
-  });
-
-  it('DEFEND on a contested own region breaks the contest without adding a shield', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('f1', 'ATTACK', 'kanto', 2000);
-    expect(h.act('r2', 'DEFEND', 'kanto', 3000).code).toBe('CONTEST_BROKEN');
-    expect(h.region('kanto')).toMatchObject({ contestedByTeamId: null, shieldCharges: 0 });
-  });
-
-  it('ATTACK on own contested region breaks the contest; on own calm region is invalid', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    const invalid = h.act('r2', 'ATTACK', 'kanto', 1500);
-    expect(invalid).toMatchObject({ ok: false, code: 'OWN_REGION_NOT_CONTESTED', apAfter: 20 });
-    h.act('f1', 'ATTACK', 'kanto', 2000);
-    expect(h.act('r2', 'ATTACK', 'kanto', 3000).code).toBe('CONTEST_BROKEN');
-  });
-
-  it('DEFEND is invalid on neutral / enemy regions and when a shield is active', () => {
-    const h = teamsWithPlayers();
-    expect(h.act('r1', 'DEFEND', 'kanto', 1000).code).toBe('NOT_OWN_REGION');
-    h.act('f1', 'ATTACK', 'kanto', 1000);
-    expect(h.act('r1', 'DEFEND', 'kanto', 1100).code).toBe('NOT_OWN_REGION');
-    h.act('f1', 'DEFEND', 'kanto', 1200);
-    const again = h.act('f2', 'DEFEND', 'kanto', 1300);
-    expect(again).toMatchObject({ ok: false, code: 'SHIELD_ALREADY_ACTIVE', apAfter: 20 });
-  });
-
-  it('shield expires after 30s', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('r1', 'DEFEND', 'kanto', 2000);
-    h.tick(31_999);
-    expect(h.region('kanto').shieldCharges).toBe(1);
-    h.tick(32_000);
-    expect(h.region('kanto').shieldCharges).toBe(0);
-  });
-
-  it('CHARGE adds 10 energy up to 60 and rejects when full without spending AP', () => {
-    const h = teamsWithPlayers();
-    for (let i = 0; i < 6; i++) expect(h.act('r1', 'CHARGE', null, 1000 + i).code).toBe('CHARGED');
-    expect(h.state.teams.RAIJIN.energy).toBe(60);
-    const r = h.act('r1', 'CHARGE', null, 2000);
-    expect(r).toMatchObject({ ok: false, code: 'ENERGY_FULL', apBefore: 14, apAfter: 14 });
-  });
-
-  it('rejects ATTACK/DEFEND without region and unknown region', () => {
-    const h = teamsWithPlayers();
-    expect(h.act('r1', 'ATTACK', null, 1000).code).toBe('REGION_REQUIRED');
-    expect(h.act('r1', 'ATTACK', 'atlantis' as RegionId, 1000).code).toBe('INVALID_REGION');
-    expect(h.state.participants.r1!.apRemaining).toBe(20);
-  });
-});
-
-describe('AP accounting and validation', () => {
-  it('spends exactly 1 AP per successful action and rejects the 4th action', () => {
-    const h = new Harness().live();
-    h.join('p', 'RAIJIN', 3);
-    expect(h.act('p', 'ATTACK', 'kanto', 1000).ok).toBe(true);
-    expect(h.act('p', 'CHARGE', null, 1001).ok).toBe(true);
-    expect(h.act('p', 'DEFEND', 'kanto', 1002).ok).toBe(true);
-    const fourth = h.act('p', 'CHARGE', null, 1003);
-    expect(fourth).toMatchObject({ ok: false, code: 'NO_AP', apAfter: 0 });
-    expect(h.state.teams.RAIJIN.apRemaining).toBe(0);
-    expect(h.state.teams.RAIJIN.actionCount).toBe(3);
-  });
-
-  it('rejects actions before LIVE, while PAUSED, and after close', () => {
-    const h = new Harness();
-    h.run({ type: 'OPEN_LOBBY', t: 0 });
-    h.join('p', 'RAIJIN');
-    expect(h.act('p', 'CHARGE', null, 1000).code).toBe('MATCH_NOT_LIVE');
-    h.run({ type: 'START_LIVE', t: 1000 });
-    h.run({ type: 'PAUSE', t: 2000, reason: 'x' });
-    expect(h.act('p', 'CHARGE', null, 2000).code).toBe('MATCH_PAUSED');
-    h.run({ type: 'RESUME', t: 2000 });
-    expect(h.act('p', 'CHARGE', null, 271_000 + 1000).code).toBe('ACTIONS_CLOSED');
-    expect(h.state.participants.p!.apRemaining).toBe(3);
-  });
-
-  it('rejects unknown participants', () => {
-    const h = new Harness().live();
-    expect(h.act('ghost', 'CHARGE', null, 10).code).toBe('UNKNOWN_PARTICIPANT');
-  });
-
-  it('is idempotent on clientActionId (no double spend)', () => {
-    const h = teamsWithPlayers();
-    const first = h.act('r1', 'ATTACK', 'kanto', 1000, 'same-id');
-    const again = h.act('r1', 'ATTACK', 'kanto', 1200, 'same-id');
-    expect(again).toMatchObject({ ...first, duplicate: true });
-    expect(h.state.participants.r1!.apRemaining).toBe(19);
-    // Same clientActionId from a different participant is a different action.
-    expect(h.act('f1', 'ATTACK', 'kanto', 1300, 'same-id').code).toBe('CONTEST_STARTED');
-  });
-
-  it('serializes concurrent attacks on the same region deterministically', () => {
-    const h = teamsWithPlayers();
-    // Both teams hit neutral kanto in the same ms: whoever is processed first captures,
-    // the second starts a contest. Order is the server receive order.
-    expect(h.act('f1', 'ATTACK', 'kanto', 5000).code).toBe('CAPTURED');
-    expect(h.act('r1', 'ATTACK', 'kanto', 5000).code).toBe('CONTEST_STARTED');
-    expect(h.act('r2', 'ATTACK', 'kanto', 5000).code).toBe('CAPTURED');
-    expect(h.region('kanto').ownerTeamId).toBe('RAIJIN');
-  });
-
-  it('participants are added idempotently and can join while paused', () => {
-    const h = new Harness().live();
-    h.run({ type: 'PAUSE', t: 0, reason: 'x' });
-    h.join('p', 'FUJIN');
-    h.join('p', 'FUJIN');
-    expect(h.state.teams.FUJIN.participantCount).toBe(1);
-    expect(h.state.teams.FUJIN.apRemaining).toBe(3);
-  });
-
-  it('cannot add participants after the match ends', () => {
-    const h = new Harness().live();
-    h.tick(300_000);
-    const r = h.join('late', 'RAIJIN');
-    expect(r.outcome.kind).toBe('rejected');
-  });
-});
-
-describe('clash resolution', () => {
-  it('computes symmetric damage from the same snapshot', () => {
-    const cfg = DEFAULT_GAME_CONFIG;
-    const a = {
-      teamId: 'RAIJIN' as const,
-      hpBefore: 100,
-      energyBefore: 20,
-      activeAttackRegions: 2,
-      activeDefenseRegions: 1,
-      activeEnergyRegions: 0,
-    };
-    const b = { ...a, teamId: 'FUJIN' as const };
-    expect(computeDamage(a, b, cfg)).toEqual(computeDamage(b, a, cfg));
-    // 10 + 3*2 + 4 (energy 20 -> +4) - 2*1 = 18
-    expect(computeDamage(a, b, cfg).damage).toBe(18);
-  });
-
-  it('clamps damage to [2, 28]', () => {
-    const cfg = DEFAULT_GAME_CONFIG;
-    const base = {
-      teamId: 'RAIJIN' as const,
-      hpBefore: 100,
-      energyBefore: 0,
-      activeAttackRegions: 0,
-      activeDefenseRegions: 0,
-      activeEnergyRegions: 0,
-    };
-    const tank = { ...base, teamId: 'FUJIN' as const, activeDefenseRegions: 8 };
-    expect(computeDamage(base, tank, cfg).damage).toBe(2);
-    const glass = { ...base, energyBefore: 60, activeAttackRegions: 8 };
-    expect(computeDamage(glass, base, cfg).damage).toBe(28);
-  });
-
-  it('energy bonus is +2 per 10 below 30, capped at +4, not consumed', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'CHARGE', null, 1000);
-    h.act('r1', 'CHARGE', null, 1001);
-    h.tick(45_000);
-    const c = h.state.clashes[0]!;
-    expect(c.outcome.RAIJIN).toMatchObject({ damageDealt: 14, special: false, energyBonus: 4 });
-    expect(c.outcome.FUJIN.damageDealt).toBe(10);
-    expect(h.state.teams.RAIJIN.energy).toBe(20);
-    expect(h.state.teams.FUJIN.hp).toBe(86);
-    expect(h.state.teams.RAIJIN.hp).toBe(90);
-  });
-
-  it('triggers the special at >=30 energy: +10 damage, -30 energy', () => {
-    const h = teamsWithPlayers();
-    for (let i = 0; i < 4; i++) h.act('f1', 'CHARGE', null, 1000 + i);
-    h.tick(45_000);
-    const c = h.state.clashes[0]!;
-    expect(c.outcome.FUJIN).toMatchObject({ special: true, damageDealt: 20, energyAfter: 10 });
-    expect(h.state.teams.RAIJIN.hp).toBe(80);
-  });
-
-  it('applies region bonuses and suspends them while contested', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'tohoku', 1000); // ATTACK region
-    h.act('r1', 'ATTACK', 'kinki', 1000); // ATTACK region
-    h.act('f1', 'ATTACK', 'hokkaido', 1000); // DEFENSE region
-    h.act('r2', 'ATTACK', 'kanto', 1000); // ENERGY region
-    // Contest kinki just before the clash: its bonus must not count.
-    h.act('f2', 'ATTACK', 'kinki', 44_000);
-    h.tick(45_000);
-    const c = h.state.clashes[0]!;
-    expect(c.snapshot.RAIJIN).toMatchObject({
-      activeAttackRegions: 1,
-      activeEnergyRegions: 1,
-    });
-    expect(c.snapshot.FUJIN.activeDefenseRegions).toBe(1);
-    // RAIJIN: 10 + 3*1 - 2*1 = 11. FUJIN: 10.
-    expect(c.outcome.RAIJIN.damageDealt).toBe(11);
-    expect(c.outcome.FUJIN.damageDealt).toBe(10);
-    // Energy region grants +5 after the clash.
-    expect(h.state.teams.RAIJIN.energy).toBe(5);
-    // After the contest expires the bonus resumes.
-    h.tick(70_000);
-    expect(h.region('kinki').contestedByTeamId).toBeNull();
-    h.tick(90_000);
-    expect(h.state.clashes[1]!.snapshot.RAIJIN.activeAttackRegions).toBe(2);
-  });
-
-  it('applies damage simultaneously; KO ends the match early with FINALIZING', () => {
-    const cfg = makeGameConfig({ hpMax: 20 });
-    const h = teamsWithPlayers(cfg);
-    h.act('r1', 'ATTACK', 'tohoku', 1000);
-    h.tick(45_000); // RAIJIN deals 13, FUJIN deals 10 -> 7 / 10
-    expect(h.state.status).toBe('LIVE');
-    h.tick(90_000); // RAIJIN deals 13 -> FUJIN 0; FUJIN deals 10 -> RAIJIN 0
-    expect(h.state.teams.FUJIN.hp).toBe(0);
-    expect(h.state.teams.RAIJIN.hp).toBe(0);
-    expect(h.state.status).toBe('FINALIZING');
-    // Double KO -> decided by owned regions (RAIJIN owns 1).
-    expect(h.state.result).toMatchObject({ winnerTeamId: 'RAIJIN', reason: 'DOUBLE_KO' });
-    h.tick(119_999);
-    expect(h.state.status).toBe('FINALIZING');
-    h.tick(120_000);
-    expect(h.state.status).toBe('FINISHED');
-    // No further clashes after KO.
-    expect(h.state.clashes).toHaveLength(2);
-  });
-
-  it('single KO wins regardless of regions', () => {
-    const cfg = makeGameConfig({ hpMax: 12 });
-    const h = teamsWithPlayers(cfg);
-    h.act('r1', 'ATTACK', 'tohoku', 1000); // RAIJIN deals 13, FUJIN 10
-    h.act('f1', 'ATTACK', 'kanto', 1000); // ENERGY: no damage effect
-    h.act('f1', 'ATTACK', 'chugoku', 1000); // ENERGY: no damage effect
-    h.tick(45_000);
-    expect(h.state.teams.RAIJIN.hp).toBe(2);
-    expect(h.state.result).toMatchObject({ winnerTeamId: 'RAIJIN', reason: 'KO' });
-  });
-
-  it('time up: HP decides, then regions, else draw', () => {
-    const h = new Harness().live();
-    h.tick(270_000);
-    expect(h.state.result?.reason).toBe('DRAW');
-
-    const h2 = teamsWithPlayers();
-    h2.act('f1', 'ATTACK', 'hokkaido', 1000); // DEFENSE region: reduces damage FUJIN takes
-    h2.tick(270_000);
-    expect(h2.state.result).toMatchObject({ winnerTeamId: 'FUJIN', reason: 'TIME_HP' });
-
-    // Same HP, more regions: give each side a region of a kind that does not change damage
-    const cfg = makeGameConfig({
-      attackRegionBonus: 0,
-      defenseRegionReduction: 0,
-      energyRegionGain: 0,
-    });
-    const h3 = teamsWithPlayers(cfg);
-    h3.act('r1', 'ATTACK', 'kanto', 1000);
-    h3.act('r1', 'ATTACK', 'chubu', 1000);
-    h3.act('f1', 'ATTACK', 'kinki', 1000);
-    h3.tick(270_000);
-    expect(h3.state.result).toMatchObject({ winnerTeamId: 'RAIJIN', reason: 'TIME_REGIONS' });
-  });
-
-  it('actions at exactly a clash time apply after the clash', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'CHARGE', null, 45_000);
-    expect(h.state.clashes[0]!.snapshot.RAIJIN.energyBefore).toBe(0);
-    expect(h.state.teams.RAIJIN.energy).toBe(10);
-  });
-
-  it('MVP is the top contributor per team', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('r2', 'CHARGE', null, 1000);
-    h.tick(270_000);
-    expect(h.state.result?.mvp.RAIJIN?.participantId).toBe('r1');
-    expect(h.state.result?.mvp.FUJIN).toBeNull();
-  });
-});
-
-describe('determinism and replay', () => {
-  it('replaying the command log reproduces state and events', () => {
-    const h = teamsWithPlayers();
-    h.act('r1', 'ATTACK', 'kanto', 1000);
-    h.act('f1', 'ATTACK', 'kanto', 2000);
-    h.act('f2', 'CHARGE', null, 3000);
-    h.tick(50_000);
-    h.act('r2', 'DEFEND', 'kanto', 51_000);
-    h.tick(300_000);
-    const commandsWithoutTicks: EngineCommand[] = h.log.filter((c) => c.type !== 'TICK');
-    commandsWithoutTicks.push({ type: 'TICK', t: 300_000 });
-    const { state } = replay('m1', h.config, 42, commandsWithoutTicks);
-    expect(state).toEqual(h.state);
-  });
-
-  it('never mutates the input state', () => {
-    const h = teamsWithPlayers();
+  it('never mutates the input state and keeps seq contiguous', () => {
+    const h = new Harness().start();
+    h.tick(OPEN);
     const before = structuredClone(h.state);
-    reduce(h.state, {
-      type: 'ACTION',
-      t: 1000,
-      participantId: 'r1',
-      clientActionId: 'x1',
-      actionType: 'ATTACK',
-      regionId: 'kanto',
-    });
+    reduce(h.state, { type: 'ZAP', t: OPEN + 5, participantId: 'x', nickname: 'x', teamId: 'RAIJIN' });
     expect(h.state).toEqual(before);
+    const seqs = [...h.zaps('FUJIN', 30, OPEN + 10).map((z) => z.eventSeq).filter(Boolean)] as number[];
+    for (let i = 1; i < seqs.length; i++) expect(seqs[i]).toBeGreaterThan(seqs[i - 1]!);
   });
 
-  it('event seq numbers are contiguous', () => {
-    const h = teamsWithPlayers();
-    const seqs: number[] = [];
-    for (let t = 0; t <= 300_000; t += 5000) {
-      const r = h.tick(t);
-      seqs.push(...r.events.map((e) => e.seq));
-    }
-    for (let i = 1; i < seqs.length; i++) expect(seqs[i]).toBe(seqs[i - 1]! + 1);
-  });
-
-  it('decideResult is deterministic for a given state', () => {
-    const h = teamsWithPlayers();
-    h.tick(100_000);
-    expect(decideResult(h.state, false)).toEqual(decideResult(h.state, false));
-  });
-});
-
-describe('fairness: names/colors do not matter', () => {
-  it('mirrored actions produce mirrored results', () => {
+  it('mirrored punches produce mirrored results (names/colors do not matter)', () => {
     const play = (a: TeamId, b: TeamId) => {
-      const h = new Harness().live();
-      h.join('x', a, 10);
-      h.join('y', b, 10);
-      h.act('x', 'ATTACK', 'tohoku', 1000);
-      h.act('x', 'CHARGE', null, 1001);
-      h.act('y', 'ATTACK', 'hokkaido', 1002);
-      h.tick(300_000);
+      const h = new Harness().start();
+      h.tick(OPEN);
+      h.zaps(a, 14, OPEN + 100);
+      h.zaps(b, 9, OPEN + 1000);
+      h.tick(1_000_000);
       return h.state;
     };
     const s1 = play('RAIJIN', 'FUJIN');
     const s2 = play('FUJIN', 'RAIJIN');
-    expect(s1.teams.RAIJIN.hp).toBe(s2.teams.FUJIN.hp);
-    expect(s1.teams.FUJIN.hp).toBe(s2.teams.RAIJIN.hp);
-    expect(s1.result!.winnerTeamId).toBe('RAIJIN');
-    expect(s2.result!.winnerTeamId).toBe('FUJIN');
+    expect(s1.rounds[0]!.winnerTeamId).toBe('RAIJIN');
+    expect(s2.rounds[0]!.winnerTeamId).toBe('FUJIN');
+    expect(s1.teams.RAIJIN.zapsTotal).toBe(s2.teams.FUJIN.zapsTotal);
+  });
+
+  it('punchesToKo counts specials and pinch exactly like the engine', () => {
+    const c = DEFAULT_GAME_CONFIG;
+    const round = { hpMax: 200, hp: { RAIJIN: 200, FUJIN: 200 }, gauge: { RAIJIN: 0, FUJIN: 0 } };
+    // 9 × 10 + 60 + 5 × 10 = 200
+    expect(punchesToKo(c, round, 'RAIJIN')).toBe(15);
+    // A robot in a pinch (≤30%) hits 1.5×: 15 per punch, special 90.
+    expect(punchesToKo(c, { ...round, hp: { RAIJIN: 50, FUJIN: 100 } }, 'RAIJIN')).toBe(7);
+    expect(punchesToKo(c, { ...round, gauge: { RAIJIN: 9, FUJIN: 0 }, hp: { RAIJIN: 200, FUJIN: 60 } }, 'RAIJIN')).toBe(1);
+    expect(punchesToSpecial(c, 7)).toBe(3);
   });
 });

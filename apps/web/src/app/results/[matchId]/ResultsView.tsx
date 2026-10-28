@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import type { PublicMatchSnapshot } from '@sats-wars/shared';
-import { RESULT_REASON_LABELS, STATUS_LABELS, TEAM_META } from '@sats-wars/shared';
+import { REGION_INFO, ROUND_END_LABELS, STATUS_LABELS, TEAM_META } from '@sats-wars/shared';
 import { JapanMap2D } from '@/components/JapanMap2D';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
@@ -28,52 +28,45 @@ export function ResultsView({ matchId }: { matchId: string }) {
         </p>
         {r ? (
           <>
-            <p
-              className="sw-display mt-2 text-4xl font-black"
-              style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}
-            >
+            <p className="sw-display mt-2 text-4xl font-black" style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}>
               {r.winnerTeamId
-                ? L(
-                    `${TEAM_META[r.winnerTeamId].nameJa}の勝利！`,
-                    `${TEAM_META[r.winnerTeamId].nameEn} WINS!`,
-                  )
-                : RESULT_REASON_LABELS[r.reason][locale]}
+                ? L(`${TEAM_META[r.winnerTeamId].nameJa} 全国制覇！`, `${TEAM_META[r.winnerTeamId].nameEn} conquers Japan!`)
+                : L('引き分け', 'Draw')}
             </p>
-            <p className="mt-1">{RESULT_REASON_LABELS[r.reason][locale]}</p>
-            <p className="mt-2">
-              HP {r.finalHp.RAIJIN} - {r.finalHp.FUJIN} · {L('地域', 'Regions')}{' '}
-              {r.regionCounts.RAIJIN} - {r.regionCounts.FUJIN}
+            <p className="mt-2 text-lg font-bold">
+              {L('雷神', 'RAIJIN')} {r.regionCounts.RAIJIN} – {r.regionCounts.FUJIN} {L('風神', 'FUJIN')}
             </p>
           </>
         ) : (
-          <p className="mt-2">{L('試合はまだ終わっていません', 'Match still in progress')}</p>
+          <p className="mt-2">{L('シーズンはまだ終わっていません', 'Season still in progress')}</p>
         )}
       </section>
       <section className="sw-panel p-4">
-        <h2 className="font-black">{L('激突の記録', 'Clashes')}</h2>
+        <h2 className="font-black">{L('各ラウンドの記録', 'Rounds')}</h2>
         <table className="mt-2 w-full text-sm">
           <thead>
             <tr className="text-off/60">
               <th className="text-left">#</th>
-              <th>{L('雷神→', 'RAIJIN→')}</th>
-              <th>{L('風神→', 'FUJIN→')}</th>
-              <th>HP</th>
+              <th className="text-left">{L('地方', 'Region')}</th>
+              <th>{L('勝者', 'Winner')}</th>
+              <th>{L('決まり手', 'How')}</th>
+              <th>{L('パンチ数', 'Punches')}</th>
             </tr>
           </thead>
           <tbody>
-            {snap.clashes.map((c) => (
-              <tr key={c.clashIndex} className="border-t border-white/5 text-center">
-                <td className="text-left">{c.clashIndex + 1}</td>
-                <td>
-                  {c.outcome.RAIJIN.damageDealt}
-                  {c.outcome.RAIJIN.special ? ' ⚡' : ''}
+            {snap.rounds.map((round) => (
+              <tr key={round.index} className="border-t border-white/5 text-center">
+                <td className="text-left">{round.index + 1}</td>
+                <td className="text-left">{L(REGION_INFO[round.regionId].labelJa, REGION_INFO[round.regionId].labelEn)}</td>
+                <td style={{ color: round.winnerTeamId ? TEAM_META[round.winnerTeamId].color : undefined }}>
+                  {round.winnerTeamId ? `${TEAM_META[round.winnerTeamId].symbol} ${L(TEAM_META[round.winnerTeamId].nameJa, TEAM_META[round.winnerTeamId].nameEn)}` : '—'}
                 </td>
                 <td>
-                  {c.outcome.FUJIN.damageDealt}
-                  {c.outcome.FUJIN.special ? ' 🌀' : ''}
+                  {ROUND_END_LABELS[round.endReason][locale]}
+                  {round.finisher ? ` (${round.finisher.nickname})` : ''}
                 </td>
-                <td>
-                  {c.outcome.RAIJIN.hpAfter} - {c.outcome.FUJIN.hpAfter}
+                <td className="tabular-nums">
+                  {round.zaps.RAIJIN} – {round.zaps.FUJIN}
                 </td>
               </tr>
             ))}
@@ -83,25 +76,8 @@ export function ResultsView({ matchId }: { matchId: string }) {
       <section className="sw-panel p-4">
         <JapanMap2D regions={snap.regions} locale={locale} className="mx-auto h-80 w-full" />
       </section>
-      <section className="sw-panel p-4">
-        <h2 className="font-black">{L('チーム貢献トップ', 'Top contributors')}</h2>
-        <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
-          {(['RAIJIN', 'FUJIN'] as const).map((t) => (
-            <ol key={t} className="list-decimal pl-5" style={{ color: TEAM_META[t].color }}>
-              {snap.leaders[t].map((l) => (
-                <li key={l.participantId}>
-                  <span className="text-off">
-                    {l.nickname}
-                    {l.isBot ? ' (BOT)' : ''} — {l.score}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          ))}
-        </div>
-      </section>
       <a href="/play" className="sw-btn flex items-center justify-center bg-amber text-navy">
-        {L('次の試合に参加', 'Join the next match')}
+        {L('次のシーズンで遊ぶ', 'Play the next season')}
       </a>
     </main>
   );

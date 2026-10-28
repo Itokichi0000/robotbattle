@@ -41,6 +41,7 @@ export const CAMERA_PRESETS: Record<
 > = {
   intro: { position: [0, 13, 27], target: [0, 4, -2] },
   overview: { position: [0, 6.0, 18.5], target: [0, 4.0, -2.4] },
+  mapFocus: { position: [0, 9.5, 7.5], target: [0, 6.2, -8.5] },
   clash: { position: [0, 3.3, 9.2], target: [0, 2.5, 0] },
   specialRAIJIN: { position: [-0.8, 3.4, 11], target: [-3.0, 3.2, 0.4] },
   specialFUJIN: { position: [0.8, 3.8, 12], target: [3.0, 3.8, 0.4] },

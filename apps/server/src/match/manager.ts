@@ -5,23 +5,28 @@ import type {
   MatchState,
   PaymentMode,
   PublicMatchSnapshot,
+  TeamId,
 } from '@sats-wars/shared';
 import { DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
+import { carryOverHp } from '@sats-wars/game-engine';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 import { AppError } from '../errors';
 import { newId } from '../auth/tokens';
 import { MatchRuntime } from './runtime';
 
-export const ADMIN_LIFECYCLE_COMMANDS = [
-  'OPEN_LOBBY',
-  'START',
-  'PAUSE',
-  'RESUME',
-  'CANCEL',
-  'NEXT_MATCH',
-] as const;
+export const ADMIN_LIFECYCLE_COMMANDS = ['START', 'PAUSE', 'RESUME', 'CANCEL', 'NEXT_MATCH'] as const;
 export type AdminLifecycleCommand = (typeof ADMIN_LIFECYCLE_COMMANDS)[number];
+
+/** Players count as supporters on the screens while active within this window. */
+export const SUPPORTER_WINDOW_MS = 10 * 60_000;
+
+/**
+ * After a crash/restart the season comes back PAUSED. With auto-loop on, the
+ * venue screen is probably unattended, so resume by itself after this delay
+ * (an operator can still pause it from /admin).
+ */
+export const RESTART_AUTO_RESUME_MS = 10_000;
 
 export interface ManagerOptions {
   repo: Repo;
@@ -36,25 +41,36 @@ export interface ManagerOptions {
 type EventsListener = (events: GameEvent[], state: MatchState) => void;
 type MatchListener = (runtime: MatchRuntime) => void;
 
-/** Holds the current match and switches to the next one. Single node, single match at a time. */
+/**
+ * Holds the current season and keeps the venue running unattended: a new
+ * season starts automatically a few seconds after the previous one ends
+ * (unless an operator turns the loop off or cancels).
+ */
 export class MatchManager {
   private runtime!: MatchRuntime;
   private unbind: (() => void) | null = null;
   private eventListeners = new Set<EventsListener>();
   private matchListeners = new Set<MatchListener>();
+  private finishedAt: number | null = null;
+  private restartPausedAt: number | null = null;
+  private supportersCache: { at: number; value: Record<TeamId, number> } | null = null;
   readonly repo: Repo;
 
   constructor(private opts: ManagerOptions) {
     this.repo = opts.repo;
   }
 
-  /** Recover the latest unfinished match after a restart, or create a fresh one. */
+  /** Recover the latest unfinished season after a restart, or create a fresh one. */
   init(): this {
     const unfinished = this.repo.latestUnfinishedMatch();
     const rt = unfinished
       ? MatchRuntime.recover(this.repo, unfinished.id, this.opts.mono, this.opts.wall)
       : this.createRuntime();
     this.bind(rt);
+    if (rt.state.status === 'CREATED' && this.autoLoop) rt.dispatch({ type: 'START' });
+    if (rt.state.status === 'PAUSED' && rt.state.pauseReason === 'SERVER_RESTART') {
+      this.restartPausedAt = this.opts.wall.now();
+    }
     return this;
   }
 
@@ -73,13 +89,18 @@ export class MatchManager {
   setPaymentsEnabled(enabled: boolean, actor: string): void {
     const before = this.paymentsEnabled;
     this.repo.setSetting('paymentsEnabled', enabled);
-    this.repo.audit(
-      actor,
-      'SET_PAYMENTS_ENABLED',
-      null,
-      { before, after: enabled },
-      this.opts.wall.now(),
-    );
+    this.repo.audit(actor, 'SET_PAYMENTS_ENABLED', null, { before, after: enabled }, this.opts.wall.now());
+  }
+
+  /** Continuous play: start seasons automatically and roll to the next one. */
+  get autoLoop(): boolean {
+    return this.repo.getSetting<boolean>('autoLoop') ?? true;
+  }
+
+  setAutoLoop(enabled: boolean, actor: string): void {
+    const before = this.autoLoop;
+    this.repo.setSetting('autoLoop', enabled);
+    this.repo.audit(actor, 'SET_AUTO_LOOP', null, { before, after: enabled }, this.opts.wall.now());
   }
 
   get nextConfig(): GameConfig {
@@ -87,6 +108,11 @@ export class MatchManager {
     const parsed = saved ? gameConfigSchema.safeParse(saved) : null;
     if (parsed?.success) return parsed.data;
     return gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...this.opts.configOverrides });
+  }
+
+  /** Config that new players see right now (price, top-up options). */
+  get liveConfig(): GameConfig {
+    return this.runtime.state.config;
   }
 
   setNextConfig(input: unknown, actor: string): GameConfig {
@@ -99,56 +125,70 @@ export class MatchManager {
     }
     const before = this.nextConfig;
     this.repo.setSetting('nextConfig', parsed.data);
-    this.repo.audit(
-      actor,
-      'SET_NEXT_CONFIG',
-      null,
-      { before, after: parsed.data },
-      this.opts.wall.now(),
-    );
+    this.repo.audit(actor, 'SET_NEXT_CONFIG', null, { before, after: parsed.data }, this.opts.wall.now());
     return parsed.data;
   }
 
   onEvents(listener: EventsListener): () => void {
     this.eventListeners.add(listener);
-    return () => this.eventListeners.delete(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
   }
 
   onMatchChanged(listener: MatchListener): () => void {
     this.matchListeners.add(listener);
-    return () => this.matchListeners.delete(listener);
+    return () => {
+      this.matchListeners.delete(listener);
+    };
   }
 
   tick(): void {
     this.runtime.tick();
-  }
-
-  /** Whether new reservations/invoices/passes may be created right now. */
-  joinOpen(): boolean {
-    const s = this.runtime.state;
-    const effective = s.status === 'PAUSED' ? s.pausedFrom : s.status;
-    if (effective === 'LOBBY') return true;
-    if (effective === 'LIVE') return this.runtime.nowGameMs() < s.config.joinCloseMs;
-    return false;
-  }
-
-  /** Real ms left until actions close, assuming no pause (used to cap invoice expiry). */
-  msUntilActionsClose(): number {
-    const s = this.runtime.state;
-    const gameMs = this.runtime.nowGameMs();
-    const effective = s.status === 'PAUSED' ? s.pausedFrom : s.status;
-    if (effective === 'LOBBY') {
-      if (s.liveStartClock === null) return Number.POSITIVE_INFINITY;
-      return s.config.actionCloseMs - gameMs;
+    this.maybeResumeAfterRestart();
+    const st = this.runtime.state.status;
+    if (st !== 'FINISHED') {
+      this.finishedAt = null;
+      return;
     }
-    if (effective === 'LIVE') return s.config.actionCloseMs - gameMs;
-    return 0;
+    const now = this.opts.wall.now();
+    this.finishedAt ??= now;
+    if (this.autoLoop && now - this.finishedAt >= this.runtime.state.config.nextSeasonDelayMs) {
+      this.finishedAt = null;
+      this.startNextSeason('auto-loop');
+    }
+  }
+
+  private maybeResumeAfterRestart(): void {
+    if (this.restartPausedAt === null) return;
+    const s = this.runtime.state;
+    // Someone already resumed/paused it by hand: stop managing it.
+    if (s.status !== 'PAUSED' || s.pauseReason !== 'SERVER_RESTART') {
+      this.restartPausedAt = null;
+      return;
+    }
+    if (!this.autoLoop || this.opts.wall.now() - this.restartPausedAt < RESTART_AUTO_RESUME_MS) return;
+    this.restartPausedAt = null;
+    this.runtime.dispatch({ type: 'RESUME' });
+    this.repo.audit('auto-loop', 'RESUME', this.runtime.matchId, { reason: 'SERVER_RESTART' }, this.opts.wall.now());
+  }
+
+  supporters(): Record<TeamId, number> {
+    const now = this.opts.wall.now();
+    if (!this.supportersCache || now - this.supportersCache.at > 1000) {
+      this.supportersCache = { at: now, value: this.repo.supporters(now - SUPPORTER_WINDOW_MS) };
+    }
+    return this.supportersCache.value;
+  }
+
+  invalidateSupporters(): void {
+    this.supportersCache = null;
   }
 
   snapshot(): PublicMatchSnapshot {
     return {
       ...this.runtime.snapshotBase(),
-      joinOpen: this.joinOpen(),
+      supporters: this.supporters(),
       paymentsEnabled: this.paymentsEnabled,
       paymentMode: this.opts.paymentMode,
       playUrl: this.opts.playUrl,
@@ -161,44 +201,51 @@ export class MatchManager {
     const before = rt.state.status;
     const now = this.opts.wall.now();
     if (cmd === 'NEXT_MATCH') {
-      if (before !== 'FINISHED' && before !== 'CANCELLED' && before !== 'CREATED') {
-        throw new AppError(
-          'INVALID_COMMAND',
-          '現在の試合が終了していません / Current match is not finished',
-        );
+      if (before === 'LIVE' || before === 'PAUSED') {
+        throw new AppError('INVALID_COMMAND', '進行中のシーズンを先に中止してください / Cancel the running season first');
       }
-      if (before === 'CREATED') {
-        // Nothing happened yet: discard by cancelling so history stays consistent.
-        rt.dispatch({ type: 'CANCEL', reason: 'REPLACED' });
-      }
-      const next = this.createRuntime();
-      this.repo.audit(actor, 'NEXT_MATCH', next.matchId, { previous: rt.matchId }, now);
-      this.bind(next);
+      if (before === 'CREATED') rt.dispatch({ type: 'CANCEL', reason: 'REPLACED' });
+      this.startNextSeason(actor);
       return;
     }
     const engineCmd =
-      cmd === 'OPEN_LOBBY'
-        ? ({ type: 'OPEN_LOBBY' } as const)
-        : cmd === 'START'
-          ? ({ type: 'START_LIVE' } as const)
-          : cmd === 'PAUSE'
-            ? ({ type: 'PAUSE', reason } as const)
-            : cmd === 'RESUME'
-              ? ({ type: 'RESUME' } as const)
-              : ({ type: 'CANCEL', reason } as const);
+      cmd === 'START'
+        ? ({ type: 'START' } as const)
+        : cmd === 'PAUSE'
+          ? ({ type: 'PAUSE', reason } as const)
+          : cmd === 'RESUME'
+            ? ({ type: 'RESUME' } as const)
+            : ({ type: 'CANCEL', reason } as const);
     const r = rt.dispatch(engineCmd);
-    if (r.outcome.kind === 'rejected') {
-      throw new AppError('INVALID_COMMAND', r.outcome.reason);
-    }
+    if (r.outcome.kind === 'rejected') throw new AppError('INVALID_COMMAND', r.outcome.reason);
     this.repo.audit(actor, cmd, rt.matchId, { before, after: rt.state.status, reason }, now);
   }
 
+  private startNextSeason(actor: string): void {
+    const prev = this.runtime.matchId;
+    const next = this.createRuntime();
+    this.repo.audit(actor, 'NEXT_MATCH', next.matchId, { previous: prev }, this.opts.wall.now());
+    this.bind(next);
+    if (this.autoLoop) next.dispatch({ type: 'START' });
+  }
+
+  /**
+   * Config frozen into the next season: the operator's next-config, with
+   * round-1 HP carried over from a season that actually finished, so a busy
+   * venue doesn't restart every season with instant knockouts.
+   */
+  private seasonConfig(): GameConfig {
+    const base = this.nextConfig;
+    const prev = this.runtime?.state;
+    if (!prev || prev.status !== 'FINISHED') return base;
+    return { ...base, hpInitial: carryOverHp(base, prev.rounds[prev.rounds.length - 1]) };
+  }
+
   private createRuntime(): MatchRuntime {
-    const id = newId('m');
     return MatchRuntime.create(
       this.repo,
-      id,
-      this.nextConfig,
+      newId('m'),
+      this.seasonConfig(),
       randomInt(1, 2 ** 31 - 1),
       this.opts.mono,
       this.opts.wall,
@@ -211,15 +258,11 @@ export class MatchManager {
     this.unbind = rt.onEvents((events, state) => {
       if (
         events.some(
-          (e) =>
-            e.type === 'MATCH_STATUS_CHANGED' &&
-            (e.data.to === 'FINISHED' || e.data.to === 'CANCELLED'),
+          (e) => e.type === 'MATCH_STATUS_CHANGED' && (e.data.to === 'FINISHED' || e.data.to === 'CANCELLED'),
         )
       ) {
         // Freeze a final public snapshot for /results.
-        this.repo.tx(() =>
-          this.repo.saveMatchProjection(state, this.opts.wall.now(), this.snapshot()),
-        );
+        this.repo.tx(() => this.repo.saveMatchProjection(state, this.opts.wall.now(), this.snapshot()));
       }
       for (const l of this.eventListeners) l(events, state);
     });

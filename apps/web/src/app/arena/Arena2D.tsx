@@ -11,16 +11,7 @@ import { useI18n } from '@/lib/i18n';
  * Fallback renderer for venues without WebGL (or after a context loss).
  * Same information as the 3D view; the director still runs for HP timing/banners.
  */
-export function Arena2D({
-  snap,
-  director,
-  gameMsRef,
-}: {
-  snap: PublicMatchSnapshot;
-  displayHp: Record<TeamId, number>;
-  director: ArenaDirector;
-  gameMsRef: { current: number };
-}) {
+export function Arena2D({ snap, director }: { snap: PublicMatchSnapshot; director: ArenaDirector }) {
   const { locale } = useI18n();
   const [, force] = useState(0);
   useEffect(() => {
@@ -88,7 +79,7 @@ export function Arena2D({
         <JapanMap2D
           regions={snap.regions}
           locale={locale}
-          gameMs={gameMsRef.current}
+          focusRegionId={snap.phase === 'ROUND' ? (snap.round?.regionId ?? null) : null}
           className="h-full w-full"
           labelScale={1.3}
         />

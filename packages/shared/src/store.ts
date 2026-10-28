@@ -1,6 +1,6 @@
 import type { GameEvent } from './events';
 import type { ClockTick, PublicMatchSnapshot } from './protocol';
-import type { RegionState, TeamState } from './state';
+import type { RegionPaint, TeamState } from './state';
 import { isClockRunning } from './time';
 
 export type ApplyResult = 'applied' | 'duplicate' | 'gap' | 'ignored';
@@ -58,7 +58,7 @@ export class MatchStore {
     const next: PublicMatchSnapshot = { ...cur, lastSeq: e.seq };
     const p = e.patch;
     if (p.regions?.length) {
-      const byId = new Map<string, RegionState>(p.regions.map((r) => [r.regionId, r]));
+      const byId = new Map<string, RegionPaint>(p.regions.map((r) => [r.regionId, r]));
       next.regions = cur.regions.map((r) => byId.get(r.regionId) ?? r);
     }
     if (p.teams?.length) {
@@ -73,20 +73,14 @@ export class MatchStore {
     }
     if (p.pausedFrom !== undefined) next.pausedFrom = p.pausedFrom;
     if (p.liveStartClock !== undefined) next.liveStartClock = p.liveStartClock;
+    if (p.phase !== undefined) next.phase = p.phase;
+    if (p.phaseEndsAt !== undefined) next.phaseEndsAt = p.phaseEndsAt;
+    if (p.roundIndex !== undefined) next.roundIndex = p.roundIndex;
+    if (p.round !== undefined) next.round = p.round;
     if (p.result !== undefined) next.result = p.result;
     if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED')
       next.pauseReason = e.data.reason;
-    if (e.type === 'CLASH_RESOLVED') {
-      next.clashes = [...cur.clashes, e.data.clash];
-      const idx = e.data.clash.clashIndex + 1;
-      const at = cur.config.clashTimesMs[idx];
-      next.nextClash =
-        at === undefined || e.data.clash.ko.length > 0 ? null : { index: idx, atGameMs: at };
-    }
-    if (next.status === 'FINALIZING' || next.status === 'FINISHED' || next.status === 'CANCELLED') {
-      next.nextClash = null;
-      next.joinOpen = false;
-    }
+    if (e.type === 'ROUND_ENDED') next.rounds = [...cur.rounds, e.data.summary];
     // Re-anchor the clock at the event time.
     next.clockMs = e.t;
     next.gameMs = e.gameMs;
@@ -96,6 +90,12 @@ export class MatchStore {
     this.notify();
     for (const l of this.eventListeners) l(e);
     return 'applied';
+  }
+
+  applyPresence(supporters: PublicMatchSnapshot['supporters']): void {
+    if (!this.snap) return;
+    this.snap = { ...this.snap, supporters };
+    this.notify();
   }
 
   applyClock(tick: ClockTick): ApplyResult {

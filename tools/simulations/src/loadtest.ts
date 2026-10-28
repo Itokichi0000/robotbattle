@@ -4,9 +4,10 @@
  *   pnpm --filter @sats-wars/simulations exec tsx src/loadtest.ts \
  *     --url http://localhost:4000 --password <ADMIN_PASSWORD> --players 100 --spectators 300
  *
- * Steps: admin opens lobby + starts; N players reserve+invoice+mock-pay; S spectator
- * sockets join; every player spends 3 AP over ~60s. Reports HTTP action latency and
- * action->event fan-out latency (time until EVERY spectator socket received the event).
+ * Steps: makes sure a season is running; N players pick a team + top up 525 sats
+ * via mock-pay; S spectator sockets join; every player taps every ~0.4–1.5 s for
+ * --duration ms. Reports HTTP punch latency and punch->event fan-out latency (time
+ * until EVERY spectator socket received the event).
  * Never run against a production server with real payments.
  */
 import { io, type Socket } from 'socket.io-client';
@@ -53,11 +54,9 @@ async function main() {
     password: PASSWORD,
   });
   const st = snap.snapshot.status as string;
-  if (st === 'FINISHED' || st === 'CANCELLED')
-    await post('/api/admin/command', { command: 'NEXT_MATCH' }, admin);
-  if (st !== 'LOBBY' && st !== 'LIVE') {
-    await post('/api/admin/command', { command: 'OPEN_LOBBY' }, admin).catch(() => undefined);
-  }
+  if (st === 'FINISHED' || st === 'CANCELLED') await post('/api/admin/command', { command: 'NEXT_MATCH' }, admin);
+  if (st === 'CREATED') await post('/api/admin/command', { command: 'START' }, admin).catch(() => undefined);
+  if (st === 'PAUSED') await post('/api/admin/command', { command: 'RESUME' }, admin).catch(() => undefined);
 
   // Spectators
   const sockets: Socket[] = [];
@@ -75,87 +74,68 @@ async function main() {
   await new Promise((r) => setTimeout(r, 2000));
   const connected = sockets.filter((s) => s.connected).length;
 
-  // Players
+  // Players: pick a team (alternating) and top up.
   const t0 = performance.now();
   const players: Array<{ token: string }> = [];
   await Promise.all(
     Array.from({ length: PLAYERS }, async (_, i) => {
-      const r = await post<{ token: string; reservationId: string }>('/api/join/reserve', {
+      const r = await post<{ token: string }>('/api/players', {
+        teamId: i % 2 ? 'FUJIN' : 'RAIJIN',
         nickname: `load${i}`,
       });
-      const inv = await post<{ invoiceId: string }>(
-        '/api/join/invoice',
-        { reservationId: r.reservationId },
-        r.token,
-      );
+      const inv = await post<{ invoiceId: string }>('/api/topups', { amountSats: 525 }, r.token);
       await post('/api/dev/mock-pay', { invoiceId: inv.invoiceId }, r.token);
       players.push({ token: r.token });
     }),
   );
   const joinMs = performance.now() - t0;
-  await post('/api/admin/command', { command: 'START' }, admin).catch(() => undefined);
 
-  const regions = ['hokkaido', 'tohoku', 'kanto', 'chubu', 'kinki', 'chugoku', 'shikoku', 'kyushu'];
   const httpLat: number[] = [];
   const fanout: number[] = [];
   let ok = 0;
-  let rejected = 0;
+  let refused = 0;
   let errors = 0;
-  const tasks: Promise<void>[] = [];
-  for (const p of players) {
-    for (let k = 0; k < 3; k++) {
-      const delay = Math.random() * DURATION_MS;
-      tasks.push(
-        new Promise<void>((resolve) =>
-          setTimeout(async () => {
-            const type = Math.random() < 0.7 ? 'ATTACK' : Math.random() < 0.5 ? 'DEFEND' : 'CHARGE';
-            const body = {
-              clientActionId: `lt-${Math.random().toString(36).slice(2)}`,
-              type,
-              regionId:
-                type === 'CHARGE' ? undefined : regions[Math.floor(Math.random() * regions.length)],
-            };
-            const start = performance.now();
-            try {
-              const res = await post<{ result: { ok: boolean; eventSeq?: number } }>(
-                '/api/actions',
-                body,
-                p.token,
-              );
-              httpLat.push(performance.now() - start);
-              if (res.result.ok && res.result.eventSeq) {
-                ok++;
-                const seq = res.result.eventSeq;
-                const deadline = start + 10_000;
-                while ((seen.get(seq) ?? 0) < connected && performance.now() < deadline)
-                  await new Promise((r) => setTimeout(r, 5));
-                if ((seen.get(seq) ?? 0) >= connected) fanout.push(lastArrival.get(seq)! - start);
-              } else rejected++;
-            } catch {
-              errors++;
-            }
-            resolve();
-          }, delay),
-        ),
-      );
+  const until = performance.now() + DURATION_MS;
+  const tasks = players.map(async (p) => {
+    while (performance.now() < until) {
+      await new Promise((r) => setTimeout(r, 400 + Math.random() * 1100));
+      const start = performance.now();
+      try {
+        const res = await post<{ result: { ok: boolean; eventSeq?: number }; creditSats: number }>(
+          '/api/zap',
+          { clientActionId: `lt-${Math.random().toString(36).slice(2)}-${Date.now()}` },
+          p.token,
+        );
+        httpLat.push(performance.now() - start);
+        if (res.result.ok && res.result.eventSeq) {
+          ok++;
+          const seq = res.result.eventSeq;
+          const deadline = start + 10_000;
+          while ((seen.get(seq) ?? 0) < connected && performance.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+          if ((seen.get(seq) ?? 0) >= connected) fanout.push(lastArrival.get(seq)! - start);
+        } else refused++; // between rounds: free no-op
+        if (res.creditSats < 21) return;
+      } catch {
+        errors++;
+      }
     }
-  }
+  });
   await Promise.all(tasks);
   for (const s of sockets) s.close();
   const report = {
     players: PLAYERS,
     spectatorsConnected: `${connected}/${SPECTATORS}`,
     joinAllMs: Math.round(joinMs),
-    actions: { ok, rejected, errors },
-    httpActionMs: { p50: pctl(httpLat, 50), p95: pctl(httpLat, 95), max: Math.max(...httpLat) },
-    actionToAllSpectatorsMs: {
+    punches: { ok, refusedBetweenRounds: refused, errors },
+    httpPunchMs: { p50: pctl(httpLat, 50), p95: pctl(httpLat, 95), max: Math.max(...httpLat) },
+    punchToAllSpectatorsMs: {
       p50: pctl(fanout, 50),
       p95: pctl(fanout, 95),
       max: Math.max(...fanout),
       samples: fanout.length,
     },
   };
-  for (const k of ['httpActionMs', 'actionToAllSpectatorsMs'] as const) {
+  for (const k of ['httpPunchMs', 'punchToAllSpectatorsMs'] as const) {
     for (const [kk, v] of Object.entries(report[k]))
       (report[k] as Record<string, number>)[kk] = Math.round(v as number);
   }
