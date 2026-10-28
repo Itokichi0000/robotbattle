@@ -101,6 +101,23 @@ describe('ArenaDirector', () => {
     expect(d.camera.preset).toBe('overview');
   });
 
+  it('a busy crowd does not keep the camera on the map: zooms are at most every 15 s', () => {
+    const d = new ArenaDirector();
+    const turn: Cue = { kind: 'alienTurn', attacks: [], fell: [], landed: [] };
+    d.play(turn);
+    run(d, 0.1);
+    expect(d.camera.preset).toBe('mapFocus');
+    run(d, 4);
+    expect(d.camera.preset).toBe('overview');
+    d.play(turn);
+    run(d, 0.5);
+    expect(d.camera.preset).toBe('overview');
+    run(d, 12);
+    d.play(turn);
+    run(d, 0.1);
+    expect(d.camera.preset).toBe('mapFocus');
+  });
+
   it('liberation, wave clear and Japan fallen banners', () => {
     const d = new ArenaDirector();
     d.play(action({ liberated: true, regionId: 'hokkaido' }));

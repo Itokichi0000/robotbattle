@@ -215,7 +215,7 @@ export function ArenaApp() {
       {!audioOn && !settings.muted && (
         <button
           onClick={enableAudio}
-          className="absolute left-1/2 top-[29%] z-30 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-base font-bold text-off ring-1 ring-white/30"
+          className="absolute bottom-[13%] left-[1.2vw] z-30 rounded-full bg-black/70 px-4 py-2 text-base font-bold text-off ring-1 ring-white/30"
         >
           🔊 クリックで音声ON / Click to enable sound
         </button>

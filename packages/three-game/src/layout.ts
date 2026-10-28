@@ -3,10 +3,10 @@ import type { RegionId, TeamId } from '@sats-wars/shared';
 import { REGION_CENTROIDS } from '@sats-wars/shared';
 import type { CameraPresetName } from './director';
 
-/** World layout of the arena (units ≈ metres; robots ~4 tall). */
+/** World layout of the arena (units ≈ metres; robots ~4 tall). The gods stand wide apart so the map between them stays readable. */
 export const ROBOT_HOME: Record<TeamId, { x: number; z: number; ry: number }> = {
-  RAIJIN: { x: -3.7, z: 0.6, ry: Math.PI / 2 - 0.55 },
-  FUJIN: { x: 3.7, z: 0.6, ry: -Math.PI / 2 + 0.55 },
+  RAIJIN: { x: -4.6, z: 0.6, ry: Math.PI / 2 - 0.55 },
+  FUJIN: { x: 4.6, z: 0.6, ry: -Math.PI / 2 + 0.55 },
 };
 
 /** Fraction of the distance to the centre a robot covers when fully advanced. */
@@ -41,7 +41,8 @@ export const CAMERA_PRESETS: Record<
 > = {
   intro: { position: [0, 13, 27], target: [0, 4, -2] },
   overview: { position: [0, 6.0, 18.5], target: [0, 4.0, -2.4] },
-  mapFocus: { position: [0, 9.5, 7.5], target: [0, 6.2, -8.5] },
+  // High enough that the gods (z≈0.6) stay below the frame while the map fills it.
+  mapFocus: { position: [0, 11.5, 6.5], target: [0, 6.2, -8.5] },
   clash: { position: [0, 3.3, 9.2], target: [0, 2.5, 0] },
   specialRAIJIN: { position: [-0.8, 3.4, 11], target: [-3.0, 3.2, 0.4] },
   specialFUJIN: { position: [0.8, 3.8, 12], target: [3.0, 3.8, 0.4] },

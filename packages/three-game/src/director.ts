@@ -263,8 +263,9 @@ export class ArenaDirector {
 
   private playWaveStart(wave: number, boss: boolean): void {
     const s = this.startTime();
+    const zoom = this.zoomToMap();
     this.at(s, () => {
-      this.setCamera('mapFocus');
+      if (zoom) this.setCamera('mapFocus');
       this.sound(boss ? 'special' : 'intro', null);
       this.setBanner(
         boss
@@ -288,7 +289,7 @@ export class ArenaDirector {
             },
       );
     });
-    this.at(s + 1.8, () => this.setCamera('overview'));
+    if (zoom) this.at(s + 1.8, () => this.setCamera('overview'));
     this.busyUntil = s + 1.8;
   }
 
@@ -362,8 +363,9 @@ export class ArenaDirector {
   private playAlienTurn(cue: Extract<Cue, { kind: 'alienTurn' }>): void {
     const s = this.startTime();
     const intro = this.settings.reducedMotion ? 0.6 : 1.0;
+    const zoom = this.zoomToMap();
     this.at(s, () => {
-      this.setCamera('mapFocus');
+      if (zoom) this.setCamera('mapFocus');
       this.sound('charge', null);
       this.setBanner({
         kind: 'alienTurn',
@@ -404,7 +406,7 @@ export class ArenaDirector {
       });
       end += 1.4;
     }
-    this.at(end, () => this.setCamera('overview'));
+    if (zoom) this.at(end, () => this.setCamera('overview'));
     this.busyUntil = end;
   }
 
@@ -460,6 +462,15 @@ export class ArenaDirector {
 
   private setClip(teamId: TeamId, clip: ClipName, advance: number): void {
     this.robots[teamId] = { clip, start: this.time, advance };
+  }
+
+  /**
+   * Zoom onto the map for an alien turn / new wave at most every few seconds.
+   * With a busy crowd those come every few seconds, and the wide shot (map +
+   * both gods) must stay the default or the gods are never on screen.
+   */
+  private zoomToMap(): boolean {
+    return this.throttle('mapFocus', 15);
   }
 
   private setCamera(preset: CameraPresetName): void {

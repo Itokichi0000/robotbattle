@@ -248,10 +248,12 @@ export function Controller({
 
       {/* Situation */}
       <section className="sw-panel grid gap-1 p-3 text-sm" aria-live="polite" data-testid="battle-status">
-        <div className="flex items-baseline justify-between gap-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
           <div className="sw-display text-xl font-black">
             {L(`ウェーブ ${snap.wave}`, `Wave ${snap.wave}`)}
-            {snap.enemies.some((e) => e.kind === 'MOTHERSHIP') && <span className="ml-2 text-base text-fuchsia-300">🪐 {L('母艦', 'Mothership')}</span>}
+            {snap.enemies.some((e) => e.kind === 'MOTHERSHIP') && (
+              <span className="ml-2 whitespace-nowrap text-base text-fuchsia-300">🪐 {L('母艦', 'Mothership')}</span>
+            )}
           </div>
           <FallMeter fallen={v.fallenCount} limit={c.fallLimit} locale={locale} />
         </div>
@@ -326,7 +328,8 @@ export function Controller({
             setSelected(id === selected ? null : id);
             setTarget(null);
           }}
-          className="mx-auto h-64 w-full"
+          className="mx-auto h-80 w-full"
+          labelScale={1.3}
         />
         {sel && selThreat && (
           <div className="mt-2 grid gap-2" data-testid="region-panel">
