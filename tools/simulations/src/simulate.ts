@@ -30,6 +30,9 @@ export interface RaidSim {
   syncAverage: number;
   assistActions: number;
   tasks: number;
+  /** City damage that got through, and what shields absorbed: is there anything to defend? */
+  cityDamage: number;
+  shieldAbsorbed: number;
 }
 
 const SPREAD: Role[] = ['GUNNER', 'GUARDIAN', 'ROUTER', 'GUNNER', 'ENGINEER', 'GUARDIAN', 'GUNNER', 'ROUTER', 'GUARDIAN', 'ENGINEER'];
@@ -95,6 +98,8 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
     syncAverage: r.syncAverage,
     assistActions: r.stats.assistActions,
     tasks: r.stats.tasks,
+    cityDamage: r.stats.cityDamageTaken,
+    shieldAbsorbed: r.stats.shieldAbsorbed,
   };
 }
 
@@ -112,6 +117,8 @@ export interface Aggregate {
   specialFallback: number;
   specialFailed: number;
   assistMean: number;
+  cityDamageMean: number;
+  shieldAbsorbedMean: number;
 }
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -134,5 +141,7 @@ export function aggregate(sims: RaidSim[]): Aggregate {
     specialFallback: share((x) => x.special === 'FALLBACK'),
     specialFailed: share((x) => x.special === 'FAILED'),
     assistMean: mean(sims.map((x) => x.assistActions)),
+    cityDamageMean: mean(sims.map((x) => x.cityDamage)),
+    shieldAbsorbedMean: mean(sims.map((x) => x.shieldAbsorbed)),
   };
 }

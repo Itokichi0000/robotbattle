@@ -68,14 +68,13 @@ export function routerParams(rand: Rand, difficulty: TaskDifficulty, suggested: 
   }
   const sinkY: Record<EnergySink, number> = { RAIJIN: 0.18, FUJIN: 0.5, RESERVE: 0.82 };
   const sinkIds = {} as Record<EnergySink, number>;
-  // Two relays (upper/lower half) and one or two blocked decoys in between.
-  const relayA = nodes.push({ id: nodes.length, x: 0.42 + rand() * 0.1, y: 0.2 + rand() * 0.15, kind: 'RELAY' }) - 1;
-  const relayB = nodes.push({ id: nodes.length, x: 0.42 + rand() * 0.1, y: 0.65 + rand() * 0.15, kind: 'RELAY' }) - 1;
+  // Two relays (upper/lower) in one column, blocked decoys in a column nearer the
+  // destinations: fixed lanes keep every node far enough apart to tap on a phone.
+  const relayA = nodes.push({ id: nodes.length, x: 0.36 + rand() * 0.08, y: 0.16 + rand() * 0.12, kind: 'RELAY' }) - 1;
+  const relayB = nodes.push({ id: nodes.length, x: 0.36 + rand() * 0.08, y: 0.72 + rand() * 0.12, kind: 'RELAY' }) - 1;
   const blocked: number[] = [];
-  const nBlocked = jammed ? 2 : 1;
-  for (let i = 0; i < nBlocked; i++) {
-    blocked.push(nodes.push({ id: nodes.length, x: 0.3 + rand() * 0.35, y: 0.42 + (i - (nBlocked - 1) / 2) * 0.22, kind: 'BLOCKED' }) - 1);
-  }
+  const blockedY = jammed ? [0.32, 0.68] : [0.4 + rand() * 0.2];
+  for (const y of blockedY) blocked.push(nodes.push({ id: nodes.length, x: 0.64 + rand() * 0.04, y, kind: 'BLOCKED' }) - 1);
   for (const s of ENERGY_SINKS) sinkIds[s] = nodes.push({ id: nodes.length, x: 0.92, y: sinkY[s], kind: 'SINK', sink: s }) - 1;
   edges.push([0, relayA], [0, relayB], [relayA, relayB]);
   // Upper relay reaches Raijin directly, lower reaches the reserve; Fujin needs a choice.

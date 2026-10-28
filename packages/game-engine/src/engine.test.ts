@@ -438,3 +438,20 @@ describe('determinism', () => {
     expect(REGION_IDS).toHaveLength(8);
   });
 });
+
+describe('router puzzle layout', () => {
+  it('keeps every node far enough apart to tap on a phone (all seeds, jammed or not)', () => {
+    // The phone draws the puzzle 280×168 px with 16 px node circles: keep ≥ 40 px between centres.
+    for (let seed = 1; seed <= 300; seed++) {
+      for (const jammed of [false, true]) {
+        const p = routerParams(mulberry32(seed), 'NORMAL', 'RESERVE', jammed);
+        if (p.role !== 'ROUTER') throw new Error('router');
+        for (const a of p.nodes)
+          for (const b of p.nodes) {
+            if (a.id >= b.id) continue;
+            expect(Math.hypot((a.x - b.x) * 280, (a.y - b.y) * 168)).toBeGreaterThanOrEqual(40);
+          }
+      }
+    }
+  });
+});

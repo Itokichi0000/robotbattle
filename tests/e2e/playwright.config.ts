@@ -38,6 +38,10 @@ export default defineConfig({
         PAYMENT_MODE: 'mock',
         LOG_LEVEL: 'warn',
         PUBLIC_PLAY_URL: 'http://localhost:3000/play',
+        // Paid passes (mock payments) + guest and Lightning (mock wallet) login.
+        PASS_MODE: 'PAID',
+        AUTH_MODE: 'both',
+        SERVER_PUBLIC_URL: 'http://localhost:4000',
       },
     },
     {

@@ -35,13 +35,14 @@ export function Logo({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   const title = size === 'lg' ? 'text-5xl md:text-7xl' : size === 'md' ? 'text-3xl' : 'text-xl';
   const sub = size === 'lg' ? 'text-xl md:text-2xl' : size === 'md' ? 'text-sm' : 'text-xs';
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex min-w-0 items-center gap-3">
       <Emblem size={emblem} />
-      <div className="leading-none">
-        <div className={`sw-display font-black ${title} tracking-wider`}>
+      {/* Very narrow phones keep only the emblem so the header never scrolls sideways. */}
+      <div className={`leading-none ${size === 'sm' ? 'max-[380px]:hidden' : ''}`}>
+        <div className={`sw-display font-black whitespace-nowrap ${title} tracking-wider`}>
           <span className="text-amber">SATS</span> <span className="text-teal">WARS</span>
         </div>
-        <div className={`${sub} mt-1 font-bold tracking-[0.3em] text-off/90`}>
+        <div className={`${sub} mt-1 font-bold whitespace-nowrap tracking-[0.3em] text-off/90 ${size === 'sm' ? 'hidden sm:block' : ''}`}>
           EARTH DEFENSE <span className="text-amber">雷神</span>×<span className="text-teal">風神</span>
         </div>
       </div>

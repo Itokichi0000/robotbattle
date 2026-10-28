@@ -22,10 +22,10 @@ function run(pilots: number, mix: RoleMix, skill: number): Aggregate {
 }
 
 const row = (label: string, a: Aggregate) =>
-  `| ${label} | ${pct(a.winRate)} | ${pct(a.citiesLostRate)} | ${pct(a.timeoutRate)} | ${n1(a.survivingMean)} | ${pct(a.bossLeftMean)} | ${a.clearMean === null ? '—' : `${Math.round(a.clearMean)}s`} | ${Math.round(a.scoreMean)} | ${Math.round(a.syncMean)} | ${pct(a.specialActivated)}/${pct(a.specialFallback)}/${pct(a.specialFailed)} | ${Math.round(a.assistMean)} |`;
+  `| ${label} | ${pct(a.winRate)} | ${pct(a.citiesLostRate)} | ${pct(a.timeoutRate)} | ${n1(a.survivingMean)} | ${pct(a.bossLeftMean)} | ${a.clearMean === null ? '—' : `${Math.round(a.clearMean)}s`} | ${Math.round(a.scoreMean)} | ${Math.round(a.syncMean)} | ${pct(a.specialActivated)}/${pct(a.specialFallback)}/${pct(a.specialFailed)} | ${Math.round(a.assistMean)} | ${Math.round(a.cityDamageMean)} / ${Math.round(a.shieldAbsorbedMean)} |`;
 
 const HEAD =
-  '| crew | win | Japan fell | timeout | cities left | boss HP left | clear time | score | SYNC avg | special ok/fallback/fail | assist acts |\n|---|---|---|---|---|---|---|---|---|---|---|';
+  '| crew | win | Japan fell | timeout | cities left | boss HP left | clear time | score | SYNC avg | special ok/fallback/fail | assist acts | city dmg / shielded |\n|---|---|---|---|---|---|---|---|---|---|---|---|';
 
 const started = Date.now();
 const out: string[] = [];
@@ -62,6 +62,9 @@ for (const s of [0.3, 0.5, 0.65, 0.8, 0.95]) out.push(row(`skill ${s}`, run(9, '
 out.push('');
 
 out.push('## Reading the table');
+out.push('');
+out.push('- "city dmg / shielded": damage that reached cities vs. damage Fujin\'s shields absorbed, per raid. Large');
+out.push('  crews kill escorts inside the telegraph window, so most pressure comes from NULL CORE (see OPEN_ISSUES).');
 out.push('');
 out.push('- Enemy and boss HP scale with active pilots (clamped), and each seat\'s effect is normalised by how many');
 out.push('  pilots are succeeding in it, so a big crowd does not win by mashing one seat (see section 2).');

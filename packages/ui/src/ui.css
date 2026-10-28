@@ -1,8 +1,6 @@
 /* SATS WARS cockpit UI (shared by apps/web and apps/solo). Plain CSS, prefix swc-. */
-.swc-root,
-.swc-cockpit,
-.swc-header,
-.swc-training {
+:root {
+  /* Prefixed tokens so pages that embed one widget (a map, a result card) get the same colours. */
   --swc-bg: #070d1a;
   --swc-panel: #0f1a2e;
   --swc-panel-2: #16243d;
@@ -13,6 +11,11 @@
   --swc-teal: #25c8d7;
   --swc-red: #ff3b5c;
   --swc-green: #3ddc84;
+}
+.swc-root,
+.swc-cockpit,
+.swc-header,
+.swc-training {
   color: var(--swc-text);
   font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
 }
@@ -581,6 +584,7 @@
 .swc-map {
   width: 100%;
   height: auto;
+  max-height: 70vh;
 }
 .swc-map-region {
   stroke: #0a1222;

@@ -179,13 +179,28 @@ export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion
   );
 }
 
+/**
+ * Label offset per city in map units (x east, y north). Pills are a few units
+ * wide at venue distance, so neighbours (名古屋/東京, 広島/大阪/高松) are pushed apart.
+ */
+const LABEL_OFFSET: Record<CityState['cityId'], [number, number]> = {
+  hokkaido: [0, 1.1],
+  tohoku: [2.4, 0],
+  kanto: [2.7, -0.4],
+  chubu: [-1.0, 1.1],
+  kinki: [0.2, -1.4],
+  chugoku: [-2.4, 0.8],
+  shikoku: [1.8, -1.5],
+  kyushu: [-2.4, -0.4],
+};
+
 function CityLabel({ city, threat, locale }: { city: CityState; threat: CityThreat | undefined; locale: 'ja' | 'en' }) {
   const c = REGION_CENTROIDS[city.cityId];
   const info = CITY_INFO[city.cityId];
   const state = city.destroyed ? 'down' : threat?.lethal ? 'danger' : threat ? 'threat' : 'ok';
   return (
     <group position={[c.x, c.y, EXTRUDE_DEPTH]}>
-      <Html position={[0, -0.6, 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <Html position={[LABEL_OFFSET[city.cityId][0], LABEL_OFFSET[city.cityId][1], 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
         <div className={`sw-map-label is-${state}`} data-state={state}>
           {threat && <span className="sw-map-label-warn">⚠{Math.ceil(threat.seconds)}s</span>}
           <span className="sw-map-label-name">{locale === 'ja' ? info.cityJa : info.cityEn}</span>

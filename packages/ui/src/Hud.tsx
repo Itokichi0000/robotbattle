@@ -82,6 +82,18 @@ export function ThreatLine({ view, locale }: { view: RaidView; locale: 'ja' | 'e
   );
 }
 
+/** Label placement per city (map units ≈ degrees) so neighbours never overlap. */
+const LABEL_AT: Record<RegionId, { dx: number; dy: number; anchor: 'start' | 'middle' | 'end' }> = {
+  hokkaido: { dx: 0, dy: -0.75, anchor: 'middle' },
+  tohoku: { dx: 0.65, dy: 0.2, anchor: 'start' },
+  kanto: { dx: 0.65, dy: 0.45, anchor: 'start' },
+  chubu: { dx: -0.1, dy: -0.75, anchor: 'middle' },
+  kinki: { dx: 0.35, dy: 1.15, anchor: 'middle' },
+  chugoku: { dx: -0.2, dy: -0.75, anchor: 'end' },
+  shikoku: { dx: 0.55, dy: 0.95, anchor: 'start' },
+  kyushu: { dx: -0.65, dy: 0.25, anchor: 'end' },
+};
+
 /** Small Japan map: 8 cities with HP, shields, incoming attacks and losses. */
 export function JapanMapMini({ view, locale, maxHp, labels = true }: { view: RaidView; locale: 'ja' | 'en'; maxHp: number; labels?: boolean }) {
   const L: Lx = (ja, en) => (locale === 'ja' ? ja : en);
@@ -115,14 +127,10 @@ export function JapanMapMini({ view, locale, maxHp, labels = true }: { view: Rai
             {c.shield > 0 && !c.destroyed && <circle r={0.75} className="swc-map-shield" />}
             <circle r={0.42} className={c.destroyed ? 'swc-map-dot is-down' : 'swc-map-dot'} />
             {labels && (
-              <text y={-0.7} textAnchor="middle" className="swc-map-label">
+              <text x={LABEL_AT[id].dx} y={LABEL_AT[id].dy} textAnchor={LABEL_AT[id].anchor} className="swc-map-label">
                 {c.destroyed ? '✕ ' : ''}
                 {L(CITY_INFO[id].cityJa, CITY_INFO[id].cityEn)} {c.destroyed ? '' : Math.round(c.hp)}
-              </text>
-            )}
-            {t && !c.destroyed && (
-              <text y={1.35} textAnchor="middle" className={`swc-map-threat${t.lethal ? ' is-lethal' : ''}`}>
-                ⚠{Math.ceil(t.seconds)}s
+                {t && !c.destroyed && <tspan className={`swc-map-threat${t.lethal ? ' is-lethal' : ''}`}> ⚠{Math.ceil(t.seconds)}s</tspan>}
               </text>
             )}
           </g>

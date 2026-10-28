@@ -91,6 +91,7 @@ export function PlayApp() {
           boardGate={gate}
         />
       )}
+      {!lobby && <PlayMap snap={snap} />}
       {(lobby || !seat.boarded) && snap.status !== 'ENDED' && <TrainingPanel locale={locale} initialRole={seat.role ?? 'GUNNER'} />}
       <CheerRow />
       <Settings me={me} onChanged={refreshMe} />
@@ -123,18 +124,26 @@ function PlayBody({ snap, me }: { snap: NonNullable<ReturnType<typeof useRaid>>;
           ⏸ {L('一時停止中', 'Paused')}
         </p>
       )}
-      {snap.status !== 'LOBBY_OPEN' && snap.status !== 'CREATED' && (
-        <details open={snap.status === 'LIVE'}>
-          <summary className="cursor-pointer text-sm text-muted">{L('日本の地図', 'Map of Japan')}</summary>
-          <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
-        </details>
-      )}
       {me.seat.stats && me.seat.stats.tasks > 0 && (
         <p className="text-center text-xs text-muted">
           {L(`あなたの出撃 ${me.seat.stats.tasks}回・成功 ${me.seat.stats.successes}回`, `Your sorties ${me.seat.stats.tasks} · hits ${me.seat.stats.successes}`)}
         </p>
       )}
     </>
+  );
+}
+
+/** Map below the cockpit: the phone's job is the mission, the big screen shows the map. */
+function PlayMap({ snap }: { snap: NonNullable<ReturnType<typeof useRaid>> }) {
+  const { L, locale } = useI18n();
+  const view = raidView(snap, snapNow(snap));
+  return (
+    <details className="sw-panel p-3">
+      <summary className="min-h-11 cursor-pointer content-center text-sm font-bold">🗾 {L('日本の地図を見る', 'Show the map of Japan')}</summary>
+      <div className="mx-auto max-w-sm">
+        <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
+      </div>
+    </details>
   );
 }
 
@@ -147,12 +156,12 @@ function Shell({ children, connState, callsign }: { children: React.ReactNode; c
   return (
     <main className="swc-root mx-auto flex min-h-dvh w-full max-w-xl flex-col gap-3 px-4 pt-3 pb-10">
       <header className="flex items-center justify-between gap-2">
-        <Link href="/" className="sw-focus rounded">
+        <Link href="/" className="sw-focus shrink-0 rounded">
           <Logo size="sm" />
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
           {callsign && (
-            <Link href="/passport" className="sw-focus max-w-[9rem] truncate rounded-full border border-line px-2 py-1 text-xs font-bold" data-testid="callsign">
+            <Link href="/passport" className="sw-focus max-w-[7rem] min-w-[4.5rem] truncate rounded-full sm:max-w-[11rem] border border-line px-2 py-1 text-xs font-bold" data-testid="callsign">
               🪪 {callsign}
             </Link>
           )}
@@ -269,20 +278,27 @@ function CheerRow() {
 
 function Settings({ me, onChanged }: { me: MeResponse; onChanged: () => Promise<void> }) {
   const { L } = useI18n();
-  const patch = async (body: Record<string, unknown>) => {
-    await api('/api/me', { method: 'PATCH', body });
-    await onChanged();
+  // Optimistic: the box flips at once; the server copy replaces it after the save.
+  const [local, setLocal] = useState({ assistMode: me.pilot.assistMode, showNameOnArena: me.pilot.showNameOnArena });
+  useEffect(() => setLocal({ assistMode: me.pilot.assistMode, showNameOnArena: me.pilot.showNameOnArena }), [me.pilot.assistMode, me.pilot.showNameOnArena]);
+  const patch = async (body: Partial<typeof local>) => {
+    setLocal((l) => ({ ...l, ...body }));
+    try {
+      await api('/api/me', { method: 'PATCH', body });
+    } finally {
+      await onChanged();
+    }
   };
   return (
     <details className="sw-panel p-3 text-sm">
       <summary className="cursor-pointer font-bold">⚙ {L('設定', 'Settings')}</summary>
       <div className="mt-2 flex flex-col gap-2">
         <label className="flex min-h-11 items-center gap-2">
-          <input type="checkbox" checked={me.pilot.assistMode} onChange={(e) => void patch({ assistMode: e.target.checked })} />
+          <input type="checkbox" checked={local.assistMode} onChange={(e) => void patch({ assistMode: e.target.checked })} />
           {L('かんたん操作（的が大きい・ゆっくり）', 'Easy controls (bigger, slower targets)')}
         </label>
         <label className="flex min-h-11 items-center gap-2">
-          <input type="checkbox" checked={me.pilot.showNameOnArena} onChange={(e) => void patch({ showNameOnArena: e.target.checked })} data-testid="show-name" />
+          <input type="checkbox" checked={local.showNameOnArena} onChange={(e) => void patch({ showNameOnArena: e.target.checked })} data-testid="show-name" />
           {L('大画面にコールサインを表示する', 'Show my callsign on the big screen')}
         </label>
         <div className="flex flex-wrap gap-2">

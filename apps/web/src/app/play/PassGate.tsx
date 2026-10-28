@@ -171,7 +171,7 @@ function SponsoredForm({
       }}
     >
       <input
-        className="sw-focus min-h-11 flex-1 rounded-lg border border-line bg-navy px-3 uppercase"
+        className="sw-focus min-h-11 min-w-0 flex-1 rounded-lg border border-line bg-navy px-3 uppercase"
         value={code}
         onChange={(e) => setCode(e.target.value)}
         placeholder="SW-XXXX-XXXX"
