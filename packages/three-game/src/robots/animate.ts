@@ -41,7 +41,10 @@ function idle(p: Pose, rig: RobotRig, t: number, calm = 1): void {
     addPos(p, 'Hips', 0, -0.06 + 0.03 * br, 0);
     addRot(p, 'Chest', 0.04 + 0.025 * br, 0, 0);
     addRot(p, 'Head', -0.04 - 0.02 * br, 0, 0);
-    for (const [s, side] of [['L', 1], ['R', -1]] as const) {
+    for (const [s, side] of [
+      ['L', 1],
+      ['R', -1],
+    ] as const) {
       addRot(p, `UpperArm_${s}`, -0.15, 0, 0.16 * side + 0.02 * br * side);
       addRot(p, `Forearm_${s}`, -0.55, 0, 0);
       addRot(p, `Thigh_${s}`, -0.15, 0, 0.06 * side);
@@ -53,7 +56,10 @@ function idle(p: Pose, rig: RobotRig, t: number, calm = 1): void {
     const hov = Math.sin(t * 2.1) * calm;
     addPos(p, 'Root', 0, 0.35 + 0.1 * hov, 0);
     addRot(p, 'Chest', 0.12, 0.05 * Math.sin(t * 1.3), 0);
-    for (const [s, side] of [['L', 1], ['R', -1]] as const) {
+    for (const [s, side] of [
+      ['L', 1],
+      ['R', -1],
+    ] as const) {
       addRot(p, `UpperArm_${s}`, -0.3, 0, 0.32 * side + 0.04 * hov * side);
       addRot(p, `Forearm_${s}`, -0.65, 0, 0);
       addRot(p, `Thigh_${s}`, -0.2 - 0.05 * hov, 0, 0.05 * side);
@@ -128,7 +134,10 @@ const CLIPS: Record<ClipName, ClipFn> = {
   Guard: (p, rig, _t, u, total) => {
     idle(p, rig, total, 0.5);
     const g = easeOut(ramp(u, 0, 0.3));
-    for (const [s, side] of [['L', 1], ['R', -1]] as const) {
+    for (const [s, side] of [
+      ['L', 1],
+      ['R', -1],
+    ] as const) {
       addRot(p, `UpperArm_${s}`, -1.25 * g, 0, -0.25 * side * g);
       addRot(p, `Forearm_${s}`, -1.1 * g, 0, 0);
     }
@@ -169,7 +178,7 @@ const CLIPS: Record<ClipName, ClipFn> = {
       const spin = easeInOut(ramp(u, 0, 0.55));
       const dive = easeOut(ramp(u, 0.6, 0.75)) * (1 - ramp(u, 0.88, 1));
       addRot(p, 'Root', 0, spin * Math.PI * 4, 0);
-      addPos(p, 'Root', 0, 1.6 * Math.sin(Math.min(1, u / 0.7) * Math.PI) , 0);
+      addPos(p, 'Root', 0, 1.6 * Math.sin(Math.min(1, u / 0.7) * Math.PI), 0);
       addRot(p, 'UpperArm_L', 0, 0, 1.45 * (1 - dive) * ramp(u, 0, 0.2));
       addRot(p, 'UpperArm_R', 0, 0, -1.45 * (1 - dive) * ramp(u, 0, 0.2));
       addRot(p, 'UpperArm_L', -1.5 * dive);
@@ -215,7 +224,13 @@ const CLIPS: Record<ClipName, ClipFn> = {
  * Apply a procedural clip to the rig. `t` = seconds since clip start,
  * `total` = global time (for continuous idle motion).
  */
-export function applyClip(rig: RobotRig, clip: ClipName, t: number, total: number, energyGlow = 0): void {
+export function applyClip(
+  rig: RobotRig,
+  clip: ClipName,
+  t: number,
+  total: number,
+  energyGlow = 0,
+): void {
   const pose = emptyPose();
   const dur = CLIP_DURATION[clip];
   const u = clamp01(t / dur);
@@ -225,8 +240,16 @@ export function applyClip(rig: RobotRig, clip: ClipName, t: number, total: numbe
     const rest = rig.rest[name];
     const r = pose.rot[name];
     const q = pose.pos[name];
-    j.rotation.set(rest.rotation.x + (r?.[0] ?? 0), rest.rotation.y + (r?.[1] ?? 0), rest.rotation.z + (r?.[2] ?? 0));
-    j.position.set(rest.position.x + (q?.[0] ?? 0), rest.position.y + (q?.[1] ?? 0), rest.position.z + (q?.[2] ?? 0));
+    j.rotation.set(
+      rest.rotation.x + (r?.[0] ?? 0),
+      rest.rotation.y + (r?.[1] ?? 0),
+      rest.rotation.z + (r?.[2] ?? 0),
+    );
+    j.position.set(
+      rest.position.x + (q?.[0] ?? 0),
+      rest.position.y + (q?.[1] ?? 0),
+      rest.position.z + (q?.[2] ?? 0),
+    );
   }
   rig.backUnit.rotation.z = pose.backSpin;
   const glow = rig.baseGlow * pose.glow * (1 + energyGlow);

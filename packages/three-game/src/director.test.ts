@@ -19,8 +19,22 @@ function clash(over: Partial<ClashRecord> = {}): ClashRecord {
     atGameMs: 45_000,
     snapshot: { RAIJIN: snap('RAIJIN'), FUJIN: snap('FUJIN') },
     outcome: {
-      RAIJIN: { teamId: 'RAIJIN', damageDealt: 12, special: false, energyBonus: 0, hpAfter: 90, energyAfter: 0 },
-      FUJIN: { teamId: 'FUJIN', damageDealt: 10, special: false, energyBonus: 0, hpAfter: 88, energyAfter: 0 },
+      RAIJIN: {
+        teamId: 'RAIJIN',
+        damageDealt: 12,
+        special: false,
+        energyBonus: 0,
+        hpAfter: 90,
+        energyAfter: 0,
+      },
+      FUJIN: {
+        teamId: 'FUJIN',
+        damageDealt: 10,
+        special: false,
+        energyBonus: 0,
+        hpAfter: 88,
+        energyAfter: 0,
+      },
     },
     ko: [],
     isFinal: false,
@@ -51,8 +65,22 @@ describe('ArenaDirector', () => {
   it('plays a special cinematic first and shortens it in reduced-motion mode', () => {
     const special = clash({
       outcome: {
-        RAIJIN: { teamId: 'RAIJIN', damageDealt: 22, special: true, energyBonus: 0, hpAfter: 90, energyAfter: 5 },
-        FUJIN: { teamId: 'FUJIN', damageDealt: 10, special: false, energyBonus: 0, hpAfter: 78, energyAfter: 0 },
+        RAIJIN: {
+          teamId: 'RAIJIN',
+          damageDealt: 22,
+          special: true,
+          energyBonus: 0,
+          hpAfter: 90,
+          energyAfter: 5,
+        },
+        FUJIN: {
+          teamId: 'FUJIN',
+          damageDealt: 10,
+          special: false,
+          energyBonus: 0,
+          hpAfter: 78,
+          energyAfter: 0,
+        },
       },
     });
     const d = new ArenaDirector();

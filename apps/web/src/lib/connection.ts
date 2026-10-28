@@ -45,12 +45,18 @@ export class MatchConnection {
     });
     this.socket.on('connect', () => {
       this.setState('connected');
-      this.socket.emit('joinRoom', { role: this.role, token: this.token ?? undefined }, () => undefined);
+      this.socket.emit(
+        'joinRoom',
+        { role: this.role, token: this.token ?? undefined },
+        () => undefined,
+      );
       void this.syncTime();
     });
     this.socket.on('disconnect', () => this.setState('reconnecting'));
     this.socket.io.on('reconnect_attempt', () => this.setState('reconnecting'));
-    this.socket.on('connect_error', () => this.setState(this.state === 'connecting' ? 'offline' : 'reconnecting'));
+    this.socket.on('connect_error', () =>
+      this.setState(this.state === 'connecting' ? 'offline' : 'reconnecting'),
+    );
     this.socket.on('matchSnapshot', (snap) => this.store.applySnapshot(snap));
     this.socket.on('matchEvent', (e: GameEvent) => {
       if (this.store.applyEvent(e, this.serverNow()) === 'gap') this.resync();

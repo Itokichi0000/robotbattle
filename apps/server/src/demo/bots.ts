@@ -5,7 +5,16 @@ import type { Repo } from '../db/repo';
 import type { MatchManager } from '../match/manager';
 import { newId, newToken, sha256 } from '../auth/tokens';
 
-const BOT_NAMES_RAIJIN = ['雷丸', 'イナズマ', 'ゴロゴロ', 'Volt', 'Bolt', '太鼓番', 'Spark', '稲光'];
+const BOT_NAMES_RAIJIN = [
+  '雷丸',
+  'イナズマ',
+  'ゴロゴロ',
+  'Volt',
+  'Bolt',
+  '太鼓番',
+  'Spark',
+  '稲光',
+];
 const BOT_NAMES_FUJIN = ['疾風', 'ツムジ', 'そよ風', 'Gale', 'Breeze', '風袋番', 'Zephyr', '旋風'];
 
 interface BotPlan {
@@ -64,7 +73,11 @@ export class DemoBots {
       }
     }
     // Small reinforcement waves keep the demo lively until joins close.
-    if (s.status === 'LIVE' && s.gameMs < s.config.joinCloseMs && s.gameMs - this.lastWaveGameMs >= 30_000) {
+    if (
+      s.status === 'LIVE' &&
+      s.gameMs < s.config.joinCloseMs &&
+      s.gameMs - this.lastWaveGameMs >= 30_000
+    ) {
       this.lastWaveGameMs = s.gameMs;
       this.spawn('RAIJIN');
       this.spawn('FUJIN');
@@ -95,30 +108,29 @@ export class DemoBots {
     const nickname = `BOT ${names[n % names.length]}${n >= names.length ? Math.floor(n / names.length) + 1 : ''}`;
     const now = this.wall.now();
     const ap = s.config.apPerParticipant;
-    rt.dispatch(
-      { type: 'ADD_PARTICIPANT', participantId, teamId, nickname, isBot: true, ap },
-      () =>
-        this.repo.insertParticipant({
-          id: participantId,
-          match_id: rt.matchId,
-          team_id: teamId,
-          nickname_sanitized: nickname,
-          nickname_hidden: 0,
-          session_id_hash: sha256(newToken()),
-          device_hash: null,
-          source: 'DEMO',
-          status: 'ACTIVE',
-          joined_at: now,
-          confirmed_at: now,
-          ap_total: ap,
-          sponsored_pass_id: null,
-        }),
+    rt.dispatch({ type: 'ADD_PARTICIPANT', participantId, teamId, nickname, isBot: true, ap }, () =>
+      this.repo.insertParticipant({
+        id: participantId,
+        match_id: rt.matchId,
+        team_id: teamId,
+        nickname_sanitized: nickname,
+        nickname_hidden: 0,
+        session_id_hash: sha256(newToken()),
+        device_hash: null,
+        source: 'DEMO',
+        status: 'ACTIVE',
+        joined_at: now,
+        confirmed_at: now,
+        ap_total: ap,
+        sponsored_pass_id: null,
+      }),
     );
     const start = Math.max(2_000, s.gameMs + 1_000);
     const end = s.config.actionCloseMs - 2_000;
-    const schedule = Array.from({ length: ap }, () => start + this.rng() * Math.max(1, end - start)).sort(
-      (a, b) => a - b,
-    );
+    const schedule = Array.from(
+      { length: ap },
+      () => start + this.rng() * Math.max(1, end - start),
+    ).sort((a, b) => a - b);
     this.bots.push({ participantId, teamId, schedule });
   }
 }

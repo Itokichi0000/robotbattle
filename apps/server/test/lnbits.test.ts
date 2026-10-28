@@ -24,7 +24,12 @@ class FakeLnbits {
   constructor() {
     this.server = createServer(async (req, res) => {
       const body = await readBody(req);
-      this.requests.push({ method: req.method!, url: req.url!, key: req.headers['x-api-key'] as string, body });
+      this.requests.push({
+        method: req.method!,
+        url: req.url!,
+        key: req.headers['x-api-key'] as string,
+        body,
+      });
       if (req.headers['x-api-key'] !== this.key) {
         res.writeHead(401).end('{"detail":"Invalid key"}');
         return;
@@ -41,10 +46,21 @@ class FakeLnbits {
           return;
         }
         const hash = randomBytes(32).toString('hex');
-        this.invoices.set(hash, { paid: false, amount: b.amount, memo: b.memo, webhook: b.webhook });
-        res.writeHead(201, { 'content-type': 'application/json' }).end(
-          JSON.stringify({ payment_hash: hash, payment_request: `lnbc${b.amount}n1fake${hash.slice(0, 20)}`, checking_id: hash }),
-        );
+        this.invoices.set(hash, {
+          paid: false,
+          amount: b.amount,
+          memo: b.memo,
+          webhook: b.webhook,
+        });
+        res
+          .writeHead(201, { 'content-type': 'application/json' })
+          .end(
+            JSON.stringify({
+              payment_hash: hash,
+              payment_request: `lnbc${b.amount}n1fake${hash.slice(0, 20)}`,
+              checking_id: hash,
+            }),
+          );
         return;
       }
       const m = /^\/api\/v1\/payments\/([0-9a-f]{64})$/.exec(req.url ?? '');
@@ -54,7 +70,9 @@ class FakeLnbits {
           res.writeHead(404).end('{"detail":"not found"}');
           return;
         }
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ paid: inv.paid, preimage: null, details: {} }));
+        res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ paid: inv.paid, preimage: null, details: {} }));
         return;
       }
       res.writeHead(404).end('{}');
@@ -98,11 +116,22 @@ describe('LnbitsPaymentAdapter', () => {
   it('creates receive-only invoices with the invoice key and checks status', async () => {
     lnbits = await new FakeLnbits().start();
     const adapter = new LnbitsPaymentAdapter(`${lnbits.url}/`, lnbits.key);
-    const inv = await adapter.createInvoice({ amountSats: 21, memo: 'test', expirySeconds: 120, webhookUrl: 'https://x/hook' });
+    const inv = await adapter.createInvoice({
+      amountSats: 21,
+      memo: 'test',
+      expirySeconds: 120,
+      webhookUrl: 'https://x/hook',
+    });
     expect(inv.bolt11).toMatch(/^lnbc21n1/);
     const create = lnbits.requests[0]!;
     expect(create).toMatchObject({ method: 'POST', url: '/api/v1/payments', key: lnbits.key });
-    expect(create.body).toMatchObject({ out: false, amount: 21, unit: 'sat', expiry: 120, webhook: 'https://x/hook' });
+    expect(create.body).toMatchObject({
+      out: false,
+      amount: 21,
+      unit: 'sat',
+      expiry: 120,
+      webhook: 'https://x/hook',
+    });
     expect(await adapter.checkStatus(inv.checkingId, inv.paymentHash)).toBe('PENDING');
     lnbits.invoices.get(inv.paymentHash)!.paid = true;
     expect(await adapter.checkStatus(inv.checkingId, inv.paymentHash)).toBe('PAID');
@@ -111,7 +140,9 @@ describe('LnbitsPaymentAdapter', () => {
   it('surfaces HTTP errors and malformed responses as exceptions', async () => {
     lnbits = await new FakeLnbits().start();
     const bad = new LnbitsPaymentAdapter(lnbits.url, 'wrong-key');
-    await expect(bad.createInvoice({ amountSats: 21, memo: 'x', expirySeconds: 60 })).rejects.toThrow(/HTTP 401/);
+    await expect(
+      bad.createInvoice({ amountSats: 21, memo: 'x', expirySeconds: 60 }),
+    ).rejects.toThrow(/HTTP 401/);
     const adapter = new LnbitsPaymentAdapter(lnbits.url, lnbits.key);
     await expect(adapter.checkStatus('x', 'f'.repeat(64))).rejects.toThrow(/HTTP 404/);
   });
@@ -133,7 +164,12 @@ describe('server with LNbits adapter', () => {
     const token = await s.adminToken();
     await admin(s, token, { command: 'OPEN_LOBBY' });
     const r = (await reserve(s)).json();
-    const res = await s.inject({ method: 'POST', url: '/api/join/invoice', headers: auth(r.token), payload: { reservationId: r.reservationId } });
+    const res = await s.inject({
+      method: 'POST',
+      url: '/api/join/invoice',
+      headers: auth(r.token),
+      payload: { reservationId: r.reservationId },
+    });
     expect(res.statusCode).toBe(200);
     const row = s.services.repo.getInvoice(res.json().invoiceId)!;
     return { s, lnbits, r, row, invoice: res.json() };
@@ -150,7 +186,11 @@ describe('server with LNbits adapter', () => {
   it('forged webhook (LNbits says unpaid) grants nothing; real payment grants once', async () => {
     const { s, lnbits, r, row } = await setup();
     const hook = () =>
-      s.inject({ method: 'POST', url: '/api/webhooks/lnbits/whsec-test-0001', payload: { payment_hash: row.payment_hash } });
+      s.inject({
+        method: 'POST',
+        url: '/api/webhooks/lnbits/whsec-test-0001',
+        payload: { payment_hash: row.payment_hash },
+      });
     await hook();
     expect(s.services.repo.getInvoice(row.id)!.status).toBe('PENDING');
     lnbits.invoices.get(row.payment_hash)!.paid = true;
@@ -165,7 +205,10 @@ describe('server with LNbits adapter', () => {
     lnbits.invoices.get(row.payment_hash)!.paid = true;
     lnbits.failNext = 1;
     await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)).toMatchObject({ status: 'PENDING', check_failures: 1 });
+    expect(s.services.repo.getInvoice(row.id)).toMatchObject({
+      status: 'PENDING',
+      check_failures: 1,
+    });
     await s.services.join.pollPending();
     const me = (await s.inject({ url: '/api/me', headers: auth(r.token) })).json();
     expect(me.status).toBe('ACTIVE');
@@ -173,7 +216,14 @@ describe('server with LNbits adapter', () => {
 
   it('refuses to start lnbits mode without explicit approval', async () => {
     await expect(
-      makeServer({ env: { PAYMENT_MODE: 'lnbits', LNBITS_URL: 'http://x', LNBITS_INVOICE_KEY: 'k', LNBITS_WEBHOOK_SECRET: 's' } }),
+      makeServer({
+        env: {
+          PAYMENT_MODE: 'lnbits',
+          LNBITS_URL: 'http://x',
+          LNBITS_INVOICE_KEY: 'k',
+          LNBITS_WEBHOOK_SECRET: 's',
+        },
+      }),
     ).rejects.toThrow(/ALLOW_REAL_PAYMENTS/);
   });
 });

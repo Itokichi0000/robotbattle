@@ -16,11 +16,19 @@ export const regionLayoutSchema = z
 export const gameConfigSchema = z
   .object({
     version: z.string().min(1).max(64),
-    lobbyMs: z.number().int().min(0).max(30 * 60_000),
+    lobbyMs: z
+      .number()
+      .int()
+      .min(0)
+      .max(30 * 60_000),
     /** Start LIVE automatically when the lobby countdown ends. */
     autoStartAfterLobby: z.boolean(),
     /** Main game length (LIVE + FINALIZING). */
-    matchMs: z.number().int().min(10_000).max(60 * 60_000),
+    matchMs: z
+      .number()
+      .int()
+      .min(10_000)
+      .max(60 * 60_000),
     actionCloseMs: z.number().int().min(5_000),
     clashTimesMs: z.array(z.number().int().positive()).min(1).max(50),
     joinCloseMs: z.number().int().min(0),
@@ -43,8 +51,16 @@ export const gameConfigSchema = z
     damageMax: z.number().int().min(1),
     apPerParticipant: z.number().int().min(1).max(20),
     entryFeeSats: z.number().int().min(1).max(100_000),
-    invoiceTtlMs: z.number().int().min(30_000).max(60 * 60_000),
-    reservationTtlMs: z.number().int().min(30_000).max(60 * 60_000),
+    invoiceTtlMs: z
+      .number()
+      .int()
+      .min(30_000)
+      .max(60 * 60_000),
+    reservationTtlMs: z
+      .number()
+      .int()
+      .min(30_000)
+      .max(60 * 60_000),
     maxParticipantsPerTeam: z.number().int().min(1).max(10_000),
     regions: regionLayoutSchema,
   })
@@ -62,8 +78,12 @@ export const gameConfigSchema = z
 
 export type GameConfig = z.infer<typeof gameConfigSchema>;
 
-export const DEFAULT_GAME_CONFIG: GameConfig = {
-  version: 'mvp-1',
+/**
+ * The numbers from the original specification (balance hypothesis v1).
+ * Kept so rule tests read like the spec and operators can revert to it.
+ */
+export const SPEC_BASELINE_CONFIG: GameConfig = {
+  version: 'spec-baseline',
   lobbyMs: 30_000,
   autoStartAfterLobby: true,
   matchMs: 300_000,
@@ -92,6 +112,24 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   invoiceTtlMs: 120_000,
   reservationTtlMs: 180_000,
   maxParticipantsPerTeam: 100,
+  regions: DEFAULT_REGION_LAYOUT.map((r) => ({ ...r })),
+};
+
+/**
+ * Default config (mvp-2): SPEC_BASELINE tuned with the balance simulator so that
+ * matches rarely end before the last clashes and attack-only play is not dominant.
+ * See docs/BALANCE_REPORT.md and docs/DECISION_LOG.md (D-016).
+ */
+export const DEFAULT_GAME_CONFIG: GameConfig = {
+  ...SPEC_BASELINE_CONFIG,
+  version: 'mvp-2',
+  baseDamage: 8,
+  damageMax: 20,
+  attackRegionBonus: 2,
+  defenseRegionReduction: 3,
+  energyRegionGain: 6,
+  chargeAmount: 15,
+  specialBonus: 12,
   regions: DEFAULT_REGION_LAYOUT.map((r) => ({ ...r })),
 };
 

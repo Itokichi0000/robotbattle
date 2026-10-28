@@ -26,22 +26,41 @@ export function Finished({
     <div className="flex flex-col gap-4" data-testid="finished">
       <section className="sw-panel p-5 text-center">
         {stale ? (
-          <p className="text-lg font-bold">{L('前の試合は終了しました。', 'Your previous match has ended.')}</p>
+          <p className="text-lg font-bold">
+            {L('前の試合は終了しました。', 'Your previous match has ended.')}
+          </p>
         ) : result ? (
           <>
             <p className="text-sm text-off/70">{RESULT_REASON_LABELS[result.reason][locale]}</p>
-            <p className="sw-display mt-2 text-4xl font-black" style={{ color: result.winnerTeamId ? TEAM_META[result.winnerTeamId].color : undefined }}>
+            <p
+              className="sw-display mt-2 text-4xl font-black"
+              style={{
+                color: result.winnerTeamId ? TEAM_META[result.winnerTeamId].color : undefined,
+              }}
+            >
               {result.winnerTeamId
-                ? L(`${TEAM_META[result.winnerTeamId].nameJa}の勝利！`, `${TEAM_META[result.winnerTeamId].nameEn} WINS!`)
+                ? L(
+                    `${TEAM_META[result.winnerTeamId].nameJa}の勝利！`,
+                    `${TEAM_META[result.winnerTeamId].nameEn} WINS!`,
+                  )
                 : L('引き分け', 'DRAW')}
             </p>
-            {result.winnerTeamId && <p className="mt-2 text-xl font-bold">{won ? L('🎉 あなたのチームの勝ち！', '🎉 Your team won!') : L('ナイスファイト！', 'Nice fight!')}</p>}
+            {result.winnerTeamId && (
+              <p className="mt-2 text-xl font-bold">
+                {won
+                  ? L('🎉 あなたのチームの勝ち！', '🎉 Your team won!')
+                  : L('ナイスファイト！', 'Nice fight!')}
+              </p>
+            )}
             <p className="mt-2 text-sm text-off/80">
-              HP {result.finalHp.RAIJIN} - {result.finalHp.FUJIN} ／ {L('地域', 'Regions')} {result.regionCounts.RAIJIN} - {result.regionCounts.FUJIN}
+              HP {result.finalHp.RAIJIN} - {result.finalHp.FUJIN} ／ {L('地域', 'Regions')}{' '}
+              {result.regionCounts.RAIJIN} - {result.regionCounts.FUJIN}
             </p>
           </>
         ) : (
-          <p className="text-lg font-bold">{L('最終決戦中！会場スクリーンを見てね', 'Final showdown! Watch the screen')}</p>
+          <p className="text-lg font-bold">
+            {L('最終決戦中！会場スクリーンを見てね', 'Final showdown! Watch the screen')}
+          </p>
         )}
       </section>
       {c && (
@@ -64,7 +83,10 @@ export function Finished({
           </dl>
         </section>
       )}
-      <a className="sw-btn flex items-center justify-center bg-white/10 py-3" href={`/results/${me.matchId}`}>
+      <a
+        className="sw-btn flex items-center justify-center bg-white/10 py-3"
+        href={`/results/${me.matchId}`}
+      >
         {L('試合結果を見る', 'View match results')}
       </a>
       <button className="sw-btn bg-amber py-3 text-navy" onClick={onNext} data-testid="next-match">

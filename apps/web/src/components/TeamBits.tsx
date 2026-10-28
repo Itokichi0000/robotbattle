@@ -5,7 +5,15 @@ export function teamColor(t: TeamId | null): string {
   return t ? TEAM_META[t].color : '#41506E';
 }
 
-export function TeamBadge({ teamId, locale, className = '' }: { teamId: TeamId; locale: 'ja' | 'en'; className?: string }) {
+export function TeamBadge({
+  teamId,
+  locale,
+  className = '',
+}: {
+  teamId: TeamId;
+  locale: 'ja' | 'en';
+  className?: string;
+}) {
   const m = TEAM_META[teamId];
   return (
     <span
@@ -52,7 +60,9 @@ export function RobotGauge({
         <div className={`sw-display font-black ${nameCls}`} style={{ color: m.color }}>
           <span aria-hidden>{m.symbol} </span>
           {locale === 'ja' ? m.nameJa : m.nameEn}
-          <span className="ml-2 text-[0.45em] font-bold text-off/70">{locale === 'ja' ? m.nameEn : m.nameJa}</span>
+          <span className="ml-2 text-[0.45em] font-bold text-off/70">
+            {locale === 'ja' ? m.nameEn : m.nameJa}
+          </span>
         </div>
         <div className={`sw-display font-black tabular-nums ${numCls}`}>
           {hp}
@@ -78,10 +88,18 @@ export function RobotGauge({
       </div>
       <div className={`mt-1 flex items-center gap-2 ${dir}`}>
         <div className="relative h-2.5 flex-1 overflow-hidden rounded bg-black/50 ring-1 ring-white/10">
-          <div className="absolute inset-y-0 left-0 bg-yellow-300/90 transition-[width] duration-500" style={{ width: `${ePct}%` }} />
-          <div className="absolute inset-y-0 w-0.5 bg-white/70" style={{ left: `${(specialThreshold / energyMax) * 100}%` }} />
+          <div
+            className="absolute inset-y-0 left-0 bg-yellow-300/90 transition-[width] duration-500"
+            style={{ width: `${ePct}%` }}
+          />
+          <div
+            className="absolute inset-y-0 w-0.5 bg-white/70"
+            style={{ left: `${(specialThreshold / energyMax) * 100}%` }}
+          />
         </div>
-        <span className={`text-xs font-bold tabular-nums ${ready ? 'text-yellow-300' : 'text-off/70'}`}>
+        <span
+          className={`text-xs font-bold tabular-nums ${ready ? 'text-yellow-300' : 'text-off/70'}`}
+        >
           {locale === 'ja' ? 'EN' : 'EN'} {team.energy}/{energyMax}
           {ready ? (locale === 'ja' ? ' 必殺OK' : ' SPECIAL') : ''}
         </span>

@@ -32,7 +32,9 @@ export function Intro({
     setBusy(true);
     setError(null);
     try {
-      const r = await api<ReserveResponse>('/api/join/reserve', { body: { nickname, deviceId: deviceId() } });
+      const r = await api<ReserveResponse>('/api/join/reserve', {
+        body: { nickname, deviceId: deviceId() },
+      });
       onJoined({
         matchId: r.matchId,
         token: r.token,
@@ -51,7 +53,10 @@ export function Intro({
   const steps = [
     {
       n: 1,
-      title: L(`${cfg.entryFeeSats} satsで参加（またはスポンサーパス）`, `Join for ${cfg.entryFeeSats} sats (or a sponsored pass)`),
+      title: L(
+        `${cfg.entryFeeSats} satsで参加（またはスポンサーパス）`,
+        `Join for ${cfg.entryFeeSats} sats (or a sponsored pass)`,
+      ),
       body: L(
         `チームは自動で振り分け。参加すると${cfg.apPerParticipant}回分の行動ポイント(AP)がもらえます。`,
         `Teams are auto-balanced. You get ${cfg.apPerParticipant} action points (AP).`,
@@ -82,7 +87,9 @@ export function Intro({
         <ol className="mt-3 flex flex-col gap-3">
           {steps.map((s) => (
             <li key={s.n} className="flex gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber font-black text-navy">{s.n}</span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber font-black text-navy">
+                {s.n}
+              </span>
               <div>
                 <p className="font-bold">{s.title}</p>
                 <p className="text-sm text-off/80">{s.body}</p>
@@ -92,7 +99,11 @@ export function Intro({
         </ol>
         <div className="mt-4 grid grid-cols-2 gap-2 text-center text-sm font-bold">
           {(['RAIJIN', 'FUJIN'] as const).map((t) => (
-            <div key={t} className="rounded-lg py-2" style={{ background: `${TEAM_META[t].color}22`, color: TEAM_META[t].color }}>
+            <div
+              key={t}
+              className="rounded-lg py-2"
+              style={{ background: `${TEAM_META[t].color}22`, color: TEAM_META[t].color }}
+            >
               {TEAM_META[t].symbol} {L(TEAM_META[t].nameJa, TEAM_META[t].nameEn)}
               <div className="text-xs text-off/70">
                 {snap.teams[t].participantCount}
@@ -102,15 +113,24 @@ export function Intro({
           ))}
         </div>
         <p className="mt-2 text-center text-xs text-off/60">
-          {L('両チームの性能は同じです。見た目と演出だけが違います。', 'Both teams have identical stats; only the look differs.')}
+          {L(
+            '両チームの性能は同じです。見た目と演出だけが違います。',
+            'Both teams have identical stats; only the look differs.',
+          )}
         </p>
       </section>
 
       {snap.joinOpen ? (
         <section className="sw-panel p-4">
           {joinLeftMs !== null && (
-            <p className="mb-3 rounded-lg bg-yellow-400/15 px-3 py-2 text-sm font-bold text-yellow-200" role="status">
-              {L(`途中参加OK：受付終了まで ${formatClock(joinLeftMs)}`, `Late join open: closes in ${formatClock(joinLeftMs)}`)}
+            <p
+              className="mb-3 rounded-lg bg-yellow-400/15 px-3 py-2 text-sm font-bold text-yellow-200"
+              role="status"
+            >
+              {L(
+                `途中参加OK：受付終了まで ${formatClock(joinLeftMs)}`,
+                `Late join open: closes in ${formatClock(joinLeftMs)}`,
+              )}
             </p>
           )}
           <label className="block text-sm font-bold" htmlFor="nick">
@@ -127,16 +147,35 @@ export function Intro({
             data-testid="nickname"
           />
           <p className="mt-1 text-xs text-off/60">
-            {L(`最大${NICKNAME_MAX_LENGTH}文字。会場スクリーンに表示されることがあります。`, `Max ${NICKNAME_MAX_LENGTH} characters. May appear on the venue screen.`)}
+            {L(
+              `最大${NICKNAME_MAX_LENGTH}文字。会場スクリーンに表示されることがあります。`,
+              `Max ${NICKNAME_MAX_LENGTH} characters. May appear on the venue screen.`,
+            )}
           </p>
-          <button className="sw-btn mt-4 w-full bg-amber py-3 text-lg text-navy" disabled={busy} onClick={join} data-testid="join">
-            {busy ? L('予約中…', 'Reserving…') : L(`参加する（${snap.config.entryFeeSats} sats / スポンサーパス）`, `Join (${snap.config.entryFeeSats} sats / pass)`)}
+          <button
+            className="sw-btn mt-4 w-full bg-amber py-3 text-lg text-navy"
+            disabled={busy}
+            onClick={join}
+            data-testid="join"
+          >
+            {busy
+              ? L('予約中…', 'Reserving…')
+              : L(
+                  `参加する（${snap.config.entryFeeSats} sats / スポンサーパス）`,
+                  `Join (${snap.config.entryFeeSats} sats / pass)`,
+                )}
           </button>
           <p className="mt-2 text-xs text-off/70">
-            {L('次の画面で支払い方法を選べます。まだ料金は発生しません。', 'You choose how to pay on the next screen. Nothing is charged yet.')}
+            {L(
+              '次の画面で支払い方法を選べます。まだ料金は発生しません。',
+              'You choose how to pay on the next screen. Nothing is charged yet.',
+            )}
           </p>
           {error && (
-            <p className="mt-3 rounded bg-danger/15 px-3 py-2 text-sm font-bold text-danger" role="alert">
+            <p
+              className="mt-3 rounded bg-danger/15 px-3 py-2 text-sm font-bold text-danger"
+              role="alert"
+            >
               {error}
             </p>
           )}
@@ -148,15 +187,25 @@ export function Intro({
               ? L('まもなく参加受付が始まります', 'Joining opens soon')
               : snap.status === 'LIVE' || snap.status === 'PAUSED'
                 ? L('この試合の参加受付は終了しました', 'Joining has closed for this match')
-                : L('試合は終了しました。次の試合をお待ちください', 'This match is over. Please wait for the next one')}
+                : L(
+                    '試合は終了しました。次の試合をお待ちください',
+                    'This match is over. Please wait for the next one',
+                  )}
           </p>
           <p className="mt-1 text-sm text-off/70">
-            {L('料金は発生していません。観戦は無料です。', 'You have not been charged. Watching is free.')}
+            {L(
+              '料金は発生していません。観戦は無料です。',
+              'You have not been charged. Watching is free.',
+            )}
           </p>
         </section>
       )}
 
-      <button className="sw-btn w-full border border-line bg-transparent py-3" onClick={onSpectate} data-testid="spectate">
+      <button
+        className="sw-btn w-full border border-line bg-transparent py-3"
+        onClick={onSpectate}
+        data-testid="spectate"
+      >
         {L('観戦のみ（無料・ウォレット不要）', 'Watch only (free, no wallet)')}
       </button>
     </div>

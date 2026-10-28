@@ -34,10 +34,16 @@ export interface NicknameResult {
   replaced: boolean;
 }
 
-export function sanitizeNickname(raw: string | undefined | null, fallbackSuffix: string): NicknameResult {
+export function sanitizeNickname(
+  raw: string | undefined | null,
+  fallbackSuffix: string,
+): NicknameResult {
   const fallback = `Player-${fallbackSuffix.slice(0, 4).toUpperCase()}`;
   if (!raw) return { nickname: fallback, replaced: true };
-  let s = raw.normalize('NFKC').replace(STRIP_RE, '').replace(/[<>&"'`\\]/g, '');
+  let s = raw
+    .normalize('NFKC')
+    .replace(STRIP_RE, '')
+    .replace(/[<>&"'`\\]/g, '');
   s = s.replace(/\s+/g, ' ').trim();
   // Count by code points so emoji/surrogates are not split.
   const chars = Array.from(s);

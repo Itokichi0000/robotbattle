@@ -5,3 +5,4 @@ pnpm-lock.yaml
 coverage
 test-results
 playwright-report
+apps/web/public/assets/robots/generated

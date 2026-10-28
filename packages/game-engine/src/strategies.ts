@@ -20,7 +20,14 @@ export interface PlannedAction {
   regionId: RegionId | null;
 }
 
-export const STRATEGY_NAMES = ['random', 'balanced', 'aggressive', 'defensive', 'charger'] as const;
+export const STRATEGY_NAMES = [
+  'random',
+  'balanced',
+  'aggressive',
+  'defensive',
+  'charger',
+  'adaptive',
+] as const;
 export type StrategyName = (typeof STRATEGY_NAMES)[number];
 
 function pick<T>(rng: Rng, items: T[]): T | undefined {
@@ -33,13 +40,18 @@ export function legalActions(state: MatchState, teamId: TeamId): PlannedAction[]
   const enemy = otherTeam(teamId);
   for (const id of state.regionOrder) {
     const r = state.regions[id];
-    if (r.ownerTeamId === null || r.ownerTeamId === enemy) out.push({ actionType: 'ATTACK', regionId: id });
+    if (r.ownerTeamId === null || r.ownerTeamId === enemy)
+      out.push({ actionType: 'ATTACK', regionId: id });
     if (r.ownerTeamId === teamId && r.contestedByTeamId === enemy)
       out.push({ actionType: 'ATTACK', regionId: id });
-    if (r.ownerTeamId === teamId && (r.contestedByTeamId !== null || r.shieldCharges < state.config.shieldMax))
+    if (
+      r.ownerTeamId === teamId &&
+      (r.contestedByTeamId !== null || r.shieldCharges < state.config.shieldMax)
+    )
       out.push({ actionType: 'DEFEND', regionId: id });
   }
-  if (state.teams[teamId].energy < state.config.energyMax) out.push({ actionType: 'CHARGE', regionId: null });
+  if (state.teams[teamId].energy < state.config.energyMax)
+    out.push({ actionType: 'CHARGE', regionId: null });
   return out;
 }
 
@@ -59,8 +71,12 @@ export function chooseAction(
 
   const enemy = otherTeam(teamId);
   const regions = state.regionOrder.map((id) => state.regions[id]);
-  const ownContested = regions.filter((r) => r.ownerTeamId === teamId && r.contestedByTeamId === enemy);
-  const finishCapture = regions.filter((r) => r.ownerTeamId === enemy && r.contestedByTeamId === teamId);
+  const ownContested = regions.filter(
+    (r) => r.ownerTeamId === teamId && r.contestedByTeamId === enemy,
+  );
+  const finishCapture = regions.filter(
+    (r) => r.ownerTeamId === enemy && r.contestedByTeamId === teamId,
+  );
   const neutral = regions.filter((r) => r.ownerTeamId === null);
   const enemyOwned = regions.filter((r) => r.ownerTeamId === enemy && r.contestedByTeamId === null);
   const ownUnshielded = regions.filter(
@@ -77,7 +93,8 @@ export function chooseAction(
     const r = pick(rng, rs);
     return r ? { actionType: 'DEFEND', regionId: r.regionId } : null;
   };
-  const charge = (): PlannedAction | null => (canCharge ? { actionType: 'CHARGE', regionId: null } : null);
+  const charge = (): PlannedAction | null =>
+    canCharge ? { actionType: 'CHARGE', regionId: null } : null;
 
   const roll = rng();
   switch (strategy) {
@@ -109,6 +126,19 @@ export function chooseAction(
         pick(rng, legal) ??
         null
       );
+    case 'adaptive': {
+      // Reactive defence first, finish our contests, grab neutrals, then weigh
+      // charging higher as fewer clashes remain (captures pay off per clash).
+      if (ownContested.length) return defend(ownContested) ?? attack(ownContested);
+      if (finishCapture.length) return attack(finishCapture);
+      if (neutral.length) return attack(neutral);
+      const clashesLeft = state.config.clashTimesMs.filter((t) => t > state.gameMs).length;
+      const nearSpecial =
+        energy + state.config.chargeAmount >= state.config.specialThreshold &&
+        energy < state.config.specialThreshold;
+      if (canCharge && (nearSpecial || clashesLeft <= 2) && roll < 0.7) return charge();
+      return attack(enemyOwned) ?? charge() ?? pick(rng, legal) ?? null;
+    }
     case 'balanced':
     default: {
       // Urgent responses first, then a weighted mix.

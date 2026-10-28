@@ -23,21 +23,33 @@ export function registerAdminRoutes(
 
   const requireAdmin = (req: FastifyRequest): string => {
     const origin = req.headers.origin;
-    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
+    if (origin && !deps.isAllowedOrigin(origin))
+      throw new AppError('FORBIDDEN', 'origin not allowed');
     const session = adminAuth.verify(extractBearer(req.headers.authorization));
     if (!session) throw new AppError('UNAUTHORIZED', 'admin login required');
     return session.actor;
   };
 
-  app.post('/api/admin/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
-    const origin = req.headers.origin;
-    if (origin && !deps.isAllowedOrigin(origin)) throw new AppError('FORBIDDEN', 'origin not allowed');
-    const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
-    const token = adminAuth.login(password);
-    repo.audit('admin', token ? 'LOGIN' : 'LOGIN_FAILED', null, { ip: req.ip.replace(/\d+$/, 'x') }, wall.now());
-    if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
-    return { token };
-  });
+  app.post(
+    '/api/admin/login',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req) => {
+      const origin = req.headers.origin;
+      if (origin && !deps.isAllowedOrigin(origin))
+        throw new AppError('FORBIDDEN', 'origin not allowed');
+      const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
+      const token = adminAuth.login(password);
+      repo.audit(
+        'admin',
+        token ? 'LOGIN' : 'LOGIN_FAILED',
+        null,
+        { ip: req.ip.replace(/\d+$/, 'x') },
+        wall.now(),
+      );
+      if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
+      return { token };
+    },
+  );
 
   app.post('/api/admin/logout', async (req) => {
     adminAuth.logout(extractBearer(req.headers.authorization));
@@ -56,7 +68,10 @@ export function registerAdminRoutes(
       paymentsEnabled: manager.paymentsEnabled,
       demoBotsPerTeam: bots.enabledPerTeam,
       participantsByStatus: byStatus,
-      invoices: { currentMatch: repo.invoiceSummary(rt.matchId), allTime: repo.invoiceSummary(null) },
+      invoices: {
+        currentMatch: repo.invoiceSummary(rt.matchId),
+        allTime: repo.invoiceSummary(null),
+      },
       passes: repo.passSummary(),
       actions: repo.actionCounts(rt.matchId),
       realtime: deps.realtimeStats(),
@@ -83,7 +98,8 @@ export function registerAdminRoutes(
       case 'EMERGENCY_STOP': {
         manager.setPaymentsEnabled(false, actor);
         const st = manager.current().state.status;
-        if (st === 'LOBBY' || st === 'LIVE' || st === 'FINALIZING') manager.command('PAUSE', actor, 'EMERGENCY_STOP');
+        if (st === 'LOBBY' || st === 'LIVE' || st === 'FINALIZING')
+          manager.command('PAUSE', actor, 'EMERGENCY_STOP');
         repo.audit(actor, 'EMERGENCY_STOP', manager.current().matchId, null, wall.now());
         break;
       }
@@ -169,7 +185,10 @@ export function registerAdminRoutes(
     const actor = requireAdmin(req);
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
     const body = z
-      .object({ disposition: z.enum(['CARRY_OVER', 'REFUND_REQUESTED', 'RESOLVED']), note: z.string().max(500).default('') })
+      .object({
+        disposition: z.enum(['CARRY_OVER', 'REFUND_REQUESTED', 'RESOLVED']),
+        note: z.string().max(500).default(''),
+      })
       .parse(req.body ?? {});
     const inv = join.setLateDisposition(id, body.disposition, body.note, actor);
     return { ok: true, disposition: inv.late_payment_disposition };
@@ -180,7 +199,12 @@ export function registerAdminRoutes(
     const body = z
       .object({
         count: z.number().int().min(1).max(200),
-        expiresInMinutes: z.number().int().min(5).max(7 * 24 * 60).default(180),
+        expiresInMinutes: z
+          .number()
+          .int()
+          .min(5)
+          .max(7 * 24 * 60)
+          .default(180),
         label: z.string().max(60).default('sponsored'),
         currentMatchOnly: z.boolean().default(false),
       })
@@ -228,7 +252,9 @@ export function registerAdminRoutes(
 
   app.get('/api/admin/events', async (req) => {
     requireAdmin(req);
-    const { afterSeq } = z.object({ afterSeq: z.coerce.number().int().min(0).default(0) }).parse(req.query);
+    const { afterSeq } = z
+      .object({ afterSeq: z.coerce.number().int().min(0).default(0) })
+      .parse(req.query);
     return { events: repo.loadEvents(manager.current().matchId, afterSeq, 500) };
   });
 }

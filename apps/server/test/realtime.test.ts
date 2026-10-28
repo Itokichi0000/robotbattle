@@ -33,7 +33,11 @@ interface Client {
   gaps: number;
 }
 
-async function client(url: string, role: 'arena' | 'player' | 'spectator' = 'spectator', token?: string) {
+async function client(
+  url: string,
+  role: 'arena' | 'player' | 'spectator' = 'spectator',
+  token?: string,
+) {
   const socket: ClientSocket = connect(url, { transports: ['websocket'], forceNew: true });
   sockets.push(socket);
   const c: Client = { socket, store: new MatchStore(), events: [], gaps: 0 };
@@ -47,7 +51,9 @@ async function client(url: string, role: 'arena' | 'player' | 'spectator' = 'spe
   });
   await new Promise<void>((resolve, reject) => {
     socket.on('connect', () =>
-      socket.emit('joinRoom', { role, token }, (res) => (res.ok ? resolve() : reject(new Error(res.error)))),
+      socket.emit('joinRoom', { role, token }, (res) =>
+        res.ok ? resolve() : reject(new Error(res.error)),
+      ),
     );
     socket.on('connect_error', reject);
   });
@@ -65,7 +71,13 @@ async function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
 
 function comparable(snap: PublicMatchSnapshot | null) {
   if (!snap) return null;
-  return { regions: snap.regions, teams: snap.teams, status: snap.status, lastSeq: snap.lastSeq, clashes: snap.clashes };
+  return {
+    regions: snap.regions,
+    teams: snap.teams,
+    status: snap.status,
+    lastSeq: snap.lastSeq,
+    clashes: snap.clashes,
+  };
 }
 
 describe('realtime sync', () => {
@@ -129,7 +141,9 @@ describe('realtime sync', () => {
     c.socket.emit('joinRoom', { role: 'spectator' });
     const server = s.services.manager.snapshot();
     await waitFor(() => c.store.snapshot?.lastSeq === server.lastSeq);
-    expect(c.store.snapshot?.regions.find((r) => r.regionId === 'kinki')?.ownerTeamId).toBe(p.teamId);
+    expect(c.store.snapshot?.regions.find((r) => r.regionId === 'kinki')?.ownerTeamId).toBe(
+      p.teamId,
+    );
   });
 
   it('player sockets receive their own payment status and action acks only', async () => {
@@ -161,7 +175,9 @@ describe('realtime sync', () => {
     s = await makeServer();
     const url = await listen(s);
     const c = await client(url);
-    const t = await new Promise<number>((resolve) => c.socket.emit('timeSync', Date.now(), resolve));
+    const t = await new Promise<number>((resolve) =>
+      c.socket.emit('timeSync', Date.now(), resolve),
+    );
     expect(t).toBe(s.clock.now());
   });
 });

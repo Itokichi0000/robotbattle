@@ -3,7 +3,13 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { RegionId, RegionState, TeamId } from '@sats-wars/shared';
-import { REGION_CENTROIDS, REGION_INFO, REGION_KIND_META, REGION_OUTLINES, TEAM_META } from '@sats-wars/shared';
+import {
+  REGION_CENTROIDS,
+  REGION_INFO,
+  REGION_KIND_META,
+  REGION_OUTLINES,
+  TEAM_META,
+} from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect } from './director';
 import { MAP_TRANSFORM, TEAM_COLORS } from './layout';
 
@@ -29,14 +35,24 @@ interface RegionVisual {
 }
 
 /** Floating hologram of Japan's 8 regions. Colours/markers mirror server state only. */
-export function MapOverlay({ regions, director, gameMsRef, reducedMotion, locale }: MapOverlayProps) {
+export function MapOverlay({
+  regions,
+  director,
+  gameMsRef,
+  reducedMotion,
+  locale,
+}: MapOverlayProps) {
   const visuals = useMemo(() => {
     const out = {} as Record<RegionId, RegionVisual>;
-    for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<[RegionId, (typeof REGION_OUTLINES)[RegionId]]>) {
+    for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<
+      [RegionId, (typeof REGION_OUTLINES)[RegionId]]
+    >) {
       const geometries: THREE.BufferGeometry[] = [];
       for (const poly of polys) {
         const shape = new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x, p.y)));
-        geometries.push(new THREE.ExtrudeGeometry(shape, { depth: EXTRUDE_DEPTH, bevelEnabled: false }));
+        geometries.push(
+          new THREE.ExtrudeGeometry(shape, { depth: EXTRUDE_DEPTH, bevelEnabled: false }),
+        );
         const pts = poly.map((p) => new THREE.Vector3(p.x, p.y, EXTRUDE_DEPTH + 0.01));
         pts.push(pts[0]!.clone());
         geometries.push(new THREE.BufferGeometry().setFromPoints(pts));
@@ -70,14 +86,26 @@ export function MapOverlay({ regions, director, gameMsRef, reducedMotion, locale
   );
 
   const byId = useMemo(() => new Map(regions.map((r) => [r.regionId, r])), [regions]);
-  const pulses = useRef<Array<{ regionId: RegionId; teamId: TeamId | null; start: number; kind: DirectorEffect['kind'] }>>([]);
+  const pulses = useRef<
+    Array<{
+      regionId: RegionId;
+      teamId: TeamId | null;
+      start: number;
+      kind: DirectorEffect['kind'];
+    }>
+  >([]);
   const pulseMeshes = useRef<Array<THREE.Mesh | null>>([]);
 
   useEffect(
     () =>
       director.onEffect((e) => {
         if ((e.kind === 'regionPulse' || e.kind === 'shield') && e.regionId) {
-          pulses.current.push({ regionId: e.regionId, teamId: e.teamId, start: director.time, kind: e.kind });
+          pulses.current.push({
+            regionId: e.regionId,
+            teamId: e.teamId,
+            start: director.time,
+            kind: e.kind,
+          });
           if (pulses.current.length > 8) pulses.current.shift();
         }
       }),
@@ -140,7 +168,11 @@ export function MapOverlay({ regions, director, gameMsRef, reducedMotion, locale
         <ringGeometry args={[10.2, 10.5, 96]} />
         <meshBasicMaterial color="#3A7BD5" transparent opacity={0.7} />
       </mesh>
-      <gridHelper args={[20, 20, '#1F4A7A', '#14304F']} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.05]} />
+      <gridHelper
+        args={[20, 20, '#1F4A7A', '#14304F']}
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[0, 0, -0.05]}
+      />
 
       {(Object.keys(visuals) as RegionId[]).map((id) => {
         const v = visuals[id];
@@ -218,8 +250,16 @@ function RegionMarker({
           <meshBasicMaterial color={color} wireframe transparent opacity={0.7} />
         </mesh>
       )}
-      <Html position={[0, -0.55, 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
-        <div className={`sw-map-label ${region.contestedByTeamId ? 'is-contested' : ''}`} data-owner={region.ownerTeamId ?? 'NEUTRAL'}>
+      <Html
+        position={[0, -0.55, 0.3]}
+        center
+        zIndexRange={[10, 0]}
+        style={{ pointerEvents: 'none' }}
+      >
+        <div
+          className={`sw-map-label ${region.contestedByTeamId ? 'is-contested' : ''}`}
+          data-owner={region.ownerTeamId ?? 'NEUTRAL'}
+        >
           <span className="sw-map-label-name">
             {kind.icon} {locale === 'ja' ? info.shortJa : info.labelEn}
           </span>

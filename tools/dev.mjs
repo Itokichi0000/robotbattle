@@ -30,7 +30,8 @@ const procs = [
   const prefix = `${color}[${name}]\x1b[0m `;
   const pipe = (stream, out) =>
     stream.on('data', (buf) => {
-      for (const line of buf.toString().split('\n')) if (line.trim()) out.write(prefix + line + '\n');
+      for (const line of buf.toString().split('\n'))
+        if (line.trim()) out.write(prefix + line + '\n');
     });
   pipe(p.stdout, process.stdout);
   pipe(p.stderr, process.stderr);
@@ -51,4 +52,6 @@ function shutdown(code) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
-console.log(`\nSATS WARS ${mode}:\n  /        http://localhost:3000/\n  /play    http://localhost:3000/play\n  /arena   http://localhost:3000/arena\n  /admin   http://localhost:3000/admin\n  server   http://localhost:4000/health\n`);
+console.log(
+  `\nSATS WARS ${mode}:\n  /        http://localhost:3000/\n  /play    http://localhost:3000/play\n  /arena   http://localhost:3000/arena\n  /admin   http://localhost:3000/admin\n  server   http://localhost:4000/health\n`,
+);

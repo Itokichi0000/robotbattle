@@ -30,7 +30,9 @@ export class SfxEngine {
   async unlock(): Promise<boolean> {
     try {
       if (!this.ctx) {
-        const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        const Ctor =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!Ctor) return false;
         this.ctx = new Ctor();
         this.master = this.ctx.createGain();
@@ -59,7 +61,8 @@ export class SfxEngine {
   }
 
   private applyVolume(): void {
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime, 0.05);
+    if (this.master && this.ctx)
+      this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime, 0.05);
   }
 
   play(name: SfxName): void {
@@ -96,7 +99,9 @@ export class SfxEngine {
         this.noiseBurst(t + 1.6, 1.0, 900, 'lowpass', 0.8);
         break;
       case 'victory':
-        [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * 0.14, f, f, 0.5, 'triangle', 0.3));
+        [523, 659, 784, 1047].forEach((f, i) =>
+          this.tone(t + i * 0.14, f, f, 0.5, 'triangle', 0.3),
+        );
         break;
       case 'ko':
         this.tone(t, 400, 60, 1.2, 'square', 0.2);
@@ -119,7 +124,14 @@ export class SfxEngine {
     return g;
   }
 
-  private tone(t: number, f0: number, f1: number, dur: number, type: OscillatorType, peak: number): void {
+  private tone(
+    t: number,
+    f0: number,
+    f1: number,
+    dur: number,
+    type: OscillatorType,
+    peak: number,
+  ): void {
     const o = this.ctx!.createOscillator();
     o.type = type;
     o.frequency.setValueAtTime(f0, t);
@@ -129,7 +141,13 @@ export class SfxEngine {
     o.stop(t + dur + 0.05);
   }
 
-  private noiseBurst(t: number, dur: number, freq: number, type: BiquadFilterType, peak: number): void {
+  private noiseBurst(
+    t: number,
+    dur: number,
+    freq: number,
+    type: BiquadFilterType,
+    peak: number,
+  ): void {
     const src = this.ctx!.createBufferSource();
     src.buffer = this.noise;
     const f = this.ctx!.createBiquadFilter();

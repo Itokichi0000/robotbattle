@@ -36,7 +36,12 @@ export function RobotActor({ teamId, director, energyRatio }: RobotActorProps) {
   });
 
   return (
-    <group ref={outer} position={[home.x, 0, home.z]} rotation={[0, home.ry, 0]} name={`robot-${teamId}`}>
+    <group
+      ref={outer}
+      position={[home.x, 0, home.z]}
+      rotation={[0, home.ry, 0]}
+      name={`robot-${teamId}`}
+    >
       <primitive object={rig.root} />
     </group>
   );

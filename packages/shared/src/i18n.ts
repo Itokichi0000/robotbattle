@@ -13,32 +13,34 @@ export const STATUS_LABELS: Record<MatchStatus, { ja: string; en: string }> = {
   CANCELLED: { ja: '中止', en: 'Cancelled' },
 };
 
-export const ACTION_CODE_LABELS: Record<ActionOkCode | ActionErrorCode, { ja: string; en: string }> =
-  {
-    CAPTURED: { ja: '占領成功！', en: 'Captured!' },
-    SHIELD_BROKEN: { ja: '敵のシールドを破壊！', en: 'Enemy shield broken!' },
-    CONTEST_STARTED: {
-      ja: '争奪開始！25秒以内に味方がもう一度攻撃すれば占領',
-      en: 'Contest started! One more team attack within 25s captures it',
-    },
-    CONTEST_BROKEN: { ja: '争奪を阻止！', en: 'Contest broken!' },
-    SHIELD_PLACED: { ja: 'シールド設置！', en: 'Shield placed!' },
-    CHARGED: { ja: 'エネルギー充電！', en: 'Energy charged!' },
-    MATCH_NOT_LIVE: { ja: '試合中ではありません', en: 'The match is not live' },
-    MATCH_PAUSED: { ja: '一時停止中です', en: 'The match is paused' },
-    ACTIONS_CLOSED: { ja: 'アクション受付は終了しました', en: 'Actions are closed' },
-    UNKNOWN_PARTICIPANT: { ja: '参加情報が見つかりません', en: 'Participant not found' },
-    NO_AP: { ja: 'APが残っていません', en: 'No AP left' },
-    INVALID_REGION: { ja: '地域が正しくありません', en: 'Invalid region' },
-    REGION_REQUIRED: { ja: '地域を選んでください', en: 'Choose a region' },
-    OWN_REGION_NOT_CONTESTED: {
-      ja: '味方の地域です（争奪中のときだけ攻撃で阻止できます）',
-      en: 'Your own region (attack only to break an enemy contest)',
-    },
-    NOT_OWN_REGION: { ja: '味方の地域にだけ防御できます', en: 'You can only defend your own region' },
-    SHIELD_ALREADY_ACTIVE: { ja: 'シールドはすでに設置済みです', en: 'Shield already active' },
-    ENERGY_FULL: { ja: 'エネルギーは満タンです', en: 'Energy is already full' },
-  };
+export const ACTION_CODE_LABELS: Record<
+  ActionOkCode | ActionErrorCode,
+  { ja: string; en: string }
+> = {
+  CAPTURED: { ja: '占領成功！', en: 'Captured!' },
+  SHIELD_BROKEN: { ja: '敵のシールドを破壊！', en: 'Enemy shield broken!' },
+  CONTEST_STARTED: {
+    ja: '争奪開始！25秒以内に味方がもう一度攻撃すれば占領',
+    en: 'Contest started! One more team attack within 25s captures it',
+  },
+  CONTEST_BROKEN: { ja: '争奪を阻止！', en: 'Contest broken!' },
+  SHIELD_PLACED: { ja: 'シールド設置！', en: 'Shield placed!' },
+  CHARGED: { ja: 'エネルギー充電！', en: 'Energy charged!' },
+  MATCH_NOT_LIVE: { ja: '試合中ではありません', en: 'The match is not live' },
+  MATCH_PAUSED: { ja: '一時停止中です', en: 'The match is paused' },
+  ACTIONS_CLOSED: { ja: 'アクション受付は終了しました', en: 'Actions are closed' },
+  UNKNOWN_PARTICIPANT: { ja: '参加情報が見つかりません', en: 'Participant not found' },
+  NO_AP: { ja: 'APが残っていません', en: 'No AP left' },
+  INVALID_REGION: { ja: '地域が正しくありません', en: 'Invalid region' },
+  REGION_REQUIRED: { ja: '地域を選んでください', en: 'Choose a region' },
+  OWN_REGION_NOT_CONTESTED: {
+    ja: '味方の地域です（争奪中のときだけ攻撃で阻止できます）',
+    en: 'Your own region (attack only to break an enemy contest)',
+  },
+  NOT_OWN_REGION: { ja: '味方の地域にだけ防御できます', en: 'You can only defend your own region' },
+  SHIELD_ALREADY_ACTIVE: { ja: 'シールドはすでに設置済みです', en: 'Shield already active' },
+  ENERGY_FULL: { ja: 'エネルギーは満タンです', en: 'Energy is already full' },
+};
 
 export const RESULT_REASON_LABELS: Record<ResultReason, { ja: string; en: string }> = {
   KO: { ja: 'KO勝利', en: 'Win by KO' },

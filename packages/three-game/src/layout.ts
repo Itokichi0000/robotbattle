@@ -35,7 +35,10 @@ export function robotWorldPosition(teamId: TeamId, height = 2): THREE.Vector3 {
   return new THREE.Vector3(h.x, height, h.z);
 }
 
-export const CAMERA_PRESETS: Record<CameraPresetName, { position: [number, number, number]; target: [number, number, number] }> = {
+export const CAMERA_PRESETS: Record<
+  CameraPresetName,
+  { position: [number, number, number]; target: [number, number, number] }
+> = {
   intro: { position: [0, 13, 27], target: [0, 4, -2] },
   overview: { position: [0, 6.0, 18.5], target: [0, 4.0, -2.4] },
   clash: { position: [0, 3.3, 9.2], target: [0, 2.5, 0] },
@@ -54,7 +57,10 @@ export const TEAM_COLORS: Record<TeamId | 'NEUTRAL', string> = {
 
 export type Quality = 'low' | 'medium' | 'high';
 
-export const QUALITY_SETTINGS: Record<Quality, { dpr: [number, number]; shadows: boolean; particles: number; antialias: boolean; stars: number }> = {
+export const QUALITY_SETTINGS: Record<
+  Quality,
+  { dpr: [number, number]; shadows: boolean; particles: number; antialias: boolean; stars: number }
+> = {
   low: { dpr: [0.75, 1], shadows: false, particles: 120, antialias: false, stars: 150 },
   medium: { dpr: [1, 1.5], shadows: false, particles: 300, antialias: true, stars: 400 },
   high: { dpr: [1, 2], shadows: true, particles: 600, antialias: true, stars: 800 },

@@ -3,7 +3,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { PublicMatchSnapshot, RoomRole } from '@sats-wars/shared';
 import { MatchConnection } from './connection';
 
-export function useMatchConnection(role: RoomRole, token: string | null = null): MatchConnection | null {
+export function useMatchConnection(
+  role: RoomRole,
+  token: string | null = null,
+): MatchConnection | null {
   const [conn, setConn] = useState<MatchConnection | null>(null);
   const tokenRef = useRef(token);
   tokenRef.current = token;

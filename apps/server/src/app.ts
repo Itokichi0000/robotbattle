@@ -113,7 +113,10 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     },
   };
 
-  await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } });
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  });
   await app.register(cors, {
     origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
     methods: ['GET', 'POST', 'PUT'],
@@ -140,13 +143,21 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
       return reply.code(err.statusCode).send({ error: err.code, message: err.message });
     }
     if (err instanceof ZodError) {
-      return reply.code(400).send({ error: 'BAD_REQUEST', message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
+      return reply
+        .code(400)
+        .send({
+          error: 'BAD_REQUEST',
+          message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+        });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status >= 400 && status < 500) {
       return reply
         .code(status)
-        .send({ error: status === 429 ? 'RATE_LIMITED' : 'BAD_REQUEST', message: (err as Error).message });
+        .send({
+          error: status === 429 ? 'RATE_LIMITED' : 'BAD_REQUEST',
+          message: (err as Error).message,
+        });
     }
     req.log.error({ err }, 'unhandled error');
     return reply.code(500).send({ error: 'INTERNAL', message: 'Internal error' });

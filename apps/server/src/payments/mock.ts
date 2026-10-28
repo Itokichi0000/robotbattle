@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { WallClock } from '../clock';
-import type { CreateInvoiceInput, CreatedInvoice, PaymentAdapter, ProviderInvoiceStatus } from './adapter';
+import type {
+  CreateInvoiceInput,
+  CreatedInvoice,
+  PaymentAdapter,
+  ProviderInvoiceStatus,
+} from './adapter';
 
 interface MockInvoice {
   paid: boolean;

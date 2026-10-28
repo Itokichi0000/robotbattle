@@ -45,13 +45,17 @@ export function Arena2D({
   const robot = (t: TeamId) => {
     const cue = director.robots[t];
     const hit = cue.clip === 'HitReact';
-    const attack = cue.clip === 'AttackHeavy' || cue.clip === 'AttackLight' || cue.clip === 'Special';
+    const attack =
+      cue.clip === 'AttackHeavy' || cue.clip === 'AttackLight' || cue.clip === 'Special';
     const down = cue.clip === 'Defeat';
     const dx = attack ? (t === 'RAIJIN' ? 60 : -60) : hit ? (t === 'RAIJIN' ? -25 : 25) : 0;
     return (
       <div
         className="flex flex-col items-center transition-transform duration-300"
-        style={{ transform: `translateX(${dx}px) rotate(${down ? (t === 'RAIJIN' ? -20 : 20) : 0}deg)`, opacity: down ? 0.5 : 1 }}
+        style={{
+          transform: `translateX(${dx}px) rotate(${down ? (t === 'RAIJIN' ? -20 : 20) : 0}deg)`,
+          opacity: down ? 0.5 : 1,
+        }}
         data-testid={`robot2d-${t}`}
       >
         <div
@@ -75,10 +79,19 @@ export function Arena2D({
   };
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center gap-8 bg-[radial-gradient(ellipse_at_center,#13254a_0%,#070D1A_70%)] px-[4vw] pt-[10vh]" data-testid="arena-2d">
+    <div
+      className="absolute inset-0 flex items-center justify-center gap-8 bg-[radial-gradient(ellipse_at_center,#13254a_0%,#070D1A_70%)] px-[4vw] pt-[10vh]"
+      data-testid="arena-2d"
+    >
       {robot('RAIJIN')}
       <div className="relative h-[62vh] w-[44vw]">
-        <JapanMap2D regions={snap.regions} locale={locale} gameMs={gameMsRef.current} className="h-full w-full" labelScale={1.3} />
+        <JapanMap2D
+          regions={snap.regions}
+          locale={locale}
+          gameMs={gameMsRef.current}
+          className="h-full w-full"
+          labelScale={1.3}
+        />
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10">
           <Emblem size={300} />
         </div>

@@ -14,7 +14,13 @@ export function DirectorClock({ director }: { director: ArenaDirector }) {
  * Camera presets driven by the director with smooth easing and optional shake.
  * Reduced-motion mode cuts between presets instead of flying, and never shakes.
  */
-export function CameraRig({ director, reducedMotion }: { director: ArenaDirector; reducedMotion: boolean }) {
+export function CameraRig({
+  director,
+  reducedMotion,
+}: {
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
   const { camera } = useThree();
   const target = useRef(new THREE.Vector3(...CAMERA_PRESETS.intro.target));
   const desiredPos = useMemo(() => new THREE.Vector3(), []);
@@ -66,8 +72,18 @@ export function LightingRig({ shadows }: { shadows: boolean }) {
         shadow-camera-top={12}
         shadow-camera-bottom={-12}
       />
-      <pointLight position={[ROBOT_HOME.RAIJIN.x - 2, 3.5, 3]} intensity={30} distance={14} color={TEAM_COLORS.RAIJIN} />
-      <pointLight position={[ROBOT_HOME.FUJIN.x + 2, 3.5, 3]} intensity={30} distance={14} color={TEAM_COLORS.FUJIN} />
+      <pointLight
+        position={[ROBOT_HOME.RAIJIN.x - 2, 3.5, 3]}
+        intensity={30}
+        distance={14}
+        color={TEAM_COLORS.RAIJIN}
+      />
+      <pointLight
+        position={[ROBOT_HOME.FUJIN.x + 2, 3.5, 3]}
+        intensity={30}
+        distance={14}
+        color={TEAM_COLORS.FUJIN}
+      />
       <pointLight position={[0, 8, -6]} intensity={25} distance={18} color="#3A7BD5" />
     </>
   );
@@ -161,7 +177,10 @@ export function PerformanceProbe({ onStats }: { onStats: (s: FrameStats) => void
     a.frames++;
     a.time += dt;
     if (a.time >= 1) {
-      onStats({ fps: Math.round(a.frames / a.time), frameMs: Math.round((a.time / a.frames) * 1000 * 10) / 10 });
+      onStats({
+        fps: Math.round(a.frames / a.time),
+        frameMs: Math.round((a.time / a.frames) * 1000 * 10) / 10,
+      });
       a.frames = 0;
       a.time = 0;
     }

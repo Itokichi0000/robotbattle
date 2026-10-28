@@ -203,7 +203,11 @@ export class ArenaDirector {
     if (this.banner && this.banner.until <= this.time) this.setBanner(null);
     for (const t of TEAMS) {
       const r = this.robots[t];
-      if (!LOOPING_CLIPS.has(r.clip) && r.clip !== 'Defeat' && this.time - r.start > CLIP_DURATION[r.clip] + 0.05) {
+      if (
+        !LOOPING_CLIPS.has(r.clip) &&
+        r.clip !== 'Defeat' &&
+        this.time - r.start > CLIP_DURATION[r.clip] + 0.05
+      ) {
         this.setClip(t, 'Idle', r.advance);
       }
     }
@@ -248,7 +252,13 @@ export class ArenaDirector {
       const dur = short ? 1.4 : 3.2;
       const s0 = s;
       this.at(s0, () => {
-        this.setCamera(specials.length === 2 ? 'clash' : specials[0] === 'RAIJIN' ? 'specialRAIJIN' : 'specialFUJIN');
+        this.setCamera(
+          specials.length === 2
+            ? 'clash'
+            : specials[0] === 'RAIJIN'
+              ? 'specialRAIJIN'
+              : 'specialFUJIN',
+        );
         for (const t of specials) {
           this.setClip(t, 'Special', 0);
           this.emitEffect('specialStorm', t, null, this.time, short ? 0.5 : 1);
@@ -289,7 +299,13 @@ export class ArenaDirector {
       this.emitEffect('sparks', null, null, this.time, 1);
       this.emitEffect('shockwave', null, null, this.time, 1);
       // Each team's signature effect lands on the opponent.
-      this.emitEffect('lightning', 'RAIJIN', null, this.time, clash.outcome.RAIJIN.special ? 1.5 : 1);
+      this.emitEffect(
+        'lightning',
+        'RAIJIN',
+        null,
+        this.time,
+        clash.outcome.RAIJIN.special ? 1.5 : 1,
+      );
       this.emitEffect('wind', 'FUJIN', null, this.time, clash.outcome.FUJIN.special ? 1.5 : 1);
       this.addShake(0.6 + (specials.length ? 0.4 : 0));
       this.sound('hit', null);
@@ -342,7 +358,13 @@ export class ArenaDirector {
       } else {
         this.setCamera('final');
         for (const t of TEAMS) this.setClip(t, 'Guard', 0);
-        this.setBanner({ kind: 'draw', teamId: null, textJa: '引き分け！', textEn: 'DRAW!', until: s + 30 });
+        this.setBanner({
+          kind: 'draw',
+          teamId: null,
+          textJa: '引き分け！',
+          textEn: 'DRAW!',
+          until: s + 30,
+        });
       }
     });
     this.busyUntil = s + 1;
@@ -380,7 +402,14 @@ export class ArenaDirector {
     intensity: number,
   ): void {
     const scaled = this.settings.reducedMotion ? intensity * 0.5 : intensity;
-    const e: DirectorEffect = { id: ++this.effectId, kind, teamId, regionId, at, intensity: scaled };
+    const e: DirectorEffect = {
+      id: ++this.effectId,
+      kind,
+      teamId,
+      regionId,
+      at,
+      intensity: scaled,
+    };
     for (const l of this.effectListeners) l(e);
   }
 }

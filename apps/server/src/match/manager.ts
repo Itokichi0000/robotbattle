@@ -73,7 +73,13 @@ export class MatchManager {
   setPaymentsEnabled(enabled: boolean, actor: string): void {
     const before = this.paymentsEnabled;
     this.repo.setSetting('paymentsEnabled', enabled);
-    this.repo.audit(actor, 'SET_PAYMENTS_ENABLED', null, { before, after: enabled }, this.opts.wall.now());
+    this.repo.audit(
+      actor,
+      'SET_PAYMENTS_ENABLED',
+      null,
+      { before, after: enabled },
+      this.opts.wall.now(),
+    );
   }
 
   get nextConfig(): GameConfig {
@@ -86,11 +92,20 @@ export class MatchManager {
   setNextConfig(input: unknown, actor: string): GameConfig {
     const parsed = gameConfigSchema.safeParse(input);
     if (!parsed.success) {
-      throw new AppError('BAD_REQUEST', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+      throw new AppError(
+        'BAD_REQUEST',
+        parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      );
     }
     const before = this.nextConfig;
     this.repo.setSetting('nextConfig', parsed.data);
-    this.repo.audit(actor, 'SET_NEXT_CONFIG', null, { before, after: parsed.data }, this.opts.wall.now());
+    this.repo.audit(
+      actor,
+      'SET_NEXT_CONFIG',
+      null,
+      { before, after: parsed.data },
+      this.opts.wall.now(),
+    );
     return parsed.data;
   }
 
@@ -147,7 +162,10 @@ export class MatchManager {
     const now = this.opts.wall.now();
     if (cmd === 'NEXT_MATCH') {
       if (before !== 'FINISHED' && before !== 'CANCELLED' && before !== 'CREATED') {
-        throw new AppError('INVALID_COMMAND', '現在の試合が終了していません / Current match is not finished');
+        throw new AppError(
+          'INVALID_COMMAND',
+          '現在の試合が終了していません / Current match is not finished',
+        );
       }
       if (before === 'CREATED') {
         // Nothing happened yet: discard by cancelling so history stays consistent.
@@ -191,9 +209,17 @@ export class MatchManager {
     this.unbind?.();
     this.runtime = rt;
     this.unbind = rt.onEvents((events, state) => {
-      if (events.some((e) => e.type === 'MATCH_STATUS_CHANGED' && (e.data.to === 'FINISHED' || e.data.to === 'CANCELLED'))) {
+      if (
+        events.some(
+          (e) =>
+            e.type === 'MATCH_STATUS_CHANGED' &&
+            (e.data.to === 'FINISHED' || e.data.to === 'CANCELLED'),
+        )
+      ) {
         // Freeze a final public snapshot for /results.
-        this.repo.tx(() => this.repo.saveMatchProjection(state, this.opts.wall.now(), this.snapshot()));
+        this.repo.tx(() =>
+          this.repo.saveMatchProjection(state, this.opts.wall.now(), this.snapshot()),
+        );
       }
       for (const l of this.eventListeners) l(events, state);
     });

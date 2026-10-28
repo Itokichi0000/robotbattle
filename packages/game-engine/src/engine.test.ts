@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionType, GameConfig, MatchState, RegionId, TeamId } from '@sats-wars/shared';
-import { DEFAULT_GAME_CONFIG, makeGameConfig } from '@sats-wars/shared';
+import { SPEC_BASELINE_CONFIG as DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
+
+/** Rule tests use the spec's baseline numbers so expectations match the written spec. */
+const makeGameConfig = (o: Partial<GameConfig> = {}) =>
+  gameConfigSchema.parse({ ...DEFAULT_GAME_CONFIG, ...o });
 import { type EngineCommand, createMatchState, reduce, replay } from './engine';
 import { computeDamage, decideResult } from './rules';
 
@@ -36,7 +40,13 @@ class Harness {
     });
   }
   /** Act at game time `gameMs` (LIVE started at clock 0). */
-  act(id: string, actionType: ActionType, regionId: RegionId | null, gameMs?: number, cid?: string) {
+  act(
+    id: string,
+    actionType: ActionType,
+    regionId: RegionId | null,
+    gameMs?: number,
+    cid?: string,
+  ) {
     const t = gameMs ?? this.state.clockMs;
     const r = this.run({
       type: 'ACTION',
@@ -440,7 +450,11 @@ describe('clash resolution', () => {
     expect(h2.state.result).toMatchObject({ winnerTeamId: 'FUJIN', reason: 'TIME_HP' });
 
     // Same HP, more regions: give each side a region of a kind that does not change damage
-    const cfg = makeGameConfig({ attackRegionBonus: 0, defenseRegionReduction: 0, energyRegionGain: 0 });
+    const cfg = makeGameConfig({
+      attackRegionBonus: 0,
+      defenseRegionReduction: 0,
+      energyRegionGain: 0,
+    });
     const h3 = teamsWithPlayers(cfg);
     h3.act('r1', 'ATTACK', 'kanto', 1000);
     h3.act('r1', 'ATTACK', 'chubu', 1000);

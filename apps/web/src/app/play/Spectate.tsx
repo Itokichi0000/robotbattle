@@ -8,7 +8,15 @@ import type { MatchConnection } from '@/lib/connection';
 import { useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 
-export function Spectate({ snap, conn, onBack }: { snap: PublicMatchSnapshot; conn: MatchConnection; onBack: () => void }) {
+export function Spectate({
+  snap,
+  conn,
+  onBack,
+}: {
+  snap: PublicMatchSnapshot;
+  conn: MatchConnection;
+  onBack: () => void;
+}) {
   const { L, locale } = useI18n();
   useTicker(500);
   const { gameMs } = conn.now();
@@ -16,8 +24,25 @@ export function Spectate({ snap, conn, onBack }: { snap: PublicMatchSnapshot; co
   return (
     <div className="flex flex-col gap-3" data-testid="spectate-view">
       <section className="sw-panel grid grid-cols-2 gap-3 p-3">
-        <RobotGauge team={snap.teams.RAIJIN} hp={snap.teams.RAIJIN.hp} hpMax={cfg.hpMax} energyMax={cfg.energyMax} specialThreshold={cfg.specialThreshold} locale={locale} size="sm" />
-        <RobotGauge team={snap.teams.FUJIN} hp={snap.teams.FUJIN.hp} hpMax={cfg.hpMax} energyMax={cfg.energyMax} specialThreshold={cfg.specialThreshold} locale={locale} size="sm" align="right" />
+        <RobotGauge
+          team={snap.teams.RAIJIN}
+          hp={snap.teams.RAIJIN.hp}
+          hpMax={cfg.hpMax}
+          energyMax={cfg.energyMax}
+          specialThreshold={cfg.specialThreshold}
+          locale={locale}
+          size="sm"
+        />
+        <RobotGauge
+          team={snap.teams.FUJIN}
+          hp={snap.teams.FUJIN.hp}
+          hpMax={cfg.hpMax}
+          energyMax={cfg.energyMax}
+          specialThreshold={cfg.specialThreshold}
+          locale={locale}
+          size="sm"
+          align="right"
+        />
       </section>
       {snap.nextClash && snap.status === 'LIVE' && (
         <p className="text-center font-bold">
@@ -25,7 +50,12 @@ export function Spectate({ snap, conn, onBack }: { snap: PublicMatchSnapshot; co
         </p>
       )}
       <div className="sw-panel p-2">
-        <JapanMap2D regions={snap.regions} locale={locale} gameMs={gameMs} className="mx-auto h-[340px] w-full" />
+        <JapanMap2D
+          regions={snap.regions}
+          locale={locale}
+          gameMs={gameMs}
+          className="mx-auto h-[340px] w-full"
+        />
       </div>
       <EventFeed events={snap.recentEvents} limit={6} />
       <button className="sw-btn bg-white/10 py-3" onClick={onBack}>

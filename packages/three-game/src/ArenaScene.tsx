@@ -6,8 +6,15 @@ import type { ArenaDirector } from './director';
 import { Effects } from './Effects';
 import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS } from './layout';
 import { MapOverlay } from './MapOverlay';
-import { RobotActor } from './RobotActor';
-import { ArenaStage, CameraRig, DirectorClock, type FrameStats, LightingRig, PerformanceProbe } from './SceneParts';
+import { ModelRobotActor } from './GlbRobotActor';
+import {
+  ArenaStage,
+  CameraRig,
+  DirectorClock,
+  type FrameStats,
+  LightingRig,
+  PerformanceProbe,
+} from './SceneParts';
 
 export interface ArenaSceneProps {
   director: ArenaDirector;
@@ -21,6 +28,9 @@ export interface ArenaSceneProps {
   onStats?: (s: FrameStats) => void;
   /** Called when the WebGL context is lost so the page can fall back to 2D. */
   onContextLost?: () => void;
+  /** Optional GLB URLs per team (same joint/clip names); procedural robots otherwise. */
+  robotModels?: Partial<Record<TeamId, string>>;
+  onModelError?: (e: unknown) => void;
 }
 
 /**
@@ -37,7 +47,11 @@ export function ArenaScene(props: ArenaSceneProps) {
     <Canvas
       shadows={q.shadows}
       dpr={q.dpr}
-      gl={{ antialias: q.antialias, powerPreference: 'high-performance', preserveDrawingBuffer: false }}
+      gl={{
+        antialias: q.antialias,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: false,
+      }}
       camera={{ fov: 42, near: 0.1, far: 200, position: CAMERA_PRESETS.intro.position }}
       onCreated={({ gl }) => {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
@@ -62,8 +76,20 @@ export function ArenaScene(props: ArenaSceneProps) {
         reducedMotion={reducedMotion}
         locale={props.locale}
       />
-      <RobotActor teamId="RAIJIN" director={director} energyRatio={teams.RAIJIN.energy / props.energyMax} />
-      <RobotActor teamId="FUJIN" director={director} energyRatio={teams.FUJIN.energy / props.energyMax} />
+      <ModelRobotActor
+        teamId="RAIJIN"
+        url={props.robotModels?.RAIJIN}
+        director={director}
+        energyRatio={teams.RAIJIN.energy / props.energyMax}
+        onModelError={props.onModelError}
+      />
+      <ModelRobotActor
+        teamId="FUJIN"
+        url={props.robotModels?.FUJIN}
+        director={director}
+        energyRatio={teams.FUJIN.energy / props.energyMax}
+        onModelError={props.onModelError}
+      />
       <Effects director={director} maxParticles={q.particles} reducedMotion={reducedMotion} />
       <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
     </Canvas>

@@ -147,8 +147,10 @@ export class JoinService {
 
   private requireOpenReservation(p: ParticipantRow, reservationId: string) {
     const res = this.repo.getReservation(reservationId);
-    if (!res || res.participant_id !== p.id) throw new AppError('NOT_FOUND', 'reservation not found');
-    if (p.status === 'ACTIVE') throw new AppError('ALREADY_ACTIVE', 'すでに参加確定しています / Already active');
+    if (!res || res.participant_id !== p.id)
+      throw new AppError('NOT_FOUND', 'reservation not found');
+    if (p.status === 'ACTIVE')
+      throw new AppError('ALREADY_ACTIVE', 'すでに参加確定しています / Already active');
     if (res.status !== 'ACTIVE' || res.expires_at <= this.now()) {
       throw new AppError(
         'RESERVATION_EXPIRED',
@@ -156,7 +158,10 @@ export class JoinService {
       );
     }
     if (res.match_id !== this.opts.manager.current().matchId) {
-      throw new AppError('JOIN_CLOSED', 'この試合の受付は終了しました / This match no longer accepts joins');
+      throw new AppError(
+        'JOIN_CLOSED',
+        'この試合の受付は終了しました / This match no longer accepts joins',
+      );
     }
     return res;
   }
@@ -176,7 +181,8 @@ export class JoinService {
     if (existing && existing.status === 'PENDING' && existing.expires_at > this.now() + 15_000) {
       return this.invoiceResponse(existing);
     }
-    if (!manager.joinOpen()) throw new AppError('JOIN_CLOSED', '参加受付は終了しました / Joining closed');
+    if (!manager.joinOpen())
+      throw new AppError('JOIN_CLOSED', '参加受付は終了しました / Joining closed');
     const cfg = manager.current().state.config;
     // Never let an invoice outlive the action window: nobody should pay and be unable to act.
     const ttl = Math.min(cfg.invoiceTtlMs, manager.msUntilActionsClose() - 30_000);
@@ -225,7 +231,11 @@ export class JoinService {
       this.repo.insertInvoice(row);
       this.repo.setParticipantStatus(p.id, 'PENDING_PAYMENT');
       // Hold the seat while the invoice is payable.
-      this.repo.setReservationStatus(res.id, 'ACTIVE', Math.max(res.expires_at, row.expires_at + 30_000));
+      this.repo.setReservationStatus(
+        res.id,
+        'ACTIVE',
+        Math.max(res.expires_at, row.expires_at + 30_000),
+      );
     });
     return this.invoiceResponse(row);
   }
@@ -300,7 +310,11 @@ export class JoinService {
           ap,
         },
         () => {
-          this.repo.updateInvoice(inv.id, { status: 'PAID', verified_at: now, fulfillment_at: now });
+          this.repo.updateInvoice(inv.id, {
+            status: 'PAID',
+            verified_at: now,
+            fulfillment_at: now,
+          });
           this.repo.setParticipantStatus(p.id, 'ACTIVE', { confirmedAt: now, apTotal: ap });
           this.repo.setReservationStatus(inv.reservation_id, 'CONFIRMED');
         },
@@ -315,7 +329,13 @@ export class JoinService {
         verified_at: now,
         late_payment_disposition: 'PENDING_REVIEW',
       });
-      this.repo.audit('system', 'LATE_PAYMENT', inv.id, { participantId: p.id, matchId: inv.match_id }, now);
+      this.repo.audit(
+        'system',
+        'LATE_PAYMENT',
+        inv.id,
+        { participantId: p.id, matchId: inv.match_id },
+        now,
+      );
     });
     this.opts.log?.warn({ invoiceId }, 'late payment needs operator review');
     this.push(p.id);
@@ -355,7 +375,13 @@ export class JoinService {
 
   // ---- sponsored passes ---------------------------------------------------
 
-  issuePasses(count: number, expiresInMs: number, label: string, actor: string, matchId: string | null): string[] {
+  issuePasses(
+    count: number,
+    expiresInMs: number,
+    label: string,
+    actor: string,
+    matchId: string | null,
+  ): string[] {
     const now = this.now();
     const codes: string[] = [];
     this.repo.tx(() => {
@@ -383,7 +409,8 @@ export class JoinService {
   redeemPass(p: ParticipantRow, reservationId: string, code: string): PaymentStatusPush {
     const { manager } = this.opts;
     this.requireOpenReservation(p, reservationId);
-    if (!manager.joinOpen()) throw new AppError('JOIN_CLOSED', '参加受付は終了しました / Joining closed');
+    if (!manager.joinOpen())
+      throw new AppError('JOIN_CLOSED', '参加受付は終了しました / Joining closed');
     const hash = sha256(normalizePassCode(code));
     const pass = this.repo.getPass(hash);
     const now = this.now();
@@ -394,7 +421,10 @@ export class JoinService {
       pass.expires_at <= now ||
       (pass.match_id !== null && pass.match_id !== rt.matchId)
     ) {
-      throw new AppError('INVALID_PASS', 'パスが無効か使用済みです / Pass is invalid or already used');
+      throw new AppError(
+        'INVALID_PASS',
+        'パスが無効か使用済みです / Pass is invalid or already used',
+      );
     }
     const ap = rt.state.config.apPerParticipant;
     rt.dispatch(
@@ -408,11 +438,24 @@ export class JoinService {
       },
       () => {
         if (!this.repo.redeemPass(hash, p.id, now)) {
-          throw new AppError('INVALID_PASS', 'パスが無効か使用済みです / Pass is invalid or already used');
+          throw new AppError(
+            'INVALID_PASS',
+            'パスが無効か使用済みです / Pass is invalid or already used',
+          );
         }
-        this.repo.setParticipantStatus(p.id, 'ACTIVE', { confirmedAt: now, apTotal: ap, passId: hash });
+        this.repo.setParticipantStatus(p.id, 'ACTIVE', {
+          confirmedAt: now,
+          apTotal: ap,
+          passId: hash,
+        });
         this.repo.setReservationStatus(reservationId, 'CONFIRMED');
-        this.repo.audit('participant', 'REDEEM_PASS', hash.slice(0, 12), { participantId: p.id }, now);
+        this.repo.audit(
+          'participant',
+          'REDEEM_PASS',
+          hash.slice(0, 12),
+          { participantId: p.id },
+          now,
+        );
       },
     );
     this.push(p.id);
@@ -473,7 +516,8 @@ export class JoinService {
   ): InvoiceRow {
     const inv = this.repo.getInvoice(invoiceId);
     if (!inv) throw new AppError('NOT_FOUND', 'invoice not found');
-    if (inv.status !== 'LATE_PAID') throw new AppError('INVALID_COMMAND', 'invoice is not a late payment');
+    if (inv.status !== 'LATE_PAID')
+      throw new AppError('INVALID_COMMAND', 'invoice is not a late payment');
     const now = this.now();
     this.repo.tx(() => {
       let code: string | null = inv.carryover_pass_code;
@@ -497,7 +541,13 @@ export class JoinService {
         late_payment_note: note.slice(0, 500),
         carryover_pass_code: code,
       });
-      this.repo.audit(actor, 'LATE_PAYMENT_DISPOSITION', inv.id, { disposition, note: note.slice(0, 500) }, now);
+      this.repo.audit(
+        actor,
+        'LATE_PAYMENT_DISPOSITION',
+        inv.id,
+        { disposition, note: note.slice(0, 500) },
+        now,
+      );
     });
     this.push(inv.participant_id);
     return this.repo.getInvoice(invoiceId)!;

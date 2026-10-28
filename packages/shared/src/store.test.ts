@@ -18,11 +18,39 @@ function snap(lastSeq = 0): PublicMatchSnapshot {
     running: true,
     serverTime: 0,
     teams: {
-      RAIJIN: { teamId: 'RAIJIN', robotId: 'raijin', hp: 100, energy: 0, participantCount: 0, apRemaining: 0, apTotal: 0, actionCount: 0 },
-      FUJIN: { teamId: 'FUJIN', robotId: 'fujin', hp: 100, energy: 0, participantCount: 0, apRemaining: 0, apTotal: 0, actionCount: 0 },
+      RAIJIN: {
+        teamId: 'RAIJIN',
+        robotId: 'raijin',
+        hp: 100,
+        energy: 0,
+        participantCount: 0,
+        apRemaining: 0,
+        apTotal: 0,
+        actionCount: 0,
+      },
+      FUJIN: {
+        teamId: 'FUJIN',
+        robotId: 'fujin',
+        hp: 100,
+        energy: 0,
+        participantCount: 0,
+        apRemaining: 0,
+        apTotal: 0,
+        actionCount: 0,
+      },
     },
     regions: [
-      { regionId: 'kanto', kind: 'ENERGY', ownerTeamId: null, contestedByTeamId: null, contestedUntil: null, shieldCharges: 0, shieldExpiresAt: null, updatedAt: 0, revision: 0 },
+      {
+        regionId: 'kanto',
+        kind: 'ENERGY',
+        ownerTeamId: null,
+        contestedByTeamId: null,
+        contestedUntil: null,
+        shieldCharges: 0,
+        shieldExpiresAt: null,
+        updatedAt: 0,
+        revision: 0,
+      },
     ],
     nextClash: { index: 0, atGameMs: 45_000 },
     clashes: [],
@@ -44,9 +72,28 @@ function captureEvent(seq: number): GameEvent {
     t: 1000,
     gameMs: 1000,
     type: 'ACTION_APPLIED',
-    data: { participantId: 'p', nickname: 'n', teamId: 'FUJIN', actionType: 'ATTACK', regionId: 'kanto', code: 'CAPTURED' },
+    data: {
+      participantId: 'p',
+      nickname: 'n',
+      teamId: 'FUJIN',
+      actionType: 'ATTACK',
+      regionId: 'kanto',
+      code: 'CAPTURED',
+    },
     patch: {
-      regions: [{ regionId: 'kanto', kind: 'ENERGY', ownerTeamId: 'FUJIN', contestedByTeamId: null, contestedUntil: null, shieldCharges: 0, shieldExpiresAt: null, updatedAt: 1000, revision: 1 }],
+      regions: [
+        {
+          regionId: 'kanto',
+          kind: 'ENERGY',
+          ownerTeamId: 'FUJIN',
+          contestedByTeamId: null,
+          contestedUntil: null,
+          shieldCharges: 0,
+          shieldExpiresAt: null,
+          updatedAt: 1000,
+          revision: 1,
+        },
+      ],
     },
   };
 }
@@ -66,7 +113,18 @@ describe('MatchStore', () => {
     s.applySnapshot(snap(5));
     expect(s.applyEvent(captureEvent(8), 0)).toBe('gap');
     expect(s.applyEvent({ ...captureEvent(6), matchId: 'other' }, 0)).toBe('gap');
-    expect(s.applyClock({ matchId: 'm', status: 'LIVE', clockMs: 1, gameMs: 1, liveStartClock: 0, running: true, serverTime: 1, lastSeq: 9 })).toBe('gap');
+    expect(
+      s.applyClock({
+        matchId: 'm',
+        status: 'LIVE',
+        clockMs: 1,
+        gameMs: 1,
+        liveStartClock: 0,
+        running: true,
+        serverTime: 1,
+        lastSeq: 9,
+      }),
+    ).toBe('gap');
   });
   it('ignores stale snapshots of the same match', () => {
     const s = new MatchStore();

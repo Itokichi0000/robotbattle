@@ -200,13 +200,20 @@ export function openDatabase(path: string): Db {
 }
 
 function migrate(db: Db): void {
-  db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  const row = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as { v: number | null };
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)',
+  );
+  const row = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as {
+    v: number | null;
+  };
   const current = row.v ?? 0;
   for (let i = current; i < MIGRATIONS.length; i++) {
     transaction(db, () => {
       db.exec(MIGRATIONS[i]!);
-      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(i + 1, Date.now());
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(
+        i + 1,
+        Date.now(),
+      );
     });
   }
 }

@@ -49,14 +49,20 @@ export class ActionService {
   submit(p: ParticipantRow, req: ActionRequest): ActionResponse {
     const rt = this.manager.current();
     if (p.match_id !== rt.matchId) {
-      throw new AppError('FORBIDDEN', 'この試合の参加者ではありません / Not a participant of the current match');
+      throw new AppError(
+        'FORBIDDEN',
+        'この試合の参加者ではありません / Not a participant of the current match',
+      );
     }
     if (p.status !== 'ACTIVE') {
       throw new AppError('FORBIDDEN', '参加が確定していません / Participation not confirmed yet');
     }
     const now = this.wall.now();
     if (!this.limiter.allow(p.id, now)) {
-      throw new AppError('RATE_LIMITED', '操作が多すぎます。少し待ってください / Too many requests');
+      throw new AppError(
+        'RATE_LIMITED',
+        '操作が多すぎます。少し待ってください / Too many requests',
+      );
     }
     const r = rt.dispatch(
       {

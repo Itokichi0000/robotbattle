@@ -25,20 +25,22 @@ export function createRealtime(
   services: Services,
   isAllowedOrigin: (origin: string | undefined) => boolean,
 ) {
-  const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(
-    httpServer,
-    {
-      cors: {
-        origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
-        credentials: false,
-      },
-      allowRequest: (req, cb) => cb(null, isAllowedOrigin(req.headers.origin)),
-      pingInterval: 10_000,
-      pingTimeout: 8_000,
-      maxHttpBufferSize: 16_384,
-      connectionStateRecovery: undefined,
+  const io = new Server<
+    ClientToServerEvents,
+    ServerToClientEvents,
+    Record<string, never>,
+    SocketData
+  >(httpServer, {
+    cors: {
+      origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
+      credentials: false,
     },
-  );
+    allowRequest: (req, cb) => cb(null, isAllowedOrigin(req.headers.origin)),
+    pingInterval: 10_000,
+    pingTimeout: 8_000,
+    maxHttpBufferSize: 16_384,
+    connectionStateRecovery: undefined,
+  });
   const { manager, join, actions, adminAuth, wall } = services;
   const arenaStatus = new Map<string, ArenaStatus & { socketId: string; updatedAt: number }>();
 

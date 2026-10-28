@@ -127,7 +127,10 @@ export class Repo {
 
   // ---- settings -----------------------------------------------------------
   getSetting<T>(key: string): T | undefined {
-    const row = this.get<{ value_json: string }>('SELECT value_json FROM settings WHERE key = ?', key);
+    const row = this.get<{ value_json: string }>(
+      'SELECT value_json FROM settings WHERE key = ?',
+      key,
+    );
     return row ? (JSON.parse(row.value_json) as T) : undefined;
   }
   setSetting(key: string, value: unknown): void {
@@ -181,7 +184,12 @@ export class Repo {
     ).map((r) => JSON.parse(r.command_json) as EngineCommand);
   }
   commandCount(matchId: string): number {
-    return this.get<{ n: number }>('SELECT COUNT(*) AS n FROM match_commands WHERE match_id = ?', matchId)?.n ?? 0;
+    return (
+      this.get<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM match_commands WHERE match_id = ?',
+        matchId,
+      )?.n ?? 0
+    );
   }
 
   /** Persist engine-derived projections for querying/reporting. */
@@ -342,7 +350,10 @@ export class Repo {
     );
   }
   listParticipants(matchId: string): ParticipantRow[] {
-    return this.all<ParticipantRow>('SELECT * FROM participants WHERE match_id = ? ORDER BY joined_at', matchId);
+    return this.all<ParticipantRow>(
+      'SELECT * FROM participants WHERE match_id = ? ORDER BY joined_at',
+      matchId,
+    );
   }
   setParticipantStatus(
     id: string,
@@ -399,7 +410,10 @@ export class Repo {
     return this.get<ReservationRow>('SELECT * FROM join_reservations WHERE id = ?', id);
   }
   getReservationByParticipant(participantId: string): ReservationRow | undefined {
-    return this.get<ReservationRow>('SELECT * FROM join_reservations WHERE participant_id = ?', participantId);
+    return this.get<ReservationRow>(
+      'SELECT * FROM join_reservations WHERE participant_id = ?',
+      participantId,
+    );
   }
   setReservationStatus(id: string, status: ReservationRow['status'], expiresAt?: number): void {
     this.run(
@@ -467,7 +481,11 @@ export class Repo {
   }
   listInvoices(matchId: string | null, limit: number): InvoiceRow[] {
     return matchId
-      ? this.all<InvoiceRow>('SELECT * FROM invoices WHERE match_id = ? ORDER BY created_at DESC LIMIT ?', matchId, limit)
+      ? this.all<InvoiceRow>(
+          'SELECT * FROM invoices WHERE match_id = ? ORDER BY created_at DESC LIMIT ?',
+          matchId,
+          limit,
+        )
       : this.all<InvoiceRow>('SELECT * FROM invoices ORDER BY created_at DESC LIMIT ?', limit);
   }
   updateInvoice(
@@ -506,7 +524,9 @@ export class Repo {
   /** Remove BOLT11 strings from settled/expired invoices older than the retention window. */
   purgeBolt11(olderThan: number): number {
     const r = this.db
-      .prepare("UPDATE invoices SET bolt11 = NULL WHERE bolt11 IS NOT NULL AND created_at < ? AND status != 'PENDING'")
+      .prepare(
+        "UPDATE invoices SET bolt11 = NULL WHERE bolt11 IS NOT NULL AND created_at < ? AND status != 'PENDING'",
+      )
       .run(olderThan);
     return Number(r.changes);
   }
@@ -599,12 +619,17 @@ export class Repo {
   }
   revokePass(hash: string): boolean {
     const r = this.db
-      .prepare("UPDATE sponsored_passes SET status = 'REVOKED' WHERE id_hash = ? AND status = 'ISSUED'")
+      .prepare(
+        "UPDATE sponsored_passes SET status = 'REVOKED' WHERE id_hash = ? AND status = 'ISSUED'",
+      )
       .run(hash);
     return Number(r.changes) === 1;
   }
   listPasses(limit: number): PassRow[] {
-    return this.all<PassRow>('SELECT * FROM sponsored_passes ORDER BY issued_at DESC LIMIT ?', limit);
+    return this.all<PassRow>(
+      'SELECT * FROM sponsored_passes ORDER BY issued_at DESC LIMIT ?',
+      limit,
+    );
   }
   passSummary(): Record<string, number> {
     const rows = this.all<{ status: string; n: number }>(
@@ -614,7 +639,13 @@ export class Repo {
   }
 
   // ---- audit --------------------------------------------------------------
-  audit(actor: string, action: string, targetId: string | null, beforeAfter: unknown, now: number): void {
+  audit(
+    actor: string,
+    action: string,
+    targetId: string | null,
+    beforeAfter: unknown,
+    now: number,
+  ): void {
     this.run(
       'INSERT INTO admin_audit_log (actor, action, target_id, before_after_json, timestamp) VALUES (?, ?, ?, ?, ?)',
       actor,

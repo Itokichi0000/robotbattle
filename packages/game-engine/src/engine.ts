@@ -15,7 +15,12 @@ import type {
   TeamState,
 } from '@sats-wars/shared';
 import { TEAM_IDS, TEAM_META, otherTeam } from '@sats-wars/shared';
-import { decideResult, emptyContribution, resolveClashOutcome, snapshotTeamForClash } from './rules';
+import {
+  decideResult,
+  emptyContribution,
+  resolveClashOutcome,
+  snapshotTeamForClash,
+} from './rules';
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -379,7 +384,8 @@ function startLive(ctx: Ctx, reason: string): void {
 
 function openLobby(ctx: Ctx): CommandOutcome {
   const s = ctx.state;
-  if (s.status !== 'CREATED') return { kind: 'rejected', reason: `cannot open lobby from ${s.status}` };
+  if (s.status !== 'CREATED')
+    return { kind: 'rejected', reason: `cannot open lobby from ${s.status}` };
   s.lobbyOpenedAtClock = s.clockMs;
   s.liveStartClock = s.config.autoStartAfterLobby ? s.clockMs + s.config.lobbyMs : null;
   s.gameMs = s.liveStartClock !== null ? s.clockMs - s.liveStartClock : 0;

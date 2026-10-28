@@ -28,12 +28,21 @@ export function ResultsView({ matchId }: { matchId: string }) {
         </p>
         {r ? (
           <>
-            <p className="sw-display mt-2 text-4xl font-black" style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}>
-              {r.winnerTeamId ? L(`${TEAM_META[r.winnerTeamId].nameJa}の勝利！`, `${TEAM_META[r.winnerTeamId].nameEn} WINS!`) : RESULT_REASON_LABELS[r.reason][locale]}
+            <p
+              className="sw-display mt-2 text-4xl font-black"
+              style={{ color: r.winnerTeamId ? TEAM_META[r.winnerTeamId].color : undefined }}
+            >
+              {r.winnerTeamId
+                ? L(
+                    `${TEAM_META[r.winnerTeamId].nameJa}の勝利！`,
+                    `${TEAM_META[r.winnerTeamId].nameEn} WINS!`,
+                  )
+                : RESULT_REASON_LABELS[r.reason][locale]}
             </p>
             <p className="mt-1">{RESULT_REASON_LABELS[r.reason][locale]}</p>
             <p className="mt-2">
-              HP {r.finalHp.RAIJIN} - {r.finalHp.FUJIN} · {L('地域', 'Regions')} {r.regionCounts.RAIJIN} - {r.regionCounts.FUJIN}
+              HP {r.finalHp.RAIJIN} - {r.finalHp.FUJIN} · {L('地域', 'Regions')}{' '}
+              {r.regionCounts.RAIJIN} - {r.regionCounts.FUJIN}
             </p>
           </>
         ) : (

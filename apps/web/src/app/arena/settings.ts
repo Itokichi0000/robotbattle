@@ -10,6 +10,8 @@ export interface ArenaSettings {
   volume: number;
   muted: boolean;
   showStats: boolean;
+  /** auto = use GLB models when a manifest exists; procedural = always the code-built robots. */
+  models: 'auto' | 'procedural';
 }
 
 const DEFAULTS: ArenaSettings = {
@@ -21,6 +23,7 @@ const DEFAULTS: ArenaSettings = {
   volume: 0.7,
   muted: false,
   showStats: false,
+  models: 'auto',
 };
 
 const KEY = 'sw.arena.settings';
@@ -42,7 +45,10 @@ export function loadArenaSettings(): ArenaSettings {
     if (mode === '2d' || mode === '3d') s.renderer = mode;
     if (q.get('reduced') === '1') s.reducedMotion = true;
     if (q.get('stats') === '1') s.showStats = true;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && !saved) s.reducedMotion = true;
+    const models = q.get('models');
+    if (models === 'auto' || models === 'procedural') s.models = models;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && !saved)
+      s.reducedMotion = true;
   }
   return s;
 }
@@ -58,4 +64,24 @@ export function webglAvailable(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Robot model URLs from the first manifest found (committed art first, then generated). */
+export async function loadRobotModels(): Promise<Partial<
+  Record<'RAIJIN' | 'FUJIN', string>
+> | null> {
+  for (const dir of ['/assets/robots', '/assets/robots/generated']) {
+    try {
+      const r = await fetch(`${dir}/manifest.json`, { cache: 'no-store' });
+      if (!r.ok) continue;
+      const m = (await r.json()) as { RAIJIN?: string; FUJIN?: string };
+      const out: Partial<Record<'RAIJIN' | 'FUJIN', string>> = {};
+      if (m.RAIJIN) out.RAIJIN = `${dir}/${m.RAIJIN}`;
+      if (m.FUJIN) out.FUJIN = `${dir}/${m.FUJIN}`;
+      return out;
+    } catch {
+      // try next
+    }
+  }
+  return null;
 }

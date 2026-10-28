@@ -107,7 +107,11 @@ class Builder {
     return m;
   }
 
-  joint(name: JointName, parent: THREE.Object3D | null, position: [number, number, number]): THREE.Group {
+  joint(
+    name: JointName,
+    parent: THREE.Object3D | null,
+    position: [number, number, number],
+  ): THREE.Group {
     const g = new THREE.Group();
     g.name = name;
     g.position.set(...position);
@@ -178,11 +182,33 @@ export function buildRaijin(): RobotRig {
   // Lightning zig-zags on both pectorals
   for (const side of [-1, 1]) {
     const zx = side * 0.62;
-    b.mesh(J.Chest, new THREE.BoxGeometry(0.06, 0.32, 0.04), glow, [zx, 0.72, 0.59], [0, 0, 0.6 * side]);
-    b.mesh(J.Chest, new THREE.BoxGeometry(0.06, 0.32, 0.04), glow, [zx + 0.08 * side, 0.46, 0.59], [0, 0, -0.6 * side]);
-    b.mesh(J.Chest, new THREE.BoxGeometry(0.06, 0.26, 0.04), glow, [zx, 0.24, 0.59], [0, 0, 0.6 * side]);
+    b.mesh(
+      J.Chest,
+      new THREE.BoxGeometry(0.06, 0.32, 0.04),
+      glow,
+      [zx, 0.72, 0.59],
+      [0, 0, 0.6 * side],
+    );
+    b.mesh(
+      J.Chest,
+      new THREE.BoxGeometry(0.06, 0.32, 0.04),
+      glow,
+      [zx + 0.08 * side, 0.46, 0.59],
+      [0, 0, -0.6 * side],
+    );
+    b.mesh(
+      J.Chest,
+      new THREE.BoxGeometry(0.06, 0.26, 0.04),
+      glow,
+      [zx, 0.24, 0.59],
+      [0, 0, 0.6 * side],
+    );
     // Abstract wave-pattern panels (seigaiha-inspired, simplified)
-    b.mesh(J.Chest, new THREE.TorusGeometry(0.16, 0.025, 6, 16, Math.PI), iron, [side * 0.35, 0.86, 0.585]);
+    b.mesh(J.Chest, new THREE.TorusGeometry(0.16, 0.025, 6, 16, Math.PI), iron, [
+      side * 0.35,
+      0.86,
+      0.585,
+    ]);
   }
 
   // Thunder drum ring (taiko) — signature silhouette
@@ -198,8 +224,21 @@ export function buildRaijin(): RobotRig {
     drum.position.set(Math.cos(a) * 1.3, Math.sin(a) * 1.3, 0);
     drum.rotation.z = a;
     back.add(drum);
-    b.mesh(drum, new THREE.CylinderGeometry(0.22, 0.22, 0.26, 16), armor, [0, 0, 0], [0, 0, Math.PI / 2]);
-    b.mesh(drum, new THREE.CylinderGeometry(0.17, 0.17, 0.28, 16), glow, [0, 0, 0], [0, 0, Math.PI / 2], [1, 1, 1]);
+    b.mesh(
+      drum,
+      new THREE.CylinderGeometry(0.22, 0.22, 0.26, 16),
+      armor,
+      [0, 0, 0],
+      [0, 0, Math.PI / 2],
+    );
+    b.mesh(
+      drum,
+      new THREE.CylinderGeometry(0.17, 0.17, 0.28, 16),
+      glow,
+      [0, 0, 0],
+      [0, 0, Math.PI / 2],
+      [1, 1, 1],
+    );
   }
 
   J.Neck = b.joint('Neck', J.Chest, [0, 1.2, 0.05]);
@@ -210,20 +249,45 @@ export function buildRaijin(): RobotRig {
   b.mesh(J.Head, new THREE.BoxGeometry(0.5, 0.11, 0.06), core, [0, 0.27, 0.3]);
   b.mesh(J.Head, new THREE.BoxGeometry(0.34, 0.14, 0.1), iron, [0, 0.08, 0.3]);
   for (const side of [-1, 1]) {
-    b.mesh(J.Head, new THREE.ConeGeometry(0.075, 0.5, 8), gold, [side * 0.27, 0.68, 0.02], [0, 0, -0.45 * side]);
+    b.mesh(
+      J.Head,
+      new THREE.ConeGeometry(0.075, 0.5, 8),
+      gold,
+      [side * 0.27, 0.68, 0.02],
+      [0, 0, -0.45 * side],
+    );
   }
 
   for (const side of [-1, 1] as const) {
     const s = side === 1 ? 'L' : 'R';
     const ua = b.joint(`UpperArm_${s}`, J.Chest, [side * 1.22, 0.85, 0]);
     J[`UpperArm_${s}`] = ua;
-    b.mesh(ua, new THREE.SphereGeometry(0.58, 18, 12), armor, [side * 0.05, 0.05, 0], [0, 0, 0], [1.1, 0.85, 1]);
-    b.mesh(ua, new THREE.TorusGeometry(0.5, 0.05, 6, 24), gold, [side * 0.05, -0.08, 0], [Math.PI / 2, 0, 0]);
+    b.mesh(
+      ua,
+      new THREE.SphereGeometry(0.58, 18, 12),
+      armor,
+      [side * 0.05, 0.05, 0],
+      [0, 0, 0],
+      [1.1, 0.85, 1],
+    );
+    b.mesh(
+      ua,
+      new THREE.TorusGeometry(0.5, 0.05, 6, 24),
+      gold,
+      [side * 0.05, -0.08, 0],
+      [Math.PI / 2, 0, 0],
+    );
     b.mesh(ua, new THREE.CylinderGeometry(0.27, 0.3, 0.8, 12), iron, [0, -0.45, 0]);
     const fa = b.joint(`Forearm_${s}`, ua, [0, -0.85, 0]);
     J[`Forearm_${s}`] = fa;
     b.mesh(fa, new THREE.CylinderGeometry(0.38, 0.33, 0.75, 14), armor, [0, -0.36, 0]);
-    b.mesh(fa, new THREE.TorusGeometry(0.37, 0.05, 6, 20), gold, [0, -0.66, 0], [Math.PI / 2, 0, 0]);
+    b.mesh(
+      fa,
+      new THREE.TorusGeometry(0.37, 0.05, 6, 20),
+      gold,
+      [0, -0.66, 0],
+      [Math.PI / 2, 0, 0],
+    );
     b.mesh(fa, new THREE.BoxGeometry(0.06, 0.5, 0.05), glow, [side * 0.37, -0.36, 0]);
     const hand = b.joint(`Hand_${s}`, fa, [0, -0.8, 0]);
     J[`Hand_${s}`] = hand;
@@ -271,10 +335,23 @@ export function buildFujin(): RobotRig {
   b.mesh(J.Spine, new THREE.CylinderGeometry(0.3, 0.36, 0.45, 8), silver, [0, 0.2, 0]);
 
   J.Chest = b.joint('Chest', J.Spine, [0, 0.42, 0]);
-  b.mesh(J.Chest, new THREE.CylinderGeometry(0.78, 0.42, 1.05, 8), navy, [0, 0.5, 0], [0, Math.PI / 8, 0], [1, 1, 0.7]);
+  b.mesh(
+    J.Chest,
+    new THREE.CylinderGeometry(0.78, 0.42, 1.05, 8),
+    navy,
+    [0, 0.5, 0],
+    [0, Math.PI / 8, 0],
+    [1, 1, 0.7],
+  );
   b.mesh(J.Chest, new THREE.BoxGeometry(0.9, 0.5, 0.08), silver, [0, 0.72, 0.38], [-0.2, 0, 0]);
   for (const side of [-1, 1]) {
-    b.mesh(J.Chest, new THREE.BoxGeometry(0.05, 0.62, 0.04), glow, [side * 0.2, 0.45, 0.41], [0, 0, 0.42 * side]);
+    b.mesh(
+      J.Chest,
+      new THREE.BoxGeometry(0.05, 0.62, 0.04),
+      glow,
+      [side * 0.2, 0.45, 0.41],
+      [0, 0, 0.42 * side],
+    );
   }
   b.mesh(J.Chest, new THREE.OctahedronGeometry(0.17), glow, [0, 0.28, 0.4]);
 
@@ -283,17 +360,48 @@ export function buildFujin(): RobotRig {
   back.name = 'BackUnit';
   back.position.set(0, 0.9, -0.55);
   J.Chest.add(back);
-  b.mesh(back, new THREE.TorusGeometry(1.35, 0.14, 10, 56, Math.PI * 1.35), veil, [0, 0.15, 0], [0, 0, -Math.PI * 0.175]);
-  b.mesh(back, new THREE.TorusGeometry(1.35, 0.04, 6, 56, Math.PI * 1.35), glow, [0, 0.15, 0.05], [0, 0, -Math.PI * 0.175]);
+  b.mesh(
+    back,
+    new THREE.TorusGeometry(1.35, 0.14, 10, 56, Math.PI * 1.35),
+    veil,
+    [0, 0.15, 0],
+    [0, 0, -Math.PI * 0.175],
+  );
+  b.mesh(
+    back,
+    new THREE.TorusGeometry(1.35, 0.04, 6, 56, Math.PI * 1.35),
+    glow,
+    [0, 0.15, 0.05],
+    [0, 0, -Math.PI * 0.175],
+  );
   for (const side of [-1, 1]) {
-    b.mesh(back, new THREE.BoxGeometry(0.08, 1.7, 0.38), silver, [side * 0.45, -0.35, -0.1], [0.3, 0, side * 0.7]);
-    b.mesh(back, new THREE.BoxGeometry(0.03, 1.6, 0.06), glow, [side * 0.5, -0.33, 0.05], [0.3, 0, side * 0.7]);
+    b.mesh(
+      back,
+      new THREE.BoxGeometry(0.08, 1.7, 0.38),
+      silver,
+      [side * 0.45, -0.35, -0.1],
+      [0.3, 0, side * 0.7],
+    );
+    b.mesh(
+      back,
+      new THREE.BoxGeometry(0.03, 1.6, 0.06),
+      glow,
+      [side * 0.5, -0.33, 0.05],
+      [0.3, 0, side * 0.7],
+    );
   }
 
   J.Neck = b.joint('Neck', J.Chest, [0, 1.1, 0.02]);
   b.mesh(J.Neck, new THREE.CylinderGeometry(0.12, 0.16, 0.22, 8), dark, [0, 0.05, 0]);
   J.Head = b.joint('Head', J.Neck, [0, 0.16, 0]);
-  b.mesh(J.Head, new THREE.IcosahedronGeometry(0.3, 1), silver, [0, 0.22, 0], [0, 0, 0], [0.85, 1, 1.1]);
+  b.mesh(
+    J.Head,
+    new THREE.IcosahedronGeometry(0.3, 1),
+    silver,
+    [0, 0.22, 0],
+    [0, 0, 0],
+    [0.85, 1, 1.1],
+  );
   b.mesh(J.Head, new THREE.BoxGeometry(0.42, 0.08, 0.1), glow, [0, 0.24, 0.27]);
   b.mesh(J.Head, new THREE.BoxGeometry(0.04, 0.32, 0.6), navy, [0, 0.5, -0.05], [-0.5, 0, 0]);
 
@@ -301,7 +409,13 @@ export function buildFujin(): RobotRig {
     const s = side === 1 ? 'L' : 'R';
     const ua = b.joint(`UpperArm_${s}`, J.Chest, [side * 0.9, 0.85, 0]);
     J[`UpperArm_${s}`] = ua;
-    b.mesh(ua, new THREE.ConeGeometry(0.3, 0.7, 4), silver, [side * 0.22, 0.08, 0], [0, 0, -side * Math.PI / 2]);
+    b.mesh(
+      ua,
+      new THREE.ConeGeometry(0.3, 0.7, 4),
+      silver,
+      [side * 0.22, 0.08, 0],
+      [0, 0, (-side * Math.PI) / 2],
+    );
     b.mesh(ua, new THREE.CylinderGeometry(0.14, 0.12, 0.85, 8), navy, [0, -0.45, 0]);
     const fa = b.joint(`Forearm_${s}`, ua, [0, -0.9, 0]);
     J[`Forearm_${s}`] = fa;
@@ -325,8 +439,20 @@ export function buildFujin(): RobotRig {
     b.mesh(sh, new THREE.BoxGeometry(0.04, 0.7, 0.04), glow, [0, -0.5, 0.16]);
     const ft = b.joint(`Foot_${s}`, sh, [0, -1.0, 0]);
     J[`Foot_${s}`] = ft;
-    b.mesh(ft, new THREE.ConeGeometry(0.16, 0.7, 4), dark, [0, -0.12, 0.2], [Math.PI / 2, Math.PI / 4, 0]);
-    b.mesh(ft, new THREE.CylinderGeometry(0.1, 0.14, 0.2, 10), silver, [0, -0.08, -0.18], [Math.PI / 2, 0, 0]);
+    b.mesh(
+      ft,
+      new THREE.ConeGeometry(0.16, 0.7, 4),
+      dark,
+      [0, -0.12, 0.2],
+      [Math.PI / 2, Math.PI / 4, 0],
+    );
+    b.mesh(
+      ft,
+      new THREE.CylinderGeometry(0.1, 0.14, 0.2, 10),
+      silver,
+      [0, -0.08, -0.18],
+      [Math.PI / 2, 0, 0],
+    );
     b.mesh(ft, new THREE.CircleGeometry(0.09, 12), glow, [0, -0.08, -0.29], [0, Math.PI, 0]);
   }
 

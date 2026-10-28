@@ -3,9 +3,15 @@ import { isClockRunning } from '@sats-wars/shared';
 import { contributionScore, rankParticipants } from './rules';
 
 export function nextClashInfo(state: MatchState): { index: number; atGameMs: number } | null {
-  if (state.status !== 'LIVE' && state.status !== 'LOBBY' && state.status !== 'PAUSED' && state.status !== 'CREATED')
+  if (
+    state.status !== 'LIVE' &&
+    state.status !== 'LOBBY' &&
+    state.status !== 'PAUSED' &&
+    state.status !== 'CREATED'
+  )
     return null;
-  if (state.status === 'PAUSED' && state.pausedFrom !== 'LIVE' && state.pausedFrom !== 'LOBBY') return null;
+  if (state.status === 'PAUSED' && state.pausedFrom !== 'LIVE' && state.pausedFrom !== 'LOBBY')
+    return null;
   const at = state.config.clashTimesMs[state.nextClashIndex];
   return at === undefined ? null : { index: state.nextClashIndex, atGameMs: at };
 }

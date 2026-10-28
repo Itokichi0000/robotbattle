@@ -8,7 +8,13 @@ import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks
 import { useI18n } from '@/lib/i18n';
 import { ArenaHud } from './ArenaHud';
 import { Arena2D } from './Arena2D';
-import { type ArenaSettings, loadArenaSettings, saveArenaSettings, webglAvailable } from './settings';
+import {
+  type ArenaSettings,
+  loadArenaSettings,
+  loadRobotModels,
+  saveArenaSettings,
+  webglAvailable,
+} from './settings';
 import { SettingsPanel } from './SettingsPanel';
 
 const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
@@ -22,9 +28,12 @@ function cueFromEvent(director: ArenaDirector, e: GameEvent): void {
     case 'ACTION_APPLIED': {
       const { code, regionId, teamId } = e.data;
       if (code === 'CHARGED') director.play({ kind: 'charge', teamId });
-      else if (regionId && (code === 'CAPTURED' || code === 'CONTEST_BROKEN')) director.play({ kind: 'capture', regionId, teamId });
-      else if (regionId && (code === 'CONTEST_STARTED' || code === 'SHIELD_BROKEN')) director.play({ kind: 'contest', regionId, teamId });
-      else if (regionId && code === 'SHIELD_PLACED') director.play({ kind: 'shield', regionId, teamId });
+      else if (regionId && (code === 'CAPTURED' || code === 'CONTEST_BROKEN'))
+        director.play({ kind: 'capture', regionId, teamId });
+      else if (regionId && (code === 'CONTEST_STARTED' || code === 'SHIELD_BROKEN'))
+        director.play({ kind: 'contest', regionId, teamId });
+      else if (regionId && code === 'SHIELD_PLACED')
+        director.play({ kind: 'shield', regionId, teamId });
       return;
     }
     case 'CLASH_RESOLVED':
@@ -35,7 +44,8 @@ function cueFromEvent(director: ArenaDirector, e: GameEvent): void {
       if (e.data.to === 'FINALIZING') director.play({ kind: 'final' });
       return;
     case 'MATCH_RESULT':
-      if (e.data.result.reason !== 'CANCELLED') director.play({ kind: 'result', winner: e.data.result.winnerTeamId });
+      if (e.data.result.reason !== 'CANCELLED')
+        director.play({ kind: 'result', winner: e.data.result.winnerTeamId });
       return;
     default:
       return;
@@ -57,17 +67,24 @@ export function ArenaApp() {
   const [stats, setStats] = useState<FrameStats | null>(null);
   const [audioOn, setAudioOn] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [robotModels, setRobotModels] = useState<Partial<Record<TeamId, string>> | null>(null);
+  const [modelError, setModelError] = useState(false);
   const gameMsRef = useRef(0);
   const introPlayedFor = useRef<string | null>(null);
 
   useEffect(() => {
     setSettings(loadArenaSettings());
     setWebgl(webglAvailable());
+    void loadRobotModels().then(setRobotModels);
   }, []);
   useEffect(() => {
     if (!settings) return;
     saveArenaSettings(settings);
-    director.settings = { reducedMotion: settings.reducedMotion, shakeScale: settings.shake, shortSpecials: settings.shortSpecials };
+    director.settings = {
+      reducedMotion: settings.reducedMotion,
+      shakeScale: settings.shake,
+      shortSpecials: settings.shortSpecials,
+    };
     sfx.setVolume(settings.volume);
     sfx.setMuted(settings.muted);
     document.documentElement.classList.toggle('sw-reduced-motion', settings.reducedMotion);
@@ -118,14 +135,18 @@ export function ArenaApp() {
           introPlayedFor.current = s.matchId;
           director.play({ kind: 'intro' });
         }
-        if ((s.status === 'FINALIZING' || s.status === 'FINISHED') && s.result) director.play({ kind: 'result', winner: s.result.winnerTeamId });
+        if ((s.status === 'FINALIZING' || s.status === 'FINISHED') && s.result)
+          director.play({ kind: 'result', winner: s.result.winnerTeamId });
         if (s.status === 'CREATED') {
           director.robots.RAIJIN = { clip: 'Idle', start: director.time, advance: 0 };
           director.robots.FUJIN = { clip: 'Idle', start: director.time, advance: 0 };
           director.camera = { preset: 'overview', since: director.time };
           setBanner(null);
         }
-      } else if (!director.busy && (director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)) {
+      } else if (
+        !director.busy &&
+        (director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)
+      ) {
         director.syncHp(hp);
       }
     },
@@ -163,7 +184,10 @@ export function ArenaApp() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === 'f' || e.key === 'F') void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
+      if (e.key === 'f' || e.key === 'F')
+        void (document.fullscreenElement
+          ? document.exitFullscreen()
+          : document.documentElement.requestFullscreen?.());
       if (e.key === 's' || e.key === 'S') setPanelOpen((v) => !v);
       if (e.key === 'm' || e.key === 'M') setSettings((s) => (s ? { ...s, muted: !s.muted } : s));
     };
@@ -178,13 +202,20 @@ export function ArenaApp() {
   if (!snap || !settings) {
     return (
       <div className="flex h-dvh items-center justify-center bg-navy text-2xl font-bold">
-        {connState === 'offline' ? 'ゲームサーバーに接続できません / Cannot reach the game server' : '読み込み中… / Loading…'}
+        {connState === 'offline'
+          ? 'ゲームサーバーに接続できません / Cannot reach the game server'
+          : '読み込み中… / Loading…'}
       </div>
     );
   }
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-navy" data-testid="arena-root" data-renderer={use3d ? 'webgl' : '2d'}>
+    <div
+      className="relative h-dvh w-full overflow-hidden bg-navy"
+      data-testid="arena-root"
+      data-renderer={use3d ? 'webgl' : '2d'}
+      data-models={settings.models === 'auto' && robotModels && !modelError ? 'glb' : 'procedural'}
+    >
       {use3d ? (
         <ArenaScene
           director={director}
@@ -197,6 +228,10 @@ export function ArenaApp() {
           locale={locale}
           onStats={setStats}
           onContextLost={() => setContextLost(true)}
+          robotModels={
+            settings.models === 'auto' && !modelError ? (robotModels ?? undefined) : undefined
+          }
+          onModelError={() => setModelError(true)}
         />
       ) : (
         <Arena2D snap={snap} displayHp={displayHp} director={director} gameMsRef={gameMsRef} />
@@ -226,7 +261,14 @@ export function ArenaApp() {
       >
         ⚙ S
       </button>
-      {panelOpen && <SettingsPanel settings={settings} onChange={setSettings} onClose={() => setPanelOpen(false)} webgl={!!webgl} />}
+      {panelOpen && (
+        <SettingsPanel
+          settings={settings}
+          onChange={setSettings}
+          onClose={() => setPanelOpen(false)}
+          webgl={!!webgl}
+        />
+      )}
     </div>
   );
 }

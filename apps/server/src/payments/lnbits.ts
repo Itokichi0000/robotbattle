@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import type { CreateInvoiceInput, CreatedInvoice, PaymentAdapter, ProviderInvoiceStatus } from './adapter';
+import type {
+  CreateInvoiceInput,
+  CreatedInvoice,
+  PaymentAdapter,
+  ProviderInvoiceStatus,
+} from './adapter';
 
 /**
  * LNbits adapter using only the wallet's *invoice/read* key.
@@ -52,7 +57,8 @@ export class LnbitsPaymentAdapter implements PaymentAdapter {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     const text = await res.text();
-    if (!res.ok) throw new Error(`LNbits ${init.method ?? 'GET'} ${path} failed: HTTP ${res.status}`);
+    if (!res.ok)
+      throw new Error(`LNbits ${init.method ?? 'GET'} ${path} failed: HTTP ${res.status}`);
     try {
       return JSON.parse(text) as unknown;
     } catch {

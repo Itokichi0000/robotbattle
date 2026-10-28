@@ -61,10 +61,14 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
 
   // ---- join flow ----------------------------------------------------------
 
-  app.post('/api/join/reserve', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
-    const body = reserveRequestSchema.parse(req.body ?? {});
-    return join.reserve(body);
-  });
+  app.post(
+    '/api/join/reserve',
+    { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req) => {
+      const body = reserveRequestSchema.parse(req.body ?? {});
+      return join.reserve(body);
+    },
+  );
 
   app.post('/api/join/invoice', async (req) => {
     const p = requireParticipant(req.headers.authorization);
@@ -74,9 +78,12 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
 
   app.get('/api/join/payment-status/:reservationId', async (req) => {
     const p = requireParticipant(req.headers.authorization);
-    const { reservationId } = z.object({ reservationId: z.string().min(1).max(64) }).parse(req.params);
+    const { reservationId } = z
+      .object({ reservationId: z.string().min(1).max(64) })
+      .parse(req.params);
     const res = repo.getReservation(reservationId);
-    if (!res || res.participant_id !== p.id) throw new AppError('NOT_FOUND', 'reservation not found');
+    if (!res || res.participant_id !== p.id)
+      throw new AppError('NOT_FOUND', 'reservation not found');
     // Opportunistically re-verify the pending invoice (covers missing webhooks).
     const inv = repo.latestInvoiceForReservation(res.id);
     if (inv?.status === 'PENDING') await join.checkInvoice(inv.id);
@@ -110,7 +117,9 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
     // Test-only virtual payment. Not registered at all in lnbits mode.
     app.post('/api/dev/mock-pay', async (req) => {
       const p = requireParticipant(req.headers.authorization);
-      const { invoiceId } = z.object({ invoiceId: z.string().min(1).max(64) }).parse(req.body ?? {});
+      const { invoiceId } = z
+        .object({ invoiceId: z.string().min(1).max(64) })
+        .parse(req.body ?? {});
       const status = await join.mockPay(p, invoiceId);
       return { ...join.paymentStatus(repo.getParticipant(p.id)!), invoiceStatus: status };
     });
@@ -121,16 +130,20 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
    * payment_hash and re-query LNbits before granting anything. Always 200 so
    * the endpoint does not leak which hashes exist.
    */
-  app.post('/api/webhooks/lnbits/:secret', { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const { secret } = z.object({ secret: z.string().max(256) }).parse(req.params);
-    if (!env.LNBITS_WEBHOOK_SECRET || secret !== env.LNBITS_WEBHOOK_SECRET) {
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
-    }
-    const body = z
-      .object({ payment_hash: z.string().regex(/^[0-9a-fA-F]{64}$/) })
-      .passthrough()
-      .safeParse(req.body);
-    if (body.success) await join.handleWebhook(body.data.payment_hash.toLowerCase());
-    return { ok: true };
-  });
+  app.post(
+    '/api/webhooks/lnbits/:secret',
+    { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const { secret } = z.object({ secret: z.string().max(256) }).parse(req.params);
+      if (!env.LNBITS_WEBHOOK_SECRET || secret !== env.LNBITS_WEBHOOK_SECRET) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+      }
+      const body = z
+        .object({ payment_hash: z.string().regex(/^[0-9a-fA-F]{64}$/) })
+        .passthrough()
+        .safeParse(req.body);
+      if (body.success) await join.handleWebhook(body.data.payment_hash.toLowerCase());
+      return { ok: true };
+    },
+  );
 }

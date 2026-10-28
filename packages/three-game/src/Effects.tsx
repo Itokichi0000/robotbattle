@@ -41,7 +41,13 @@ function robotPos(teamId: TeamId, advanced = 0): THREE.Vector3 {
 }
 
 /** Jagged polyline from `a` to `b` (lightning). */
-function boltPoints(a: THREE.Vector3, b: THREE.Vector3, rng: () => number, segments = 14, jitter = 0.5): THREE.Vector3[] {
+function boltPoints(
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  rng: () => number,
+  segments = 14,
+  jitter = 0.5,
+): THREE.Vector3[] {
   const pts: THREE.Vector3[] = [];
   for (let i = 0; i <= segments; i++) {
     const u = i / segments;
@@ -140,7 +146,12 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       pt.alive = true;
       pt.p.copy(origin);
       const spread = opts.spread ?? 1;
-      pt.v.set((Math.random() - 0.5) * 2 * spread, Math.random() * (opts.up ?? 1), (Math.random() - 0.5) * 2 * spread)
+      pt.v
+        .set(
+          (Math.random() - 0.5) * 2 * spread,
+          Math.random() * (opts.up ?? 1),
+          (Math.random() - 0.5) * 2 * spread,
+        )
         .normalize()
         .multiplyScalar(speed * (0.4 + Math.random() * 0.8));
       pt.life = 0;
@@ -167,8 +178,12 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
         switch (e.kind) {
           case 'sparks':
             spawn(Math.round(90 * e.intensity), CLASH_POINT, '#FFFFFF', 9, 0.9, { gravity: -9 });
-            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.RAIJIN, 7, 1.0, { gravity: -7 });
-            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.FUJIN, 7, 1.0, { gravity: -7 });
+            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.RAIJIN, 7, 1.0, {
+              gravity: -7,
+            });
+            spawn(Math.round(60 * e.intensity), CLASH_POINT, TEAM_COLORS.FUJIN, 7, 1.0, {
+              gravity: -7,
+            });
             break;
           case 'shockwave':
             add(0.9);
@@ -180,17 +195,29 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
           case 'wind':
             add(1.0);
             if (e.teamId) {
-              spawn(50, robotPos(otherTeam(e.teamId), 0.6), TEAM_COLORS.FUJIN, 3, 1.2, { gravity: 0.5, swirl: 6 });
+              spawn(50, robotPos(otherTeam(e.teamId), 0.6), TEAM_COLORS.FUJIN, 3, 1.2, {
+                gravity: 0.5,
+                swirl: 6,
+              });
             }
             break;
           case 'chargeAura':
             add(1.2);
-            if (e.teamId) spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, { gravity: 2.5, spread: 0.4, up: 3 });
+            if (e.teamId)
+              spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, {
+                gravity: 2.5,
+                spread: 0.4,
+                up: 3,
+              });
             break;
           case 'specialStorm':
             add(2.8 * Math.max(0.5, e.intensity));
             if (e.teamId === 'FUJIN') {
-              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, { gravity: 3, swirl: 9, spread: 0.6 });
+              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, {
+                gravity: 3,
+                swirl: 9,
+                spread: 0.6,
+              });
             } else if (e.teamId === 'RAIJIN') {
               spawn(160, robotPos('RAIJIN').setY(3.5), TEAM_COLORS.RAIJIN, 7, 1.8, { gravity: -5 });
             }
@@ -237,7 +264,9 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
 
     const t = director.time;
     transients.current = transients.current.filter((x) => t - x.start < x.duration);
-    const rings = transients.current.filter((x) => x.kind === 'shockwave' || x.kind === 'chargeAura');
+    const rings = transients.current.filter(
+      (x) => x.kind === 'shockwave' || x.kind === 'chargeAura',
+    );
     ringRefs.current.forEach((m, i) => {
       if (!m) return;
       const x = rings[i];
@@ -272,8 +301,12 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       const frame = reducedMotion ? 0 : Math.floor(age * 8);
       const rng = seeded(x.seed + i * 131 + frame * 977);
       const target =
-        x.kind === 'lightning' ? robotPos('FUJIN', 0.6) : robotPos('RAIJIN').add(new THREE.Vector3((rng() - 0.5) * 6, -2, (rng() - 0.5) * 4));
-      const from = target.clone().add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
+        x.kind === 'lightning'
+          ? robotPos('FUJIN', 0.6)
+          : robotPos('RAIJIN').add(new THREE.Vector3((rng() - 0.5) * 6, -2, (rng() - 0.5) * 4));
+      const from = target
+        .clone()
+        .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
       const pts = boltPoints(from, target, rng, 16, 0.7);
       line.geometry.setFromPoints(pts);
       const mat = line.material as THREE.LineBasicMaterial;
@@ -302,12 +335,30 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
   return (
     <group name="effects">
       <points geometry={geometry} frustumCulled={false}>
-        <pointsMaterial size={0.14} vertexColors transparent depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
+        <pointsMaterial
+          size={0.14}
+          vertexColors
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+        />
       </points>
       {Array.from({ length: 6 }, (_, i) => (
-        <mesh key={`ring-${i}`} ref={(m) => void (ringRefs.current[i] = m)} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <mesh
+          key={`ring-${i}`}
+          ref={(m) => void (ringRefs.current[i] = m)}
+          rotation={[-Math.PI / 2, 0, 0]}
+          visible={false}
+        >
           <ringGeometry args={[0.85, 1, 64]} />
-          <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} blending={THREE.AdditiveBlending} />
+          <meshBasicMaterial
+            transparent
+            opacity={0}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
         </mesh>
       ))}
       {bolts.map((l, i) => (
@@ -316,7 +367,13 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       {Array.from({ length: 6 }, (_, i) => (
         <mesh key={`vortex-${i}`} ref={(m) => void (vortexRefs.current[i] = m)} visible={false}>
           <torusGeometry args={[1, 0.05, 6, 48, Math.PI * 1.5]} />
-          <meshBasicMaterial color={TEAM_COLORS.FUJIN} transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
+          <meshBasicMaterial
+            color={TEAM_COLORS.FUJIN}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
         </mesh>
       ))}
     </group>

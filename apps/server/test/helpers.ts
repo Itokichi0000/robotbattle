@@ -74,7 +74,8 @@ export async function admin(s: TestServer, token: string, body: Record<string, u
     headers: { authorization: `Bearer ${token}` },
     payload: body,
   });
-  if (res.statusCode !== 200) throw new Error(`admin ${JSON.stringify(body)} -> ${res.statusCode} ${res.body}`);
+  if (res.statusCode !== 200)
+    throw new Error(`admin ${JSON.stringify(body)} -> ${res.statusCode} ${res.body}`);
   return res.json();
 }
 

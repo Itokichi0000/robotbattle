@@ -29,7 +29,11 @@ describe('join + mock payment + actions', () => {
   it('mock pay -> ACTIVE with 3 AP -> 3 actions -> 4th rejected', async () => {
     const { s, token } = await liveServer();
     const p = await joinAndPay(s, 'たろう');
-    expect(p.pay).toMatchObject({ participantStatus: 'ACTIVE', invoiceStatus: 'PAID', apRemaining: 3 });
+    expect(p.pay).toMatchObject({
+      participantStatus: 'ACTIVE',
+      invoiceStatus: 'PAID',
+      apRemaining: 3,
+    });
     // Actions are rejected (no AP spent) while in the lobby.
     const early = await act(s, p.token, 'CHARGE');
     expect(early.json().result).toMatchObject({ ok: false, code: 'MATCH_NOT_LIVE' });
@@ -59,7 +63,11 @@ describe('join + mock payment + actions', () => {
 
   it('rejects actions without a valid token and before payment', async () => {
     const { s } = await liveServer();
-    const noAuth = await s.inject({ method: 'POST', url: '/api/actions', payload: { clientActionId: 'abcdefgh', type: 'CHARGE' } });
+    const noAuth = await s.inject({
+      method: 'POST',
+      url: '/api/actions',
+      payload: { clientActionId: 'abcdefgh', type: 'CHARGE' },
+    });
     expect(noAuth.statusCode).toBe(401);
     const r = (await reserve(s)).json();
     const unpaid = await act(s, r.token, 'CHARGE');
@@ -76,7 +84,10 @@ describe('join + mock payment + actions', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body).not.toHaveProperty('ap');
-    const st = await s.inject({ url: `/api/join/payment-status/${body.reservationId}`, headers: auth(body.token) });
+    const st = await s.inject({
+      url: `/api/join/payment-status/${body.reservationId}`,
+      headers: auth(body.token),
+    });
     expect(st.json()).toMatchObject({ participantStatus: 'RESERVED', apRemaining: 0 });
   });
 
@@ -100,10 +111,18 @@ describe('join + mock payment + actions', () => {
     const { s } = await liveServer({ LOBBY_MS: '600000' });
     const r = (await reserve(s)).json();
     await s.advance(181_000);
-    const inv = await s.inject({ method: 'POST', url: '/api/join/invoice', headers: auth(r.token), payload: { reservationId: r.reservationId } });
+    const inv = await s.inject({
+      method: 'POST',
+      url: '/api/join/invoice',
+      headers: auth(r.token),
+      payload: { reservationId: r.reservationId },
+    });
     expect(inv.statusCode).toBe(410);
     expect(inv.json().error).toBe('RESERVATION_EXPIRED');
-    const st = await s.inject({ url: `/api/join/payment-status/${r.reservationId}`, headers: auth(r.token) });
+    const st = await s.inject({
+      url: `/api/join/payment-status/${r.reservationId}`,
+      headers: auth(r.token),
+    });
     expect(st.json().participantStatus).toBe('EXPIRED');
   });
 
@@ -120,10 +139,20 @@ describe('join + mock payment + actions', () => {
     const { s, token } = await liveServer();
     await admin(s, token, { command: 'SET_PAYMENTS_ENABLED', enabled: false });
     const r = (await reserve(s)).json();
-    const inv = await s.inject({ method: 'POST', url: '/api/join/invoice', headers: auth(r.token), payload: { reservationId: r.reservationId } });
+    const inv = await s.inject({
+      method: 'POST',
+      url: '/api/join/invoice',
+      headers: auth(r.token),
+      payload: { reservationId: r.reservationId },
+    });
     expect(inv.json().error).toBe('PAYMENTS_DISABLED');
     const codes = (
-      await s.inject({ method: 'POST', url: '/api/admin/passes', headers: auth(token), payload: { count: 1 } })
+      await s.inject({
+        method: 'POST',
+        url: '/api/admin/passes',
+        headers: auth(token),
+        payload: { count: 1 },
+      })
     ).json().codes as string[];
     const redeem = await s.inject({
       method: 'POST',
@@ -139,7 +168,12 @@ describe('sponsored passes', () => {
   it('are single use, case-insensitive, and cannot be guessed', async () => {
     const { s, token } = await liveServer();
     const { codes } = (
-      await s.inject({ method: 'POST', url: '/api/admin/passes', headers: auth(token), payload: { count: 2, label: 'kids' } })
+      await s.inject({
+        method: 'POST',
+        url: '/api/admin/passes',
+        headers: auth(token),
+        payload: { count: 2, label: 'kids' },
+      })
     ).json();
     expect(codes).toHaveLength(2);
     const a = (await reserve(s)).json();
@@ -165,7 +199,8 @@ describe('sponsored passes', () => {
       payload: { reservationId: b.reservationId, code: 'SW-AAAA-BBBB-CCCC' },
     });
     expect(guess.json().error).toBe('INVALID_PASS');
-    const passes = (await s.inject({ url: '/api/admin/passes', headers: auth(token) })).json().passes;
+    const passes = (await s.inject({ url: '/api/admin/passes', headers: auth(token) })).json()
+      .passes;
     expect(passes.map((p: { status: string }) => p.status).sort()).toEqual(['ISSUED', 'REDEEMED']);
     // Plain codes are never listed back.
     expect(JSON.stringify(passes)).not.toContain(codes[1]);
@@ -174,7 +209,12 @@ describe('sponsored passes', () => {
   it('expired or revoked passes are rejected', async () => {
     const { s, token } = await liveServer({ LOBBY_MS: '1800000' });
     const { codes } = (
-      await s.inject({ method: 'POST', url: '/api/admin/passes', headers: auth(token), payload: { count: 1, expiresInMinutes: 5 } })
+      await s.inject({
+        method: 'POST',
+        url: '/api/admin/passes',
+        headers: auth(token),
+        payload: { count: 1, expiresInMinutes: 5 },
+      })
     ).json();
     await s.advance(5 * 60_000 + 1000);
     const r = (await reserve(s)).json();
@@ -197,7 +237,12 @@ describe('payment verification and webhooks', () => {
     await admin(s, token, { command: 'OPEN_LOBBY' });
     const r = (await reserve(s)).json();
     const inv = (
-      await s.inject({ method: 'POST', url: '/api/join/invoice', headers: auth(r.token), payload: { reservationId: r.reservationId } })
+      await s.inject({
+        method: 'POST',
+        url: '/api/join/invoice',
+        headers: auth(r.token),
+        payload: { reservationId: r.reservationId },
+      })
     ).json();
     const row = s.services.repo.getInvoice(inv.invoiceId)!;
     return { s, adapter, token, r, inv, row };
@@ -211,13 +256,24 @@ describe('payment verification and webhooks', () => {
       payload: { payment_hash: row.payment_hash, paid: true, amount: 21000 },
     });
     expect(hook.statusCode).toBe(200);
-    const st = await s.inject({ url: `/api/join/payment-status/${r.reservationId}`, headers: auth(r.token) });
-    expect(st.json()).toMatchObject({ participantStatus: 'PENDING_PAYMENT', invoiceStatus: 'PENDING', apRemaining: 0 });
+    const st = await s.inject({
+      url: `/api/join/payment-status/${r.reservationId}`,
+      headers: auth(r.token),
+    });
+    expect(st.json()).toMatchObject({
+      participantStatus: 'PENDING_PAYMENT',
+      invoiceStatus: 'PENDING',
+      apRemaining: 0,
+    });
   });
 
   it('rejects webhooks with a wrong secret and ignores unknown hashes', async () => {
     const { s } = await setup();
-    const bad = await s.inject({ method: 'POST', url: '/api/webhooks/lnbits/wrong', payload: { payment_hash: 'a'.repeat(64) } });
+    const bad = await s.inject({
+      method: 'POST',
+      url: '/api/webhooks/lnbits/wrong',
+      payload: { payment_hash: 'a'.repeat(64) },
+    });
     expect(bad.statusCode).toBe(404);
     const unknown = await s.inject({
       method: 'POST',
@@ -231,8 +287,16 @@ describe('payment verification and webhooks', () => {
     const { s, adapter, r, row } = await setup();
     adapter.markPaid(row.lnbits_checking_id);
     await Promise.all([
-      s.inject({ method: 'POST', url: '/api/webhooks/lnbits/hook-secret-1234', payload: { payment_hash: row.payment_hash } }),
-      s.inject({ method: 'POST', url: '/api/webhooks/lnbits/hook-secret-1234', payload: { payment_hash: row.payment_hash } }),
+      s.inject({
+        method: 'POST',
+        url: '/api/webhooks/lnbits/hook-secret-1234',
+        payload: { payment_hash: row.payment_hash },
+      }),
+      s.inject({
+        method: 'POST',
+        url: '/api/webhooks/lnbits/hook-secret-1234',
+        payload: { payment_hash: row.payment_hash },
+      }),
       s.inject({ url: `/api/join/payment-status/${r.reservationId}`, headers: auth(r.token) }),
       s.services.join.pollPending(),
     ]);
@@ -257,7 +321,10 @@ describe('payment verification and webhooks', () => {
     adapter.markPaid(row.lnbits_checking_id);
     adapter.failChecks = true;
     await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)).toMatchObject({ status: 'PENDING', check_failures: 1 });
+    expect(s.services.repo.getInvoice(row.id)).toMatchObject({
+      status: 'PENDING',
+      check_failures: 1,
+    });
     adapter.failChecks = false;
     await s.services.join.pollPending();
     expect(s.services.repo.getInvoice(row.id)!.status).toBe('PAID');
@@ -278,9 +345,16 @@ describe('payment verification and webhooks', () => {
     await admin(s, token, { command: 'CANCEL' });
     adapter.markPaid(row.lnbits_checking_id);
     await s.services.join.pollPending();
-    expect(s.services.repo.getInvoice(row.id)).toMatchObject({ status: 'LATE_PAID', late_payment_disposition: 'PENDING_REVIEW' });
+    expect(s.services.repo.getInvoice(row.id)).toMatchObject({
+      status: 'LATE_PAID',
+      late_payment_disposition: 'PENDING_REVIEW',
+    });
     const me = await s.inject({ url: '/api/me', headers: auth(r.token) });
-    expect(me.json()).toMatchObject({ invoiceStatus: 'LATE_PAID', apRemaining: 0, lateCarryoverCode: null });
+    expect(me.json()).toMatchObject({
+      invoiceStatus: 'LATE_PAID',
+      apRemaining: 0,
+      lateCarryoverCode: null,
+    });
     const disp = await s.inject({
       method: 'POST',
       url: `/api/admin/invoices/${row.id}/disposition`,
@@ -301,7 +375,8 @@ describe('payment verification and webhooks', () => {
       payload: { reservationId: r2.reservationId, code: me2.lateCarryoverCode },
     });
     expect(redeem.json().participantStatus).toBe('ACTIVE');
-    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json().entries;
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json()
+      .entries;
     expect(audit.map((e: { action: string }) => e.action)).toContain('LATE_PAYMENT');
   });
 
@@ -325,7 +400,11 @@ describe('admin', () => {
   it('requires authentication and rejects disallowed origins', async () => {
     s = await makeServer({ env: { ALLOWED_ORIGINS: 'http://localhost:3000' } });
     expect((await s.inject({ url: '/api/admin/overview' })).statusCode).toBe(401);
-    const wrong = await s.inject({ method: 'POST', url: '/api/admin/login', payload: { password: 'nope' } });
+    const wrong = await s.inject({
+      method: 'POST',
+      url: '/api/admin/login',
+      payload: { password: 'nope' },
+    });
     expect(wrong.statusCode).toBe(401);
     const token = await s.adminToken();
     const evil = await s.inject({
@@ -333,7 +412,10 @@ describe('admin', () => {
       headers: { ...auth(token), origin: 'https://evil.example' },
     });
     expect(evil.statusCode).toBe(403);
-    const ok = await s.inject({ url: '/api/admin/overview', headers: { ...auth(token), origin: 'http://localhost:3000' } });
+    const ok = await s.inject({
+      url: '/api/admin/overview',
+      headers: { ...auth(token), origin: 'http://localhost:3000' },
+    });
     expect(ok.statusCode).toBe(200);
     expect(JSON.stringify(ok.json())).not.toContain('test-admin-password');
   });
@@ -358,7 +440,8 @@ describe('admin', () => {
 
   it('runs a full match to FINISHED and rolls to the next match with frozen config', async () => {
     const { s, token } = await liveServer();
-    const cfg = (await s.inject({ url: '/api/admin/next-config', headers: auth(token) })).json().config;
+    const cfg = (await s.inject({ url: '/api/admin/next-config', headers: auth(token) })).json()
+      .config;
     const put = await s.inject({
       method: 'PUT',
       url: '/api/admin/next-config',
@@ -383,7 +466,10 @@ describe('admin', () => {
     expect(next.config).toMatchObject({ entryFeeSats: 42, version: 'test-2' });
     // Old match result is retrievable.
     const old = await s.inject({ url: `/api/matches/${firstId}/snapshot` });
-    expect(old.json().snapshot).toMatchObject({ status: 'FINISHED', result: { winnerTeamId: p.teamId } });
+    expect(old.json().snapshot).toMatchObject({
+      status: 'FINISHED',
+      result: { winnerTeamId: p.teamId },
+    });
     // Old tokens cannot act in the new match.
     const stale = await act(s, p.token, 'CHARGE');
     expect(stale.statusCode).toBe(403);

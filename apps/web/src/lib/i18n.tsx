@@ -20,7 +20,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const saved = storage.get('sw.locale');
     const fromQuery = new URLSearchParams(window.location.search).get('lang');
-    const next = fromQuery === 'en' || fromQuery === 'ja' ? fromQuery : saved === 'en' ? 'en' : 'ja';
+    const next =
+      fromQuery === 'en' || fromQuery === 'ja' ? fromQuery : saved === 'en' ? 'en' : 'ja';
     setLocaleState(next);
   }, []);
   useEffect(() => {

@@ -5,7 +5,15 @@ import { useI18n } from '@/lib/i18n';
 import { eventMessage } from '@/lib/messages';
 import { teamColor } from './TeamBits';
 
-export function EventFeed({ events, limit = 6, large = false }: { events: GameEvent[]; limit?: number; large?: boolean }) {
+export function EventFeed({
+  events,
+  limit = 6,
+  large = false,
+}: {
+  events: GameEvent[];
+  limit?: number;
+  large?: boolean;
+}) {
   const { locale } = useI18n();
   const msgs = useMemo(
     () =>

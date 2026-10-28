@@ -32,7 +32,9 @@ export function eventMessage(e: GameEvent, l: Locale): FeedMessage | null {
           case 'CONTEST_BROKEN':
             return ja ? `${t}が${r}の争奪を阻止！（${who}）` : `${t} held ${r}! (${who})`;
           case 'SHIELD_BROKEN':
-            return ja ? `${t}が${r}のシールドを破壊！（${who}）` : `${t} broke the shield on ${r}! (${who})`;
+            return ja
+              ? `${t}が${r}のシールドを破壊！（${who}）`
+              : `${t} broke the shield on ${r}! (${who})`;
           case 'SHIELD_PLACED':
             return ja ? `${t}が${r}にシールド設置（${who}）` : `${t} shielded ${r} (${who})`;
           case 'CHARGED':
@@ -45,13 +47,17 @@ export function eventMessage(e: GameEvent, l: Locale): FeedMessage | null {
       return {
         ...base,
         teamId: e.data.teamId,
-        text: ja ? `${e.data.nickname}が${team(e.data.teamId, l)}に参戦！` : `${e.data.nickname} joined ${team(e.data.teamId, l)}!`,
+        text: ja
+          ? `${e.data.nickname}が${team(e.data.teamId, l)}に参戦！`
+          : `${e.data.nickname} joined ${team(e.data.teamId, l)}!`,
       };
     case 'CONTEST_EXPIRED':
       return {
         ...base,
         teamId: e.data.ownerTeamId,
-        text: ja ? `${region(e.data.regionId, l)}の争奪は時間切れ。防衛成功！` : `${region(e.data.regionId, l)} contest timed out — defended!`,
+        text: ja
+          ? `${region(e.data.regionId, l)}の争奪は時間切れ。防衛成功！`
+          : `${region(e.data.regionId, l)} contest timed out — defended!`,
       };
     case 'SHIELD_EXPIRED':
       return null;

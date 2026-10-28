@@ -35,10 +35,7 @@ interface EventBase<T extends string, D> {
 }
 
 export type GameEvent =
-  | EventBase<
-      'MATCH_STATUS_CHANGED',
-      { from: MatchStatus; to: MatchStatus; reason: string | null }
-    >
+  | EventBase<'MATCH_STATUS_CHANGED', { from: MatchStatus; to: MatchStatus; reason: string | null }>
   | EventBase<
       'PARTICIPANT_JOINED',
       { participantId: string; teamId: TeamId; nickname: string; isBot: boolean }

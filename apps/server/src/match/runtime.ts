@@ -165,8 +165,13 @@ export class MatchRuntime {
     }
     if (r.events.length > 0) {
       this.recent.push(...r.events);
-      if (this.recent.length > RECENT_EVENTS) this.recent.splice(0, this.recent.length - RECENT_EVENTS);
-      for (const l of this.listeners) l(r.events.map((e) => this.presentEvent(e)), this.state);
+      if (this.recent.length > RECENT_EVENTS)
+        this.recent.splice(0, this.recent.length - RECENT_EVENTS);
+      for (const l of this.listeners)
+        l(
+          r.events.map((e) => this.presentEvent(e)),
+          this.state,
+        );
     }
     return r;
   }

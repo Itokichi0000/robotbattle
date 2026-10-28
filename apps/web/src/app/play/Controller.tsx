@@ -1,7 +1,21 @@
 'use client';
 import { useRef, useState } from 'react';
-import type { ActionResponse, ActionResult, ActionType, PublicMatchSnapshot, RegionId, RegionState } from '@sats-wars/shared';
-import { ACTION_CODE_LABELS, REGION_INFO, REGION_KIND_META, TEAM_META, formatClock, otherTeam } from '@sats-wars/shared';
+import type {
+  ActionResponse,
+  ActionResult,
+  ActionType,
+  PublicMatchSnapshot,
+  RegionId,
+  RegionState,
+} from '@sats-wars/shared';
+import {
+  ACTION_CODE_LABELS,
+  REGION_INFO,
+  REGION_KIND_META,
+  TEAM_META,
+  formatClock,
+  otherTeam,
+} from '@sats-wars/shared';
 import { JapanMap2D } from '@/components/JapanMap2D';
 import { RobotGauge, TeamBadge } from '@/components/TeamBits';
 import { ApiError, api, newClientActionId } from '@/lib/api';
@@ -76,7 +90,15 @@ export function Controller({
       }
     } catch (e) {
       setLast({
-        result: { ok: false, code: 'MATCH_NOT_LIVE', actionType: pending.type, regionId: pending.regionId, apBefore: ap, apAfter: ap, atGameMs: gameMs },
+        result: {
+          ok: false,
+          code: 'MATCH_NOT_LIVE',
+          actionType: pending.type,
+          regionId: pending.regionId,
+          apBefore: ap,
+          apAfter: ap,
+          atGameMs: gameMs,
+        },
         error: e instanceof ApiError ? e.message : String(e),
       });
     } finally {
@@ -95,7 +117,10 @@ export function Controller({
   return (
     <div className="flex flex-col gap-3 pb-24">
       {/* Status strip */}
-      <section className="sw-panel flex items-center justify-between gap-2 p-3" style={{ borderColor: TEAM_META[myTeam].color }}>
+      <section
+        className="sw-panel flex items-center justify-between gap-2 p-3"
+        style={{ borderColor: TEAM_META[myTeam].color }}
+      >
         <div>
           <TeamBadge teamId={myTeam} locale={locale} className="text-lg" />
           <p className="mt-1 max-w-[9rem] truncate text-xs text-off/70">{me.nickname}</p>
@@ -104,7 +129,10 @@ export function Controller({
           <div className="text-xs font-bold text-off/70">AP</div>
           <div className="flex gap-1" data-testid="ap">
             {Array.from({ length: me.apTotal }, (_, i) => (
-              <span key={i} className={`h-5 w-5 rounded-full border-2 ${i < ap ? 'border-yellow-300 bg-yellow-300' : 'border-white/30'}`} />
+              <span
+                key={i}
+                className={`h-5 w-5 rounded-full border-2 ${i < ap ? 'border-yellow-300 bg-yellow-300' : 'border-white/30'}`}
+              />
             ))}
           </div>
           <div className="text-xs font-black tabular-nums">
@@ -115,7 +143,9 @@ export function Controller({
           {lobby ? (
             <>
               <div className="text-xs text-off/70">{L('開始まで', 'Starts in')}</div>
-              <div className="text-2xl font-black tabular-nums">{snap.liveStartClock !== null ? formatClock(-gameMs) : '--:--'}</div>
+              <div className="text-2xl font-black tabular-nums">
+                {snap.liveStartClock !== null ? formatClock(-gameMs) : '--:--'}
+              </div>
             </>
           ) : (
             <>
@@ -132,23 +162,51 @@ export function Controller({
       </section>
 
       {paused && (
-        <div className="rounded-lg bg-yellow-400/20 px-3 py-2 text-center font-bold text-yellow-200" role="status">
-          {L('一時停止中です。APは失われません。再開までお待ちください。', 'Paused. Your AP is safe. Please wait.')}
+        <div
+          className="rounded-lg bg-yellow-400/20 px-3 py-2 text-center font-bold text-yellow-200"
+          role="status"
+        >
+          {L(
+            '一時停止中です。APは失われません。再開までお待ちください。',
+            'Paused. Your AP is safe. Please wait.',
+          )}
         </div>
       )}
       {lobby && (
         <div className="sw-panel p-4 text-center" data-testid="waiting">
-          <p className="text-lg font-black">{L('参加確定！まもなく試合開始', 'You are in! The match starts soon')}</p>
+          <p className="text-lg font-black">
+            {L('参加確定！まもなく試合開始', 'You are in! The match starts soon')}
+          </p>
           <p className="mt-1 text-sm text-off/80">
-            {L('開始後に地域を選んでアクションできます。会場スクリーンを見てね。', 'After the start, pick regions and act. Watch the big screen!')}
+            {L(
+              '開始後に地域を選んでアクションできます。会場スクリーンを見てね。',
+              'After the start, pick regions and act. Watch the big screen!',
+            )}
           </p>
         </div>
       )}
 
       {/* Robots */}
       <section className="sw-panel grid grid-cols-2 gap-3 p-3">
-        <RobotGauge team={snap.teams.RAIJIN} hp={snap.teams.RAIJIN.hp} hpMax={cfg.hpMax} energyMax={cfg.energyMax} specialThreshold={cfg.specialThreshold} locale={locale} size="sm" />
-        <RobotGauge team={snap.teams.FUJIN} hp={snap.teams.FUJIN.hp} hpMax={cfg.hpMax} energyMax={cfg.energyMax} specialThreshold={cfg.specialThreshold} locale={locale} size="sm" align="right" />
+        <RobotGauge
+          team={snap.teams.RAIJIN}
+          hp={snap.teams.RAIJIN.hp}
+          hpMax={cfg.hpMax}
+          energyMax={cfg.energyMax}
+          specialThreshold={cfg.specialThreshold}
+          locale={locale}
+          size="sm"
+        />
+        <RobotGauge
+          team={snap.teams.FUJIN}
+          hp={snap.teams.FUJIN.hp}
+          hpMax={cfg.hpMax}
+          energyMax={cfg.energyMax}
+          specialThreshold={cfg.specialThreshold}
+          locale={locale}
+          size="sm"
+          align="right"
+        />
       </section>
 
       {last && (
@@ -160,7 +218,11 @@ export function Controller({
         >
           {last.error ?? ACTION_CODE_LABELS[last.result.code][locale]}
           {last.result.ok && <span className="ml-2 text-off/80">AP {last.result.apAfter}</span>}
-          {!last.result.ok && !last.error && <span className="ml-2 text-xs text-off/70">{L('（APは消費されていません）', '(no AP used)')}</span>}
+          {!last.result.ok && !last.error && (
+            <span className="ml-2 text-xs text-off/70">
+              {L('（APは消費されていません）', '(no AP used)')}
+            </span>
+          )}
         </div>
       )}
       {lastMsg && <p className="truncate text-center text-xs text-off/70">📣 {lastMsg.text}</p>}
@@ -182,11 +244,29 @@ export function Controller({
 
       {tab === 'map' && (
         <div className="sw-panel p-2">
-          <JapanMap2D regions={snap.regions} locale={locale} myTeam={myTeam} selected={selected} onSelect={setSelected} gameMs={gameMs} className="mx-auto h-[360px] w-full" />
+          <JapanMap2D
+            regions={snap.regions}
+            locale={locale}
+            myTeam={myTeam}
+            selected={selected}
+            onSelect={setSelected}
+            gameMs={gameMs}
+            className="mx-auto h-[360px] w-full"
+          />
           {selected ? (
-            <RegionRow r={region(selected)} myTeam={myTeam} enemy={enemy} gameMs={gameMs} disabled={!live || ap <= 0} onPick={setPending} expanded />
+            <RegionRow
+              r={region(selected)}
+              myTeam={myTeam}
+              enemy={enemy}
+              gameMs={gameMs}
+              disabled={!live || ap <= 0}
+              onPick={setPending}
+              expanded
+            />
           ) : (
-            <p className="p-2 text-center text-sm text-off/70">{L('地域をタップして選択', 'Tap a region')}</p>
+            <p className="p-2 text-center text-sm text-off/70">
+              {L('地域をタップして選択', 'Tap a region')}
+            </p>
           )}
         </div>
       )}
@@ -223,7 +303,11 @@ export function Controller({
             EN {snap.teams[myTeam].energy}/{cfg.energyMax}
           </span>
         </button>
-        {ap <= 0 && live && <p className="mt-1 text-center text-xs text-off/70">{L('APを使い切りました。会場で応援しよう！', 'All AP used. Cheer on your team!')}</p>}
+        {ap <= 0 && live && (
+          <p className="mt-1 text-center text-xs text-off/70">
+            {L('APを使い切りました。会場で応援しよう！', 'All AP used. Cheer on your team!')}
+          </p>
+        )}
       </div>
 
       {pending && (
@@ -232,8 +316,16 @@ export function Controller({
           sending={sending}
           onConfirm={submit}
           onCancel={() => setPending(null)}
-          regionLabel={pending.regionId ? L(REGION_INFO[pending.regionId].labelJa, REGION_INFO[pending.regionId].labelEn) : null}
-          hint={pending.regionId && pending.type !== 'CHARGE' ? actionHint(pending.type, region(pending.regionId), myTeam) : null}
+          regionLabel={
+            pending.regionId
+              ? L(REGION_INFO[pending.regionId].labelJa, REGION_INFO[pending.regionId].labelEn)
+              : null
+          }
+          hint={
+            pending.regionId && pending.type !== 'CHARGE'
+              ? actionHint(pending.type, region(pending.regionId), myTeam)
+              : null
+          }
         />
       )}
     </div>
@@ -263,13 +355,27 @@ function RegionRow({
   const info = REGION_INFO[r.regionId];
   const kind = REGION_KIND_META[r.kind];
   const owner = r.ownerTeamId;
-  const status = owner === null ? { ja: '中立', en: 'Neutral', cls: 'bg-white/15 text-off' } : owner === myTeam ? { ja: '味方', en: 'Ally', cls: 'text-navy' } : { ja: '敵', en: 'Enemy', cls: 'text-navy' };
-  const contestLeft = r.contestedUntil !== null ? Math.max(0, Math.ceil((r.contestedUntil - gameMs) / 1000)) : 0;
+  const status =
+    owner === null
+      ? { ja: '中立', en: 'Neutral', cls: 'bg-white/15 text-off' }
+      : owner === myTeam
+        ? { ja: '味方', en: 'Ally', cls: 'text-navy' }
+        : { ja: '敵', en: 'Enemy', cls: 'text-navy' };
+  const contestLeft =
+    r.contestedUntil !== null ? Math.max(0, Math.ceil((r.contestedUntil - gameMs) / 1000)) : 0;
   const attack = actionHint('ATTACK', r, myTeam);
   const defend = actionHint('DEFEND', r, myTeam);
   return (
-    <div className="sw-panel overflow-hidden" data-testid={`region-${r.regionId}`} style={{ borderColor: owner ? TEAM_META[owner].color : undefined }}>
-      <button className="sw-focus flex w-full items-center gap-3 p-3 text-left" onClick={onToggle} aria-expanded={expanded}>
+    <div
+      className="sw-panel overflow-hidden"
+      data-testid={`region-${r.regionId}`}
+      style={{ borderColor: owner ? TEAM_META[owner].color : undefined }}
+    >
+      <button
+        className="sw-focus flex w-full items-center gap-3 p-3 text-left"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
         <span className="text-2xl" aria-hidden>
           {kind.icon}
         </span>
@@ -280,33 +386,74 @@ function RegionRow({
           </span>
         </span>
         <span className="flex flex-col items-end gap-1">
-          <span className={`rounded-full px-2 py-0.5 text-xs font-black ${status.cls}`} style={owner ? { background: TEAM_META[owner].color } : undefined}>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-black ${status.cls}`}
+            style={owner ? { background: TEAM_META[owner].color } : undefined}
+          >
             {owner ? `${TEAM_META[owner].symbol} ` : ''}
             {L(status.ja, status.en)}
           </span>
           {r.contestedByTeamId && (
             <span className="rounded-full bg-yellow-300 px-2 py-0.5 text-xs font-black text-navy sw-pulse">
-              {r.contestedByTeamId === enemy ? L('敵が争奪中', 'Enemy contest') : L('味方が争奪中', 'Our contest')} {contestLeft}s
+              {r.contestedByTeamId === enemy
+                ? L('敵が争奪中', 'Enemy contest')
+                : L('味方が争奪中', 'Our contest')}{' '}
+              {contestLeft}s
             </span>
           )}
-          {r.shieldCharges > 0 && <span className="text-xs font-bold">🛡 {L('シールド', 'Shield')}</span>}
+          {r.shieldCharges > 0 && (
+            <span className="text-xs font-bold">🛡 {L('シールド', 'Shield')}</span>
+          )}
         </span>
       </button>
       {expanded && (
         <div className="grid grid-cols-2 gap-2 border-t border-line p-3">
-          <ActionButton label={L('⚔ 攻撃', '⚔ Attack')} hint={attack} disabled={disabled || !attack.enabled} onClick={() => onPick({ type: 'ATTACK', regionId: r.regionId })} cls="bg-danger text-white" testId={`attack-${r.regionId}`} />
-          <ActionButton label={L('🛡 防御', '🛡 Defend')} hint={defend} disabled={disabled || !defend.enabled} onClick={() => onPick({ type: 'DEFEND', regionId: r.regionId })} cls="bg-teal text-navy" testId={`defend-${r.regionId}`} />
+          <ActionButton
+            label={L('⚔ 攻撃', '⚔ Attack')}
+            hint={attack}
+            disabled={disabled || !attack.enabled}
+            onClick={() => onPick({ type: 'ATTACK', regionId: r.regionId })}
+            cls="bg-danger text-white"
+            testId={`attack-${r.regionId}`}
+          />
+          <ActionButton
+            label={L('🛡 防御', '🛡 Defend')}
+            hint={defend}
+            disabled={disabled || !defend.enabled}
+            onClick={() => onPick({ type: 'DEFEND', regionId: r.regionId })}
+            cls="bg-teal text-navy"
+            testId={`defend-${r.regionId}`}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function ActionButton({ label, hint, disabled, onClick, cls, testId }: { label: string; hint: { ja: string; en: string }; disabled: boolean; onClick: () => void; cls: string; testId: string }) {
+function ActionButton({
+  label,
+  hint,
+  disabled,
+  onClick,
+  cls,
+  testId,
+}: {
+  label: string;
+  hint: { ja: string; en: string };
+  disabled: boolean;
+  onClick: () => void;
+  cls: string;
+  testId: string;
+}) {
   const { L } = useI18n();
   return (
     <div className="flex flex-col gap-1">
-      <button className={`sw-btn w-full py-3 text-lg ${cls}`} disabled={disabled} onClick={onClick} data-testid={testId}>
+      <button
+        className={`sw-btn w-full py-3 text-lg ${cls}`}
+        disabled={disabled}
+        onClick={onClick}
+        data-testid={testId}
+      >
         {label}
       </button>
       <span className="text-[11px] leading-tight text-off/70">{L(hint.ja, hint.en)}</span>
@@ -330,18 +477,39 @@ function ConfirmSheet({
   hint: { ja: string; en: string } | null;
 }) {
   const { L } = useI18n();
-  const verb = pending.type === 'ATTACK' ? L('攻撃', 'Attack') : pending.type === 'DEFEND' ? L('防御', 'Defend') : L('充電', 'Charge');
+  const verb =
+    pending.type === 'ATTACK'
+      ? L('攻撃', 'Attack')
+      : pending.type === 'DEFEND'
+        ? L('防御', 'Defend')
+        : L('充電', 'Charge');
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60" role="dialog" aria-modal="true" aria-label={L('確認', 'Confirm')}>
+    <div
+      className="fixed inset-0 z-30 flex items-end justify-center bg-black/60"
+      role="dialog"
+      aria-modal="true"
+      aria-label={L('確認', 'Confirm')}
+    >
       <div className="sw-panel m-3 w-full max-w-xl p-4">
-        <p className="text-xl font-black">{regionLabel ? L(`${regionLabel}を${verb}しますか？`, `${verb} ${regionLabel}?`) : L(`${verb}しますか？`, `${verb}?`)}</p>
+        <p className="text-xl font-black">
+          {regionLabel
+            ? L(`${regionLabel}を${verb}しますか？`, `${verb} ${regionLabel}?`)
+            : L(`${verb}しますか？`, `${verb}?`)}
+        </p>
         {hint && <p className="mt-1 text-sm text-off/80">{L(hint.ja, hint.en)}</p>}
-        <p className="mt-1 text-sm text-off/70">{L('成功するとAPを1消費します。', 'Uses 1 AP if it succeeds.')}</p>
+        <p className="mt-1 text-sm text-off/70">
+          {L('成功するとAPを1消費します。', 'Uses 1 AP if it succeeds.')}
+        </p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button className="sw-btn bg-white/10 py-3" onClick={onCancel} disabled={sending}>
             {L('やめる', 'Cancel')}
           </button>
-          <button className="sw-btn bg-amber py-3 text-lg text-navy" onClick={onConfirm} disabled={sending} data-testid="confirm">
+          <button
+            className="sw-btn bg-amber py-3 text-lg text-navy"
+            onClick={onConfirm}
+            disabled={sending}
+            data-testid="confirm"
+          >
             {sending ? L('送信中…', 'Sending…') : L('実行！', 'Go!')}
           </button>
         </div>

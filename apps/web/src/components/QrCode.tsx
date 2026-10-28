@@ -7,7 +7,12 @@ export function QrCode({ url, size = 220, label }: { url: string; size?: number;
   const [svg, setSvg] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#070D1A', light: '#FFFFFF' } })
+    QRCode.toString(url, {
+      type: 'svg',
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#070D1A', light: '#FFFFFF' },
+    })
       .then((s) => alive && setSvg(s))
       .catch(() => alive && setSvg(null));
     return () => {
@@ -24,7 +29,9 @@ export function QrCode({ url, size = 220, label }: { url: string; size?: number;
         // qrcode output is generated locally from a configured URL.
         dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
       />
-      <figcaption className="max-w-[260px] break-all text-center text-sm font-bold text-off/90">{url.replace(/^https?:\/\//, '')}</figcaption>
+      <figcaption className="max-w-[260px] break-all text-center text-sm font-bold text-off/90">
+        {url.replace(/^https?:\/\//, '')}
+      </figcaption>
     </figure>
   );
 }

@@ -74,12 +74,14 @@ export class MatchStore {
     if (p.pausedFrom !== undefined) next.pausedFrom = p.pausedFrom;
     if (p.liveStartClock !== undefined) next.liveStartClock = p.liveStartClock;
     if (p.result !== undefined) next.result = p.result;
-    if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED') next.pauseReason = e.data.reason;
+    if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED')
+      next.pauseReason = e.data.reason;
     if (e.type === 'CLASH_RESOLVED') {
       next.clashes = [...cur.clashes, e.data.clash];
       const idx = e.data.clash.clashIndex + 1;
       const at = cur.config.clashTimesMs[idx];
-      next.nextClash = at === undefined || e.data.clash.ko.length > 0 ? null : { index: idx, atGameMs: at };
+      next.nextClash =
+        at === undefined || e.data.clash.ko.length > 0 ? null : { index: idx, atGameMs: at };
     }
     if (next.status === 'FINALIZING' || next.status === 'FINISHED' || next.status === 'CANCELLED') {
       next.nextClash = null;
