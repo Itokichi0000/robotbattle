@@ -1,27 +1,21 @@
 'use client';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { PublicMatchSnapshot, RoomRole } from '@sats-wars/shared';
-import { MatchConnection } from './connection';
+import type { PublicRaidSnapshot, RoomRole } from '@sats-wars/shared';
+import { RaidConnection } from './connection';
 
-export function useMatchConnection(
-  role: RoomRole,
-  token: string | null = null,
-): MatchConnection | null {
-  const [conn, setConn] = useState<MatchConnection | null>(null);
+export function useRaidConnection(role: RoomRole, token: string | null = null): RaidConnection | null {
+  const [conn, setConn] = useState<RaidConnection | null>(null);
   const tokenRef = useRef(token);
   tokenRef.current = token;
   useEffect(() => {
-    const c = new MatchConnection(role, tokenRef.current);
+    const c = new RaidConnection(role, tokenRef.current);
     setConn(c);
     return () => c.close();
   }, [role]);
-  useEffect(() => {
-    conn?.setToken(token);
-  }, [conn, token]);
   return conn;
 }
 
-export function useSnapshot(conn: MatchConnection | null): PublicMatchSnapshot | null {
+export function useRaid(conn: RaidConnection | null): PublicRaidSnapshot | null {
   return useSyncExternalStore(
     (cb) => (conn ? conn.store.subscribe(cb) : () => undefined),
     () => conn?.store.snapshot ?? null,
@@ -29,11 +23,19 @@ export function useSnapshot(conn: MatchConnection | null): PublicMatchSnapshot |
   );
 }
 
-export function useConnectionState(conn: MatchConnection | null) {
+export function useConnectionState(conn: RaidConnection | null) {
   return useSyncExternalStore(
     (cb) => (conn ? conn.onState(cb) : () => undefined),
     () => conn?.state ?? 'connecting',
     () => 'connecting' as const,
+  );
+}
+
+export function usePilotsOnline(conn: RaidConnection | null): number {
+  return useSyncExternalStore(
+    (cb) => (conn ? conn.onState(cb) : () => undefined),
+    () => conn?.pilotsOnline ?? 0,
+    () => 0,
   );
 }
 

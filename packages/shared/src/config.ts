@@ -127,6 +127,8 @@ export const gameConfigSchema = z
     // ---- difficulty & assist ----
     /** Enemy HP scales with active pilots / this (clamped to [min,max]). */
     difficultyReferencePilots: z.number().int().min(1),
+    /** Below the reference crew, enemy HP shrinks faster than linearly: small crews also cover fewer seats. */
+    difficultySmallCrewExponent: z.number().min(1).max(3),
     difficultyMinScale: z.number().min(0.05).max(1),
     difficultyMaxScale: z.number().min(1).max(10),
     /** Below this many active pilots an assist AI fills empty seats (recorded in results). */
@@ -169,7 +171,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   cityRebuildHp: 25,
   cityRebuildCooldownSeconds: 30,
 
-  bossBaseHp: 1000,
+  bossBaseHp: 900,
   scout: { hp: 60, damage: 18, telegraphMs: [8000, 12000], recoveryMs: [4000, 7000] },
   siege: { hp: 140, damage: 36, telegraphMs: [12000, 18000], recoveryMs: [6000, 9000] },
   saboteur: { hp: 90, damage: 6, telegraphMs: [10000, 12000], recoveryMs: [6000, 9000], energyDrain: 25, jamSeconds: 15 },
@@ -228,6 +230,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   },
 
   difficultyReferencePilots: 9,
+  difficultySmallCrewExponent: 1.4,
   difficultyMinScale: 0.25,
   difficultyMaxScale: 6,
   assistBelowPilots: 5,

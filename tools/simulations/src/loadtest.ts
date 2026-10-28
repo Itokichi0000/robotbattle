@@ -2,17 +2,19 @@
  * Load / latency probe against a RUNNING game server in mock payment mode.
  *
  *   pnpm --filter @sats-wars/simulations exec tsx src/loadtest.ts \
- *     --url http://localhost:4000 --password <ADMIN_PASSWORD> --players 100 --spectators 300
+ *     --url http://localhost:4000 --password <ADMIN_PASSWORD> --pilots 100 --spectators 300 --duration 60000
  *
- * Steps: makes sure a campaign is running; N players join + top up 525 sats
- * via mock-pay; S spectator sockets join; every player presses おすすめ (AUTO)
- * every ~0.4–1.5 s for --duration ms. Reports HTTP action latency and
- * action->event fan-out latency (time until EVERY spectator socket received it).
- * Note: a big crowd may finish a campaign (日本陥落) within the run; later
- * moves are then refused for free until the next campaign starts.
+ * Steps: switches the event to FREE passes (mock server only), opens the lobby
+ * and starts the raid; N guest pilots board (seats spread evenly); S spectator
+ * sockets subscribe; every pilot loops request mission → play (solver) →
+ * submit. Reports HTTP latency for mission/submit and the time from submit
+ * until EVERY spectator socket received that pilot's TASK_RESOLVED event.
  * Never run against a production server with real payments.
  */
 import { io, type Socket } from 'socket.io-client';
+import type { GameEvent, Role, SubmitResponse, TaskResponse } from '@sats-wars/shared';
+import { ROLES } from '@sats-wars/shared';
+import { solveTask } from '@sats-wars/game-engine';
 
 const args = process.argv.slice(2);
 const arg = (n: string, d: string) => {
@@ -21,22 +23,22 @@ const arg = (n: string, d: string) => {
 };
 const URL_ = arg('url', 'http://localhost:4000');
 const PASSWORD = arg('password', process.env.ADMIN_PASSWORD ?? '');
-const PLAYERS = Number(arg('players', '100'));
+const PILOTS = Number(arg('pilots', '100'));
 const SPECTATORS = Number(arg('spectators', '200'));
 const DURATION_MS = Number(arg('duration', '60000'));
 
-async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
+async function call<T>(method: string, path: string, body: unknown, token?: string): Promise<{ status: number; json: T }> {
   const r = await fetch(URL_ + path, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
+    method,
+    headers: { 'content-type': 'application/json', origin: URL_, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const j = (await r.json()) as T;
-  if (!r.ok) throw new Error(`${path} ${r.status} ${JSON.stringify(j)}`);
-  return j;
+  return { status: r.status, json: (await r.json()) as T };
+}
+async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const r = await call<T>('POST', path, body, token);
+  if (r.status >= 400) throw new Error(`${path} ${r.status} ${JSON.stringify(r.json)}`);
+  return r.json;
 }
 
 function pctl(xs: number[], p: number): number {
@@ -44,101 +46,123 @@ function pctl(xs: number[], p: number): number {
   const s = [...xs].sort((a, b) => a - b);
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]!;
 }
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   if (!PASSWORD) throw new Error('--password (ADMIN_PASSWORD) is required');
-  const snap = (await (await fetch(`${URL_}/api/public/current-match`)).json()) as {
-    snapshot: { paymentMode: string; status: string };
-  };
-  if (snap.snapshot.paymentMode !== 'mock')
-    throw new Error('Refusing to run: server is not in PAYMENT_MODE=mock');
-  const { token: admin } = await post<{ token: string }>('/api/admin/login', {
-    password: PASSWORD,
-  });
-  const st = snap.snapshot.status as string;
-  if (st === 'FINISHED' || st === 'CANCELLED') await post('/api/admin/command', { command: 'NEXT_MATCH' }, admin);
-  if (st === 'CREATED') await post('/api/admin/command', { command: 'START' }, admin).catch(() => undefined);
-  if (st === 'PAUSED') await post('/api/admin/command', { command: 'RESUME' }, admin).catch(() => undefined);
+  const snap = (await (await fetch(`${URL_}/api/public/current-raid`)).json()) as { snapshot: { paymentMode: string; status: string } };
+  if (snap.snapshot.paymentMode !== 'mock') throw new Error('Refusing to run: server is not in PAYMENT_MODE=mock');
+  const { token: admin } = await post<{ token: string }>('/api/admin/login', { password: PASSWORD });
+  const cmd = (body: Record<string, unknown>) => post('/api/admin/command', body, admin).catch(() => undefined);
+  await cmd({ command: 'SET_PASS_MODE', mode: 'FREE' });
+  await cmd({ command: 'SET_JOIN_STOPPED', stopped: false });
+  const st = snap.snapshot.status;
+  if (st === 'ENDED' || st === 'CANCELLED' || st === 'LIVE' || st === 'PAUSED') await cmd({ command: 'NEXT_RAID' });
+  await cmd({ command: 'OPEN_LOBBY' });
 
   // Spectators
   const sockets: Socket[] = [];
-  const seen = new Map<number, number>(); // seq -> count of sockets that got it
-  const lastArrival = new Map<number, number>();
+  const firstSeen = new Map<string, { count: number; last: number }>();
   for (let i = 0; i < SPECTATORS; i++) {
-    const s = io(URL_, { transports: ['websocket'], forceNew: true });
-    s.on('connect', () => s.emit('joinRoom', { role: 'spectator' }));
-    s.on('matchEvent', (e: { seq: number }) => {
-      seen.set(e.seq, (seen.get(e.seq) ?? 0) + 1);
-      lastArrival.set(e.seq, performance.now());
+    const s = io(URL_, { transports: ['websocket'], forceNew: true, extraHeaders: { origin: URL_ } });
+    s.on('connect', () => s.emit('raid:subscribe', { role: 'spectator' }));
+    s.on('raid:event', (e: GameEvent) => {
+      if (e.type !== 'TASK_RESOLVED') return;
+      const k = `${e.data.pilotId}:${e.seq}`;
+      const cur = firstSeen.get(k) ?? { count: 0, last: 0 };
+      cur.count++;
+      cur.last = performance.now();
+      firstSeen.set(k, cur);
     });
     sockets.push(s);
   }
-  await new Promise((r) => setTimeout(r, 2000));
+  await sleep(2000);
   const connected = sockets.filter((s) => s.connected).length;
 
-  // Players: join (everyone is on the same side) and top up.
+  // Pilots board with evenly spread seats.
   const t0 = performance.now();
-  const players: Array<{ token: string }> = [];
+  const pilots: Array<{ token: string; id: string; role: Role }> = [];
   await Promise.all(
-    Array.from({ length: PLAYERS }, async (_, i) => {
-      const r = await post<{ token: string }>('/api/players', { nickname: `load${i}` });
-      const inv = await post<{ invoiceId: string }>('/api/topups', { amountSats: 525 }, r.token);
-      await post('/api/dev/mock-pay', { invoiceId: inv.invoiceId }, r.token);
-      players.push({ token: r.token });
+    Array.from({ length: PILOTS }, async (_, i) => {
+      const r = await post<{ token: string; pilot: { pilotId: string } }>('/api/auth/guest', { callsign: `load${i}` });
+      const role = ROLES[i % ROLES.length]!;
+      await post('/api/raids/current/board', { role }, r.token);
+      pilots.push({ token: r.token, id: r.pilot.pilotId, role });
     }),
   );
-  const joinMs = performance.now() - t0;
+  const boardMs = performance.now() - t0;
+  await cmd({ command: 'START' });
 
-  const httpLat: number[] = [];
+  const reqLat: number[] = [];
+  const subLat: number[] = [];
   const fanout: number[] = [];
-  let ok = 0;
-  let refused = 0;
-  let errors = 0;
+  const counts = { tasks: 0, successes: 0, refused: 0, errors: 0, rateLimited: 0 };
   const until = performance.now() + DURATION_MS;
-  const tasks = players.map(async (p) => {
+  const loops = pilots.map(async (p) => {
+    await sleep(Math.random() * 3000);
     while (performance.now() < until) {
-      await new Promise((r) => setTimeout(r, 400 + Math.random() * 1100));
-      const start = performance.now();
       try {
-        const res = await post<{ result: { ok: boolean; eventSeq?: number }; creditSats: number }>(
-          '/api/action',
-          { clientActionId: `lt-${Math.random().toString(36).slice(2)}-${Date.now()}`, action: 'AUTO' },
-          p.token,
-        );
-        httpLat.push(performance.now() - start);
-        if (res.result.ok && res.result.eventSeq) {
-          ok++;
-          const seq = res.result.eventSeq;
-          const deadline = start + 10_000;
-          while ((seen.get(seq) ?? 0) < connected && performance.now() < deadline) await new Promise((r) => setTimeout(r, 5));
-          if ((seen.get(seq) ?? 0) >= connected) fanout.push(lastArrival.get(seq)! - start);
-        } else refused++; // not live / nothing to do: free no-op
-        if (res.creditSats < 21) return;
+        const a = performance.now();
+        const r = await call<TaskResponse>('POST', '/api/raids/current/tasks', {}, p.token);
+        reqLat.push(performance.now() - a);
+        if (r.status === 429) {
+          counts.rateLimited++;
+          await sleep(2000);
+          continue;
+        }
+        if (r.status >= 400 || r.json.code !== 'OK' || !r.json.task) {
+          counts.refused++;
+          await sleep(r.json.cooldownUntil ? Math.max(500, r.json.cooldownUntil - r.json.gameMs) : 2000);
+          continue;
+        }
+        const task = r.json.task;
+        const input = solveTask(task.params, 0.7, Math.random, 900, task.target.kind === 'ENERGY' ? task.target.sink : undefined);
+        const playMs = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 2500;
+        await sleep(playMs);
+        const b = performance.now();
+        const s = await post<SubmitResponse>('/api/raids/current/tasks/submit', { taskId: task.taskId, clientSubmissionId: `lt-${Math.random().toString(36).slice(2)}`, input }, p.token);
+        subLat.push(performance.now() - b);
+        counts.tasks++;
+        if (s.result.ok && s.result.success > 0) counts.successes++;
+        // Fan-out: the newest TASK_RESOLVED of this pilot reaching every spectator.
+        const deadline = b + 10_000;
+        let done = false;
+        while (!done && performance.now() < deadline) {
+          for (const [k, v] of firstSeen) {
+            if (k.startsWith(`${p.id}:`) && v.count >= connected && v.last >= b) {
+              fanout.push(v.last - b);
+              firstSeen.delete(k);
+              done = true;
+              break;
+            }
+          }
+          if (!done) await sleep(10);
+        }
+        await sleep(Math.max(0, s.result.cooldownUntil - s.result.atGameMs) + 500 + Math.random() * 2000);
       } catch {
-        errors++;
+        counts.errors++;
+        await sleep(1000);
       }
     }
   });
-  await Promise.all(tasks);
+  await Promise.all(loops);
   for (const s of sockets) s.close();
-  const report = {
-    players: PLAYERS,
-    spectatorsConnected: `${connected}/${SPECTATORS}`,
-    joinAllMs: Math.round(joinMs),
-    actions: { ok, refusedFree: refused, errors },
-    httpActionMs: { p50: pctl(httpLat, 50), p95: pctl(httpLat, 95), max: Math.max(...httpLat) },
-    actionToAllSpectatorsMs: {
-      p50: pctl(fanout, 50),
-      p95: pctl(fanout, 95),
-      max: Math.max(...fanout),
-      samples: fanout.length,
-    },
-  };
-  for (const k of ['httpActionMs', 'actionToAllSpectatorsMs'] as const) {
-    for (const [kk, v] of Object.entries(report[k]))
-      (report[k] as Record<string, number>)[kk] = Math.round(v as number);
-  }
-  console.log(JSON.stringify(report, null, 2));
+  const round = (o: Record<string, number>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v)]));
+  console.log(
+    JSON.stringify(
+      {
+        pilots: PILOTS,
+        spectatorsConnected: `${connected}/${SPECTATORS}`,
+        boardAllMs: Math.round(boardMs),
+        counts,
+        requestMissionMs: round({ p50: pctl(reqLat, 50), p95: pctl(reqLat, 95), max: Math.max(...reqLat) }),
+        submitMs: round({ p50: pctl(subLat, 50), p95: pctl(subLat, 95), max: Math.max(...subLat) }),
+        submitToAllSpectatorsMs: { ...round({ p50: pctl(fanout, 50), p95: pctl(fanout, 95), max: Math.max(...fanout) }), samples: fanout.length },
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(0);
 }
 

@@ -1,84 +1,76 @@
-import type { RegionId } from '@sats-wars/shared';
+import type { RaidResult, RegionId } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 
 /**
  * Rehearsal preview (/arena?preview=1): plays synthetic cues locally so
- * operators, the MC and artists can check camera/VFX without a running
- * campaign. Never sends anything to the server and never changes game state.
+ * operators, the MC and artists can check camera/VFX without a running raid.
+ * Never sends anything to the server and never changes game state.
  */
-export const PREVIEW_HELP =
-  'PREVIEW: 1 ウェーブ開始 / 2 雷神連打 / 3 風神連打 / 4 合体技 / 5 敵ターン / 6 奪還 / 7 クリア / 8 日本陥落 / 9 開幕 / 0 リセット / [ ] 速度';
+export const PREVIEW_HELP = 'PREVIEW: 1 開幕 / 2 砲撃 / 3 シールド / 4 敵の予告 / 5 敵の攻撃 / 6 都市陥落 / 7 神雷風陣 / 8 成功 / 9 失敗 / 0 リセット';
 
 interface PreviewState {
   n: number;
-  wave: number;
-  region: RegionId;
 }
 
 export function newPreviewState(): PreviewState {
-  return { n: 0, wave: 1, region: 'kanto' };
+  return { n: 0 };
 }
 
 const pick = (st: PreviewState): RegionId => REGION_IDS[st.n % REGION_IDS.length]!;
 
+const fakeResult = (won: boolean): RaidResult => ({
+  outcome: won ? ('SUCCEEDED' as const) : ('FAILED' as const),
+  reason: won ? ('BOSS_DEFEATED' as const) : ('CITIES_LOST' as const),
+  endedAtGameMs: 400_000,
+  clearTimeMs: won ? 400_000 : null,
+  survivingCities: won ? 6 : 3,
+  cityHpTotal: 400,
+  syncAverage: 60,
+  syncPeak: 90,
+  special: won ? ('ACTIVATED' as const) : ('FAILED' as const),
+  score: { citySurvival: 300, speed: 40, coordination: 120, bossDefeat: won ? 200 : 0, total: won ? 660 : 420 },
+  mvps: {},
+  pilots: 9,
+  bots: 0,
+  assisted: false,
+  configHash: 'preview',
+  stats: { tasks: 0, successes: 0, enemiesDefeated: 0, cityDamageTaken: 0, shieldAbsorbed: 0, energyRouted: 0, repairs: 0, syncSum: 0, syncSamples: 0, syncPeak: 90, assistActions: 0, peakPilots: 9 },
+});
+
 export function handlePreviewKey(key: string, director: ArenaDirector, st: PreviewState): boolean {
   st.n++;
-  const name = `ゲスト${(st.n % 9) + 1}`;
+  const name = `PILOT-${String(10000 + st.n).slice(1)}`;
+  const city = pick(st);
   switch (key) {
     case '1':
-      st.wave++;
-      director.play({ kind: 'waveStart', wave: st.wave, boss: st.wave % 5 === 0 });
+      director.play({ kind: 'raidStart' });
       return true;
     case '2':
-    case '3': {
-      const action = key === '2' ? 'RAIJIN' : 'FUJIN';
-      st.region = pick(st);
-      for (let i = 0; i < 5; i++) {
-        setTimeout(
-          () => director.play({ kind: 'action', action, regionId: st.region, nickname: name, damage: 30, kills: i === 4 ? 1 : 0, liberated: false }),
-          i * 180,
-        );
-      }
+      director.play({ kind: 'task', role: 'GUNNER', robot: 'RAIJIN', success: 1, callsign: name, assist: false, effect: { kind: 'DAMAGE', enemyId: 1, enemyKind: 'SCOUT', weakpoint: 'CORE', amount: 36, defeated: false, note: null } });
       return true;
-    }
+    case '3':
+      director.play({ kind: 'task', role: 'GUARDIAN', robot: 'FUJIN', success: 1, callsign: name, assist: false, effect: { kind: 'SHIELD', cityId: city, amount: 45 } });
+      return true;
     case '4':
-      director.play({ kind: 'action', action: 'COMBO', regionId: pick(st), nickname: 'プレビュー', damage: 150, kills: 3, liberated: false });
+      director.play({ kind: 'telegraph', enemyId: 1, enemyKind: 'SIEGE', targets: [city] });
       return true;
-    case '5': {
-      const a = pick(st);
-      const b = REGION_IDS[(st.n + 3) % REGION_IDS.length]!;
-      director.play({
-        kind: 'alienTurn',
-        attacks: [
-          { regionId: a, damage: 40, absorbed: 0, cityHpAfter: 0, fell: true },
-          { regionId: b, damage: 20, absorbed: 20, cityHpAfter: 70, fell: false },
-        ],
-        fell: [a],
-        landed: [REGION_IDS[(st.n + 5) % REGION_IDS.length]!],
-      });
+    case '5':
+      director.play({ kind: 'attack', enemyId: 1, enemyKind: 'SIEGE', robotHit: null, jam: false, hits: [{ cityId: city, damage: 36, absorbed: 10, hpAfter: 64, destroyed: false }] });
       return true;
-    }
     case '6':
-      director.play({ kind: 'action', action: 'RAIJIN', regionId: pick(st), nickname: 'プレビュー', damage: 45, kills: 1, liberated: true });
+      director.play({ kind: 'cityDestroyed', cityId: city });
       return true;
     case '7':
-      director.play({ kind: 'waveCleared', wave: st.wave });
+      director.play({ kind: 'specialOpen' });
+      setTimeout(() => director.play({ kind: 'specialResolved', outcome: 'ACTIVATED', damage: 250, bossId: null, cityHits: [] }), 1500);
       return true;
     case '8':
-      director.play({ kind: 'japanFallen', reachedWave: st.wave });
-      return true;
     case '9':
-      director.play({ kind: 'campaignStart' });
+      director.play({ kind: 'raidEnded', result: fakeResult(key === '8') });
       return true;
     case '0':
       director.reset();
-      return true;
-    case '[':
-      director.timeScale = Math.max(0.05, director.timeScale / 2);
-      return true;
-    case ']':
-      director.timeScale = Math.min(1, director.timeScale * 2);
       return true;
     default:
       return false;

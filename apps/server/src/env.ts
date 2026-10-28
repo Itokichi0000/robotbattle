@@ -19,6 +19,8 @@ const envSchema = z.object({
   /** Public base URL of THIS server (LNURL-auth callback, LNbits webhook). Fixed; never taken from Host headers. */
   SERVER_PUBLIC_URL: z.string().default(''),
   EVENT_ID: z.string().min(1).max(64).default('local-demo'),
+  /** Guest sign-ups per minute per IP. Venue Wi-Fi often NATs everyone to one address. */
+  GUEST_SIGNUPS_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(300),
   ADMIN_PASSWORD: z.string().default(''),
   /** Demo mode: free passes, demo-only admin tools (time scale), labelled DEMO everywhere. */
   DEMO_MODE: boolish,

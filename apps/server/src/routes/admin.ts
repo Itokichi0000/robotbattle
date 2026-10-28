@@ -16,7 +16,9 @@ export const BROADCAST_TEMPLATES = {
   LAST_RAID: { ja: '本日最後の作戦です！', en: 'Last raid of the day!' },
 } as const;
 
-const clean = (s: string) => s.normalize('NFKC').replace(/[<>&"'`\\\u0000-\u001F\u007F-\u009F​-‏‪-‮]/g, '').trim().slice(0, 80);
+// Strips markup characters, control characters and bidi/zero-width marks from staff broadcast text.
+// eslint-disable-next-line no-control-regex -- control characters are exactly what we remove
+const clean = (s: string) => s.normalize('NFKC').replace(/[<>&"'`\\\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E]/g, '').trim().slice(0, 80);
 
 const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.enum(ADMIN_LIFECYCLE_COMMANDS), reason: z.string().max(200).optional() }),

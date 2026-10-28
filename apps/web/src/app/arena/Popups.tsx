@@ -1,114 +1,66 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { ACTION_LABELS, REGION_INFO } from '@sats-wars/shared';
-import type { MatchConnection } from '@/lib/connection';
+import { ROLE_LABELS } from '@sats-wars/shared';
+import { effectSentence } from '@sats-wars/ui';
+import type { RaidConnection } from '@/lib/connection';
 
 interface Pop {
   id: number;
   text: string;
-  big: boolean;
+  tone: 'good' | 'miss' | 'cheer' | 'big';
   at: number;
 }
 
-/** Max visible: a busy crowd shouldn't bury the map in text. */
+/** Max visible: a busy crowd shouldn't bury the screen in text. */
 const MAX_POPS = 7;
-const LIFE_MS = 2600;
+const LIFE_MS = 2800;
 
 /**
- * "たろう ⚡ 東北 −45" for every move, so everyone who paid sees their own
- * name on the big screen within a second.
+ * 「サトシ 🛡 東京にシールド+45」 for every finished mission, so each pilot sees
+ * their own name on the big screen within a second. Names arrive already
+ * moderated by the server (pseudonym unless the pilot opted in).
  */
-export function ActionPopups({ conn, locale }: { conn: MatchConnection; locale: 'ja' | 'en' }) {
+export function ActionPopups({ conn, locale }: { conn: RaidConnection; locale: 'ja' | 'en' }) {
+  const L = (ja: string, en: string) => (locale === 'ja' ? ja : en);
   const [pops, setPops] = useState<Pop[]>([]);
   const id = useRef(0);
-  useEffect(
-    () =>
-      conn.store.onEvent((e) => {
-        if (e.type !== 'PLAYER_ACTION') return;
-        const d = e.data;
-        const a = ACTION_LABELS[d.action];
-        const where = locale === 'ja' ? REGION_INFO[d.regionId].shortJa : REGION_INFO[d.regionId].labelEn;
-        const what = d.liberated
-          ? locale === 'ja'
-            ? '奪還！'
-            : 'liberated!'
-          : d.action === 'SHIELD'
-            ? locale === 'ja'
-              ? '結界'
-              : 'barrier'
-            : d.kills > 0
-              ? locale === 'ja'
-                ? `撃破×${d.kills}`
-                : `${d.kills} down`
-              : `−${d.damage}`;
-        const text = `${d.nickname} ${a.icon} ${where} ${what}`;
-        const big = d.liberated || d.kills > 0 || d.action === 'COMBO';
-        const now = Date.now();
-        setPops((prev) => [...prev.filter((p) => now - p.at < LIFE_MS).slice(-(MAX_POPS - 1)), { id: ++id.current, text, big, at: now }]);
-      }),
-    [conn, locale],
-  );
-  // Sweep expired pops even when nobody acts.
   useEffect(() => {
-    const t = setInterval(() => setPops((prev) => (prev.some((p) => Date.now() - p.at >= LIFE_MS) ? prev.filter((p) => Date.now() - p.at < LIFE_MS) : prev)), 500);
-    return () => clearInterval(t);
-  }, []);
-
+    const push = (text: string, tone: Pop['tone']) =>
+      setPops((p) => [...p.filter((x) => Date.now() - x.at < LIFE_MS).slice(-(MAX_POPS - 1)), { id: ++id.current, text, tone, at: Date.now() }]);
+    const offs = [
+      conn.store.onEvent((e) => {
+        if (e.type === 'TASK_RESOLVED') {
+          const d = e.data;
+          const who = d.assist ? L('AI支援', 'AI assist') : d.callsign;
+          push(`${who} ${ROLE_LABELS[d.role].icon} ${d.success > 0 ? effectSentence(d.effect, L) : L('ミス', 'missed')}`, d.success > 0 ? 'good' : 'miss');
+        } else if (e.type === 'ENEMY_DEFEATED' && e.data.callsign) {
+          push(L(`💥 ${e.data.callsign} が撃破！`, `💥 ${e.data.callsign} took it down!`), 'big');
+        } else if (e.type === 'CITY_REBUILT') {
+          push(L(`🏗 ${e.data.callsign} が再建！`, `🏗 ${e.data.callsign} rebuilt it!`), 'big');
+        } else if (e.type === 'PILOT_BOARDED' && !e.data.isBot) {
+          push(L(`🚀 ${e.data.callsign} が搭乗`, `🚀 ${e.data.callsign} boarded`), 'cheer');
+        }
+      }),
+      conn.onCheer((c) => push(`${c.emoji} ${c.callsign}`, 'cheer')),
+    ];
+    const gc = setInterval(() => setPops((p) => p.filter((x) => Date.now() - x.at < LIFE_MS)), 500);
+    return () => {
+      offs.forEach((o) => o());
+      clearInterval(gc);
+    };
+  }, [conn, locale]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="pointer-events-none absolute left-[1.2vw] top-[24%] flex w-[24%] flex-col items-start gap-[0.4vh]" data-testid="action-pops" aria-hidden>
+    <ul className="pointer-events-none flex flex-col items-start gap-[0.4vh]" aria-live="off" data-testid="action-popups">
       {pops.map((p) => (
-        <div
+        <li
           key={p.id}
-          className={`sw-pop-in max-w-full truncate rounded-full bg-black/65 px-3 py-0.5 font-black ${p.big ? 'text-[1.5em] text-yellow-300' : 'text-[1.3em]'}`}
-          style={{ borderLeft: '5px solid #25C8D7' }}
+          className={`sw-pop-in rounded-full px-[1vw] py-[0.3vh] text-[1.4vw] font-bold shadow-lg ${
+            p.tone === 'big' ? 'bg-amber text-navy' : p.tone === 'good' ? 'bg-navy-3/90 text-off' : p.tone === 'cheer' ? 'bg-teal/80 text-navy' : 'bg-navy-2/80 text-muted'
+          }`}
         >
           {p.text}
-        </div>
+        </li>
       ))}
-    </div>
-  );
-}
-
-interface Bubble {
-  id: number;
-  emoji: string;
-  nickname: string;
-  x: number;
-  at: number;
-}
-
-/** Free cheers float up from the bottom of the screen. */
-export function CheerBubbles({ conn, reducedMotion }: { conn: MatchConnection; reducedMotion: boolean }) {
-  const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  const id = useRef(0);
-  useEffect(
-    () =>
-      conn.onCheer((c) => {
-        const now = Date.now();
-        setBubbles((prev) => [
-          ...prev.filter((b) => now - b.at < 3000).slice(-14),
-          { id: ++id.current, emoji: c.emoji, nickname: c.nickname, x: Math.random(), at: now },
-        ]);
-      }),
-    [conn],
-  );
-  useEffect(() => {
-    const t = setInterval(() => setBubbles((prev) => (prev.length ? prev.filter((b) => Date.now() - b.at < 3000) : prev)), 600);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-[16%] h-[40%] overflow-hidden" aria-hidden data-testid="cheers">
-      {bubbles.map((b) => (
-        <div
-          key={b.id}
-          className={`absolute bottom-0 flex flex-col items-center ${reducedMotion ? '' : 'sw-cheer-up'}`}
-          // Keep clear of the centre where the map is.
-          style={{ left: `${b.x < 0.5 ? 4 + b.x * 50 : 66 + (b.x - 0.5) * 50}%` }}
-        >
-          <span className="text-[2.6em] leading-none">{b.emoji}</span>
-          <span className="rounded bg-black/60 px-1.5 text-[0.85em] font-bold">{b.nickname}</span>
-        </div>
-      ))}
-    </div>
+    </ul>
   );
 }

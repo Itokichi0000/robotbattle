@@ -16,6 +16,7 @@
     "@sats-wars/game-engine": "workspace:*",
     "@sats-wars/shared": "workspace:*",
     "@sats-wars/three-game": "workspace:*",
+    "@sats-wars/ui": "workspace:*",
     "next": "16.3.8",
     "qrcode": "^1.5.4",
     "react": "~19.2.0",

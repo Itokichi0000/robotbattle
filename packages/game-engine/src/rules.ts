@@ -54,7 +54,9 @@ export function activePilotIds(s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'
 
 /** Enemy HP multiplier from the (smoothed) number of active pilots. */
 export function difficultyScale(c: GameConfig, activePilots: number): number {
-  return Math.min(c.difficultyMaxScale, Math.max(c.difficultyMinScale, activePilots / c.difficultyReferencePilots));
+  const ratio = activePilots / c.difficultyReferencePilots;
+  const curved = ratio < 1 ? ratio ** c.difficultySmallCrewExponent : ratio;
+  return Math.min(c.difficultyMaxScale, Math.max(c.difficultyMinScale, curved));
 }
 
 /**

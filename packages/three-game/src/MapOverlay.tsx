@@ -2,22 +2,23 @@ import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import type { Enemy, RegionId, RegionState, TeamId } from '@sats-wars/shared';
-import { REGION_CENTROIDS, REGION_INFO, REGION_OUTLINES } from '@sats-wars/shared';
+import type { CityState, RegionId } from '@sats-wars/shared';
+import { CITY_INFO, REGION_CENTROIDS, REGION_OUTLINES } from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect } from './director';
-import { ALIEN_COLOR, MAP_TRANSFORM, TEAM_COLORS } from './layout';
+import { ALIEN_COLOR, CORRUPT_RED, MAP_TRANSFORM, TEAM_COLORS } from './layout';
 
-/** What the next alien turn will do to each region (computed by the caller from engine rules). */
-export interface RegionDanger {
-  damageNext: number;
-  willFall: boolean;
+/** Incoming attack on a city (computed by the caller from server telegraphs). */
+export interface CityThreat {
+  /** Seconds until the first attack lands. */
+  seconds: number;
+  /** Damage after current shields would destroy the city. */
+  lethal: boolean;
 }
 
 export interface MapOverlayProps {
-  regions: RegionState[];
-  enemies: Enemy[];
-  danger: Partial<Record<RegionId, RegionDanger>>;
-  cityHpMax: number;
+  cities: CityState[];
+  threats: Partial<Record<RegionId, CityThreat>>;
+  cityMaxHp: number;
   director: ArenaDirector;
   reducedMotion: boolean;
   locale: 'ja' | 'en';
@@ -27,12 +28,12 @@ const EXTRUDE_DEPTH = 0.22;
 const HEALTHY = new THREE.Color('#2E7BD6');
 const HURT = new THREE.Color('#F7931A');
 const CRITICAL = new THREE.Color('#FF4D5E');
-const CAPTURED = new THREE.Color(ALIEN_COLOR);
+const DOWN = new THREE.Color('#2A2F3D');
 
-/** City health as colour: blue (fine) → amber → red (about to fall); violet = captured. */
-function regionColor(r: RegionState, cityHpMax: number): THREE.Color {
-  if (r.fallen) return CAPTURED.clone();
-  const u = Math.max(0, Math.min(1, r.cityHp / cityHpMax));
+/** City health as colour: blue (fine) → amber → red; dark grey = facility down. */
+function regionColor(r: CityState, cityMaxHp: number): THREE.Color {
+  if (r.destroyed) return DOWN.clone();
+  const u = Math.max(0, Math.min(1, r.hp / cityMaxHp));
   return u > 0.5 ? HURT.clone().lerp(HEALTHY, (u - 0.5) * 2) : CRITICAL.clone().lerp(HURT, u * 2);
 }
 
@@ -43,10 +44,10 @@ interface RegionVisual {
 }
 
 /**
- * Floating hologram of Japan's 8 regions with the invading UFOs above them.
- * Everything shown mirrors server state; pulses and effects come from the director.
+ * Floating hologram of Japan's 8 defence regions (one city node each).
+ * Everything shown mirrors server state; pulses come from the director.
  */
-export function MapOverlay({ regions, enemies, danger, cityHpMax, director, reducedMotion, locale }: MapOverlayProps) {
+export function MapOverlay({ cities, threats, cityMaxHp, director, reducedMotion, locale }: MapOverlayProps) {
   const visuals = useMemo(() => {
     const out = {} as Record<RegionId, RegionVisual>;
     for (const [id, polys] of Object.entries(REGION_OUTLINES) as Array<[RegionId, (typeof REGION_OUTLINES)[RegionId]]>) {
@@ -86,15 +87,15 @@ export function MapOverlay({ regions, enemies, danger, cityHpMax, director, redu
     [visuals],
   );
 
-  const byId = useMemo(() => new Map(regions.map((r) => [r.regionId, r])), [regions]);
-  const pulses = useRef<Array<{ regionId: RegionId; teamId: TeamId | null; start: number; kind: DirectorEffect['kind'] }>>([]);
+  const byId = useMemo(() => new Map(cities.map((r) => [r.cityId, r])), [cities]);
+  const pulses = useRef<Array<{ regionId: RegionId; start: number; kind: DirectorEffect['kind'] }>>([]);
   const pulseMeshes = useRef<Array<THREE.Mesh | null>>([]);
 
   useEffect(
     () =>
       director.onEffect((e) => {
-        if ((e.kind === 'regionPulse' || e.kind === 'shield' || e.kind === 'alienAttack') && e.regionId) {
-          pulses.current.push({ regionId: e.regionId, teamId: e.teamId, start: director.time, kind: e.kind });
+        if ((e.kind === 'shield' || e.kind === 'beam' || e.kind === 'repair' || e.kind === 'cityBlast') && e.to?.kind === 'city') {
+          pulses.current.push({ regionId: e.to.id, start: director.time, kind: e.kind });
           if (pulses.current.length > 12) pulses.current.shift();
         }
       }),
@@ -103,19 +104,19 @@ export function MapOverlay({ regions, enemies, danger, cityHpMax, director, redu
 
   useFrame(() => {
     const t = director.time;
-    for (const r of regions) {
-      const v = visuals[r.regionId];
-      const c = regionColor(r, cityHpMax);
+    for (const r of cities) {
+      const v = visuals[r.cityId];
+      const c = regionColor(r, cityMaxHp);
       v.material.color.copy(c);
       v.material.emissive.copy(c);
-      const d = danger[r.regionId];
-      if (d?.willFall && !r.fallen) {
-        // About to fall at the next alien turn: slow 1 Hz glow (steady with reduced motion).
+      const d = threats[r.cityId];
+      if (d && !r.destroyed) {
+        // Under attack: slow 1 Hz glow (≤2 Hz rule; steady with reduced motion), red edge if lethal.
         v.material.emissiveIntensity = reducedMotion ? 0.9 : 0.5 + 0.45 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2));
-        v.edge.color.set('#FF4D5E');
+        v.edge.color.set(d.lethal ? '#FF4D5E' : '#FFB04D');
       } else {
-        v.material.emissiveIntensity = r.fallen ? 0.6 : 0.35;
-        v.edge.color.set(r.fallen ? ALIEN_COLOR : r.shield > 0 ? '#8BEAF2' : '#9FB3D9');
+        v.material.emissiveIntensity = r.destroyed ? 0.15 : 0.35;
+        v.edge.color.set(r.destroyed ? '#555B6E' : r.shield > 0 ? '#8BEAF2' : '#9FB3D9');
       }
     }
     pulses.current = pulses.current.filter((p) => t - p.start < 1.2);
@@ -133,7 +134,7 @@ export function MapOverlay({ regions, enemies, danger, cityHpMax, director, redu
       const s = 0.3 + age * (p.kind === 'shield' ? 1.2 : 2.2);
       m.scale.set(s, s, s);
       const mat = m.material as THREE.MeshBasicMaterial;
-      mat.color.set(p.kind === 'alienAttack' ? '#FF4D5E' : p.kind === 'shield' ? '#8BEAF2' : p.teamId ? TEAM_COLORS[p.teamId] : ALIEN_COLOR);
+      mat.color.set(p.kind === 'beam' || p.kind === 'cityBlast' ? CORRUPT_RED : p.kind === 'shield' ? TEAM_COLORS.FUJIN : p.kind === 'repair' ? '#7DFFB2' : ALIEN_COLOR);
       mat.opacity = (1 - age) * 0.85;
     });
   });
@@ -163,19 +164,10 @@ export function MapOverlay({ regions, enemies, danger, cityHpMax, director, redu
                 <lineLoop key={i} geometry={g} material={v.edge} />
               ),
             )}
-            {r && (
-              <RegionLabel
-                region={r}
-                aliens={enemies.filter((e) => e.regionId === id).length}
-                danger={danger[id]}
-                locale={locale}
-              />
-            )}
+            {r && <CityLabel city={r} threat={threats[id]} locale={locale} />}
           </group>
         );
       })}
-
-      <Ufos enemies={enemies} director={director} reducedMotion={reducedMotion} />
 
       {Array.from({ length: 12 }, (_, i) => (
         <mesh key={`pulse-${i}`} ref={(m) => void (pulseMeshes.current[i] = m)} visible={false}>
@@ -187,95 +179,18 @@ export function MapOverlay({ regions, enemies, danger, cityHpMax, director, redu
   );
 }
 
-/** Saucers hovering over their region; motherships are big. */
-function Ufos({ enemies, director, reducedMotion }: { enemies: Enemy[]; director: ArenaDirector; reducedMotion: boolean }) {
-  const parts = useMemo(
-    () => ({
-      disc: new THREE.SphereGeometry(0.42, 18, 8),
-      dome: new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      body: new THREE.MeshStandardMaterial({ color: '#C9C2E8', metalness: 0.7, roughness: 0.3, emissive: ALIEN_COLOR, emissiveIntensity: 0.4 }),
-      glass: new THREE.MeshStandardMaterial({ color: ALIEN_COLOR, emissive: ALIEN_COLOR, emissiveIntensity: 1.2, transparent: true, opacity: 0.9 }),
-      walker: new THREE.MeshStandardMaterial({ color: '#FF4FD8', emissive: '#FF4FD8', emissiveIntensity: 0.8 }),
-    }),
-    [],
-  );
-  useEffect(() => () => Object.values(parts).forEach((p) => p.dispose()), [parts]);
-  const refs = useRef(new Map<number, THREE.Group>());
-
-  // Lay out several aliens in one region on a small spiral around its centroid.
-  const placed = useMemo(() => {
-    const perRegion = new Map<RegionId, number>();
-    return enemies.map((e) => {
-      const k = perRegion.get(e.regionId) ?? 0;
-      perRegion.set(e.regionId, k + 1);
-      const c = REGION_CENTROIDS[e.regionId];
-      const ang = k * 2.2;
-      const rad = k === 0 ? 0 : 0.45 + 0.18 * k;
-      return { e, x: c.x + Math.cos(ang) * rad, y: c.y + Math.sin(ang) * rad };
-    });
-  }, [enemies]);
-
-  useFrame(() => {
-    const t = director.time;
-    for (const p of placed) {
-      const g = refs.current.get(p.e.id);
-      if (!g) continue;
-      const bob = reducedMotion ? 0 : Math.sin(t * 2 + p.e.id) * 0.08;
-      g.position.set(p.x, p.y, EXTRUDE_DEPTH + 0.9 + bob);
-      g.rotation.z = reducedMotion ? 0 : t * 1.5 + p.e.id;
-    }
-  });
-
-  return (
-    <group name="ufos">
-      {placed.map(({ e, x, y }) => {
-        const scale = e.kind === 'MOTHERSHIP' ? 2.1 : e.kind === 'WALKER' ? 1.25 : 0.9;
-        return (
-          <group
-            key={e.id}
-            ref={(g) => {
-              if (g) refs.current.set(e.id, g);
-              else refs.current.delete(e.id);
-            }}
-            position={[x, y, EXTRUDE_DEPTH + 0.9]}
-            scale={scale}
-          >
-            <mesh geometry={parts.disc} material={e.kind === 'WALKER' ? parts.walker : parts.body} scale={[1, 1, 0.3]} />
-            <mesh geometry={parts.dome} material={parts.glass} position={[0, 0, 0.08]} rotation={[Math.PI / 2, 0, 0]} />
-          </group>
-        );
-      })}
-    </group>
-  );
-}
-
-function RegionLabel({
-  region,
-  aliens,
-  danger,
-  locale,
-}: {
-  region: RegionState;
-  aliens: number;
-  danger: RegionDanger | undefined;
-  locale: 'ja' | 'en';
-}) {
-  const c = REGION_CENTROIDS[region.regionId];
-  const info = REGION_INFO[region.regionId];
-  const state = region.fallen ? 'captured' : danger?.willFall ? 'danger' : 'ok';
+function CityLabel({ city, threat, locale }: { city: CityState; threat: CityThreat | undefined; locale: 'ja' | 'en' }) {
+  const c = REGION_CENTROIDS[city.cityId];
+  const info = CITY_INFO[city.cityId];
+  const state = city.destroyed ? 'down' : threat?.lethal ? 'danger' : threat ? 'threat' : 'ok';
   return (
     <group position={[c.x, c.y, EXTRUDE_DEPTH]}>
       <Html position={[0, -0.6, 0.3]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
         <div className={`sw-map-label is-${state}`} data-state={state}>
-          {state === 'danger' && <span className="sw-map-label-warn">⚠</span>}
-          <span className="sw-map-label-name">{locale === 'ja' ? info.shortJa : info.labelEn}</span>
-          {region.fallen ? (
-            <span className="sw-map-label-hp">👾</span>
-          ) : (
-            <span className="sw-map-label-hp">🏙{region.cityHp}</span>
-          )}
-          {region.shield > 0 && <span>🛡</span>}
-          {aliens > 0 && <span className="sw-map-label-aliens">🛸{aliens}</span>}
+          {threat && <span className="sw-map-label-warn">⚠{Math.ceil(threat.seconds)}s</span>}
+          <span className="sw-map-label-name">{locale === 'ja' ? info.cityJa : info.cityEn}</span>
+          <span className="sw-map-label-hp">{city.destroyed ? '✖' : city.hp}</span>
+          {city.shield > 0 && <span className="sw-map-label-shield">🛡{city.shield}</span>}
         </div>
       </Html>
     </group>

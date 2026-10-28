@@ -6,7 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  transpilePackages: ['@sats-wars/shared', '@sats-wars/game-engine', '@sats-wars/three-game'],
+  transpilePackages: ['@sats-wars/shared', '@sats-wars/game-engine', '@sats-wars/three-game', '@sats-wars/ui'],
   turbopack: { root },
   poweredByHeader: false,
   async headers() {

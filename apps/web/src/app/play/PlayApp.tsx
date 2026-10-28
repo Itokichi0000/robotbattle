@@ -1,171 +1,301 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { JoinResponse, MeResponse } from '@sats-wars/shared';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { MeResponse, SessionResponse } from '@sats-wars/shared';
+import { CHEER_EMOJIS, ONE_LINE_RULES } from '@sats-wars/shared';
+import { Cockpit, JapanMapMini, RaidHeader, ResultCard, type SeatState, ThreatLine, TrainingPanel, raidView } from '@sats-wars/ui';
 import { ConnectionPill } from '@/components/ConnectionPill';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { Logo } from '@/components/Logo';
-import { ApiError, api, storage } from '@/lib/api';
-import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks';
+import { ApiError, api } from '@/lib/api';
+import { useConnectionState, useRaid, useRaidConnection, useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
-import { Controller } from './Controller';
-import { type PlaySession, clearSession, deviceId, loadSession, saveSession } from './session';
+import { httpRaidClient } from '@/lib/raidClient';
+import { PassGate } from './PassGate';
+import { deviceId } from './session';
 
 /**
- * Phone flow, deliberately one screen: everyone is on the same side, so the
- * player is created silently on first load and lands straight on the
- * controller (big おすすめ button, map for those who want to choose).
+ * Phone: become a pilot (guest or Lightning), take a seat, fly missions.
+ * The session is an HttpOnly cookie; nothing secret is kept in the page.
  */
 export function PlayApp() {
-  const { L } = useI18n();
-  const [session, setSession] = useState<PlaySession | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [largeText, setLargeText] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const conn = useMatchConnection('player', session?.token ?? null);
-  const snap = useSnapshot(conn);
+  const { L, locale } = useI18n();
+  const conn = useRaidConnection('pilot');
+  const snap = useRaid(conn);
   const connState = useConnectionState(conn);
-
-  useEffect(() => {
-    setSession(loadSession());
-    setLargeText(storage.get('sw.largeText') === '1');
-    setLoaded(true);
-  }, []);
-  useEffect(() => {
-    document.body.classList.toggle('sw-large-text', largeText);
-    storage.set('sw.largeText', largeText ? '1' : '0');
-  }, [largeText]);
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [seatPatch, setSeatPatch] = useState<Partial<SeatState>>({});
+  const client = useMemo(() => (conn ? httpRaidClient(conn) : null), [conn]);
 
   const refreshMe = useCallback(async () => {
-    if (!session) return;
     try {
-      setMe(await api<MeResponse>('/api/me', { token: session.token }));
+      const m = await api<MeResponse>('/api/me');
+      setMe(m);
+      setSeatPatch({});
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        // Token replaced or unknown: joining again with the device id restores
-        // the same player (and credit).
-        clearSession();
-        setSession(null);
-        setMe(null);
-      }
+      if (e instanceof ApiError && e.status === 401) setMe(null);
+    } finally {
+      setAuthChecked(true);
     }
-  }, [session]);
+  }, []);
 
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
-  // Balance pushes (top-up credited, move charged, code redeemed).
+  // A new raid (or a raid that just opened) resets the seat.
   useEffect(() => {
-    if (!conn) return;
-    return conn.onCredit((c) => setMe((m) => (m ? { ...m, creditSats: c.creditSats } : m)));
-  }, [conn]);
-  // A new season resets "this season" counters; a phone that slept catches up.
-  useEffect(() => {
-    if (connState === 'connected') void refreshMe();
-  }, [connState, refreshMe, snap?.matchId]);
+    if (snap && me && snap.raidId !== me.seat.raidId) void refreshMe();
+  }, [snap?.raidId, me, refreshMe]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onSession = useCallback((s: PlaySession) => {
-    saveSession(s);
-    setSession(s);
-  }, []);
+  const onLogin = useCallback(async () => {
+    await refreshMe();
+    conn?.resubscribe();
+  }, [refreshMe, conn]);
 
-  // No team to pick: join (free) as soon as the page is open.
-  const joining = useRef(false);
-  const join = useCallback(async () => {
-    if (joining.current) return;
-    joining.current = true;
-    setJoinError(null);
-    try {
-      const r = await api<JoinResponse>('/api/players', { body: { deviceId: deviceId() } });
-      onSession({ token: r.token, playerId: r.playerId, nickname: r.nickname });
-    } catch (e) {
-      setJoinError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      joining.current = false;
-    }
-  }, [onSession]);
-  useEffect(() => {
-    if (loaded && !session && snap) void join();
-  }, [loaded, session, snap, join]);
+  if (!authChecked) return <Shell connState={connState}>{L('読み込み中…', 'Loading…')}</Shell>;
+  if (!me) return <Shell connState={connState}><Onboarding onLogin={onLogin} /></Shell>;
+  if (!snap || !client) return <Shell connState={connState}>{L('サーバーに接続中…', 'Connecting…')}</Shell>;
 
-  let body: React.ReactNode;
-  if (!loaded || !snap) {
-    body = <Centered>{connState === 'offline' ? <Offline /> : L('読み込み中…', 'Loading…')}</Centered>;
-  } else if (!session) {
-    body = (
-      <Centered>
-        {joinError ? (
-          <div>
-            <p className="font-bold text-danger">{joinError}</p>
-            <button type="button" className="sw-btn mt-3 bg-amber px-4 text-navy" onClick={() => void join()}>
-              {L('もう一度', 'Retry')}
-            </button>
-          </div>
-        ) : (
-          L('隊員登録中…', 'Joining the defence force…')
-        )}
-      </Centered>
-    );
-  } else {
-    body = (
-      <Controller
-        snap={snap}
-        conn={conn!}
-        session={session}
-        me={me}
-        onMe={setMe}
-        onSession={onSession}
-        refreshMe={refreshMe}
-      />
-    );
-  }
+  const seat: SeatState = { ...me.seat, ...seatPatch };
+  const needsPass = !seat.boarded && !me.seat.entitled && snap.passMode === 'PAID' && !snap.demoMode && me.passCredits === 0;
+  const lobby = snap.status === 'LOBBY_OPEN' || snap.status === 'CREATED';
+  const gate = !snap.joinOpen && !seat.boarded ? (
+    <div className="sw-panel p-4 text-center" data-testid="join-closed">
+      <p className="font-bold">{L('今回の出撃受付は終了しました', 'Boarding has closed for this raid')}</p>
+      <p className="text-sm text-muted">{L('応援して次の作戦を待とう！ 次はすぐ始まります', 'Cheer now and join the next raid soon!')}</p>
+    </div>
+  ) : needsPass ? (
+    <PassGate snap={snap} conn={conn!} pending={me.pendingInvoice} onGranted={refreshMe} />
+  ) : undefined;
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-3 pb-6 pt-3">
-      <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <Logo size="sm" />
-        <div className="flex flex-wrap items-center justify-end gap-2">
+    <Shell connState={connState} callsign={me.pilot.callsign}>
+      <PlayBody snap={snap} me={me} />
+      {snap.status === 'ENDED' && snap.result ? (
+        <>
+          <ResultCard result={snap.result} locale={locale} bestScore={snap.bestScore} />
+          <p className="text-center text-sm text-muted">{L('まもなく次の作戦が始まります', 'The next raid starts soon')}</p>
+          <Link className="sw-btn sw-focus bg-navy-3 px-4 py-3 text-center" href="/passport">
+            🪪 {L('パイロット手帳を見る', 'Open my passport')}
+          </Link>
+        </>
+      ) : (
+        <Cockpit
+          client={client}
+          raid={snap}
+          seat={seat}
+          onSeat={(p) => setSeatPatch((s) => ({ ...s, ...p }))}
+          locale={locale}
+          easy={me.pilot.assistMode}
+          boardGate={gate}
+        />
+      )}
+      {(lobby || !seat.boarded) && snap.status !== 'ENDED' && <TrainingPanel locale={locale} initialRole={seat.role ?? 'GUNNER'} />}
+      <CheerRow />
+      <Settings me={me} onChanged={refreshMe} />
+    </Shell>
+  );
+}
+
+function PlayBody({ snap, me }: { snap: NonNullable<ReturnType<typeof useRaid>>; me: MeResponse }) {
+  const { L, locale } = useI18n();
+  useTicker(500);
+  const view = raidView(snap, snapNow(snap));
+  const lobbyLeft = snap.lobbyEndsAt ? Math.max(0, Math.ceil((snap.lobbyEndsAt - Date.now()) / 1000)) : null;
+  return (
+    <>
+      {snap.broadcast && (
+        <p className="rounded-lg bg-teal/20 px-3 py-2 text-sm font-bold" role="status">
+          📢 {L(snap.broadcast.messageJa, snap.broadcast.messageEn)}
+        </p>
+      )}
+      <RaidHeader raid={snap} view={view} locale={locale} compact />
+      {snap.status === 'LIVE' && <ThreatLine view={view} locale={locale} />}
+      {snap.status === 'LOBBY_OPEN' && (
+        <p className="sw-panel p-3 text-center font-bold" data-testid="lobby-countdown">
+          {lobbyLeft !== null ? L(`出撃まで ${lobbyLeft}秒`, `Launch in ${lobbyLeft}s`) : L('パイロット募集中', 'Pilots wanted')}
+          <span className="block text-xs font-normal text-muted">{L(`${snap.crew.length}人が搭乗中`, `${snap.crew.length} aboard`)}</span>
+        </p>
+      )}
+      {snap.status === 'PAUSED' && (
+        <p className="rounded-lg bg-amber/20 px-3 py-2 text-center font-bold" role="status">
+          ⏸ {L('一時停止中', 'Paused')}
+        </p>
+      )}
+      {snap.status !== 'LOBBY_OPEN' && snap.status !== 'CREATED' && (
+        <details open={snap.status === 'LIVE'}>
+          <summary className="cursor-pointer text-sm text-muted">{L('日本の地図', 'Map of Japan')}</summary>
+          <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
+        </details>
+      )}
+      {me.seat.stats && me.seat.stats.tasks > 0 && (
+        <p className="text-center text-xs text-muted">
+          {L(`あなたの出撃 ${me.seat.stats.tasks}回・成功 ${me.seat.stats.successes}回`, `Your sorties ${me.seat.stats.tasks} · hits ${me.seat.stats.successes}`)}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** Rough game time from the snapshot anchor (the cockpit uses the synced clock). */
+function snapNow(s: NonNullable<ReturnType<typeof useRaid>>): number {
+  return s.running ? s.gameMs + Math.max(0, Date.now() - s.serverTime) : s.gameMs;
+}
+
+function Shell({ children, connState, callsign }: { children: React.ReactNode; connState: ReturnType<typeof useConnectionState>; callsign?: string }) {
+  return (
+    <main className="swc-root mx-auto flex min-h-dvh w-full max-w-xl flex-col gap-3 px-4 pt-3 pb-10">
+      <header className="flex items-center justify-between gap-2">
+        <Link href="/" className="sw-focus rounded">
+          <Logo size="sm" />
+        </Link>
+        <div className="flex items-center gap-2">
+          {callsign && (
+            <Link href="/passport" className="sw-focus max-w-[9rem] truncate rounded-full border border-line px-2 py-1 text-xs font-bold" data-testid="callsign">
+              🪪 {callsign}
+            </Link>
+          )}
           <ConnectionPill state={connState} />
-          <button
-            type="button"
-            className="sw-focus rounded-full border border-line px-2 py-1.5 text-sm font-bold"
-            onClick={() => setLargeText((v) => !v)}
-            aria-pressed={largeText}
-            aria-label={L('文字サイズ', 'Text size')}
-          >
-            {largeText ? 'A−' : 'A+'}
-          </button>
           <LanguageToggle />
         </div>
       </header>
-      <main className="flex flex-1 flex-col">{body}</main>
-      <footer className="mt-6 text-center text-[11px] text-off/50">
-        <a className="underline" href="/#terms">
-          {L('利用条件・個人情報の扱い', 'Terms & privacy')}
-        </a>
-        {' · '}
-        {L('賞金・換金・払い戻しはありません', 'No prizes, no cash-out')}
-        {' · '}
-        {L('支払い情報は会場画面に表示されません', 'Payment data never appears on the venue screen')}
-      </footer>
-    </div>
+      {children}
+    </main>
   );
 }
 
-export function Centered({ children }: { children: React.ReactNode }) {
+function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
+  const { L, locale } = useI18n();
+  const [callsign, setCallsign] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [modes, setModes] = useState<{ mock: boolean; lightning: boolean; demo: boolean } | null>(null);
+  useEffect(() => {
+    api<{ mock: boolean; lightning: boolean; demo: boolean }>('/api/auth/modes')
+      .then(setModes)
+      .catch(() => setModes(null));
+  }, []);
+  const guest = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api<SessionResponse>('/api/auth/guest', { body: { callsign: callsign.trim(), deviceId: deviceId() } });
+      await onLogin();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="sw-panel flex flex-1 flex-col items-center justify-center p-6 text-center">{children}</div>
+    <section className="flex flex-col gap-4" data-testid="onboarding">
+      <div className="sw-panel p-4">
+        <h1 className="sw-display text-2xl">{L('君も、パイロットになろう。', 'Become a pilot.')}</h1>
+        <p className="mt-2 text-sm">{locale === 'ja' ? ONE_LINE_RULES.ja : ONE_LINE_RULES.en}</p>
+        <ul className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <li>🎯 {L('砲撃：敵の弱点を撃つ', 'Gunner: hit weak points')}</li>
+          <li>🛡 {L('防衛：街を守る', 'Guardian: shield cities')}</li>
+          <li>🔌 {L('電力：エネルギーをつなぐ', 'Router: route energy')}</li>
+          <li>🔧 {L('整備：修理する', 'Engineer: repair')}</li>
+        </ul>
+      </div>
+      <form
+        className="sw-panel flex flex-col gap-3 p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void guest();
+        }}
+      >
+        <label className="text-sm font-bold" htmlFor="callsign">
+          {L('コールサイン（大画面に出る名前・省略可）', 'Callsign (optional, may appear on the big screen)')}
+        </label>
+        <input
+          id="callsign"
+          className="sw-focus min-h-12 rounded-lg border border-line bg-navy px-3 text-lg"
+          value={callsign}
+          onChange={(e) => setCallsign(e.target.value)}
+          maxLength={20}
+          placeholder={L('例：サトシ', 'e.g. Satoshi')}
+          autoComplete="nickname"
+          data-testid="callsign-input"
+        />
+        <p className="text-xs text-muted">{L('本名や連絡先は入れないでね。名前は「大画面に表示」を選んだときだけ出ます。', 'No real names or contacts. Your name shows on screen only if you allow it.')}</p>
+        {(modes?.mock ?? true) && (
+          <button type="submit" className="sw-btn bg-amber px-4 text-lg text-navy" disabled={busy} data-testid="guest-login">
+            🚀 {L('ゲストで搭乗', 'Board as guest')}
+          </button>
+        )}
+        {modes?.lightning && (
+          <Link className="sw-btn sw-focus flex items-center justify-center bg-navy-3 px-4" href="/auth/lightning?next=/play" data-testid="lightning-login">
+            ⚡ {L('Lightningウォレットでログイン（記録を残す）', 'Log in with a Lightning wallet (keep records)')}
+          </Link>
+        )}
+        {error && (
+          <p className="text-sm text-danger" role="alert">
+            {error}
+          </p>
+        )}
+      </form>
+    </section>
   );
 }
 
-function Offline() {
+function CheerRow() {
   const { L } = useI18n();
+  const [sent, setSent] = useState<string | null>(null);
+  const cheer = async (emoji: string) => {
+    try {
+      await api('/api/cheer', { body: { emoji } });
+      setSent(emoji);
+      setTimeout(() => setSent(null), 1200);
+    } catch {
+      // cheering is best-effort
+    }
+  };
   return (
-    <div>
-      <p className="text-lg font-bold text-danger">{L('ゲームサーバーに接続できません', 'Cannot reach the game server')}</p>
-      <p className="mt-2 text-sm text-off/80">
-        {L('会場Wi-Fiに接続しているか確認してください。自動で再接続します。', 'Check the venue Wi-Fi. We will retry automatically.')}
-      </p>
+    <div className="flex flex-col gap-1">
+      <p className="text-xs text-muted">{L('応援（無料・大画面に出る）', 'Cheer (free, shown on the big screen)')}</p>
+      <div className="grid grid-cols-6 gap-1">
+        {CHEER_EMOJIS.map((e) => (
+          <button key={e} type="button" className={`sw-btn sw-focus bg-navy-3 text-xl ${sent === e ? 'ring-2 ring-teal' : ''}`} onClick={() => void cheer(e)} aria-label={L(`応援 ${e}`, `Cheer ${e}`)}>
+            {e}
+          </button>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function Settings({ me, onChanged }: { me: MeResponse; onChanged: () => Promise<void> }) {
+  const { L } = useI18n();
+  const patch = async (body: Record<string, unknown>) => {
+    await api('/api/me', { method: 'PATCH', body });
+    await onChanged();
+  };
+  return (
+    <details className="sw-panel p-3 text-sm">
+      <summary className="cursor-pointer font-bold">⚙ {L('設定', 'Settings')}</summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <label className="flex min-h-11 items-center gap-2">
+          <input type="checkbox" checked={me.pilot.assistMode} onChange={(e) => void patch({ assistMode: e.target.checked })} />
+          {L('かんたん操作（的が大きい・ゆっくり）', 'Easy controls (bigger, slower targets)')}
+        </label>
+        <label className="flex min-h-11 items-center gap-2">
+          <input type="checkbox" checked={me.pilot.showNameOnArena} onChange={(e) => void patch({ showNameOnArena: e.target.checked })} data-testid="show-name" />
+          {L('大画面にコールサインを表示する', 'Show my callsign on the big screen')}
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Link className="sw-btn sw-focus bg-navy-3 px-3 py-2" href="/passport">
+            🪪 {L('パイロット手帳', 'Passport')}
+          </Link>
+          {!me.pilot.lightningLinked && (
+            <Link className="sw-btn sw-focus bg-navy-3 px-3 py-2" href="/auth/lightning?next=/play">
+              ⚡ {L('ウォレットで記録を保存', 'Save records with a wallet')}
+            </Link>
+          )}
+        </div>
+      </div>
+    </details>
   );
 }

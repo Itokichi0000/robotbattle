@@ -1,7 +1,7 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PublicMatchSnapshot, TeamId } from '@sats-wars/shared';
+import type { PublicRaidSnapshot, TeamId } from '@sats-wars/shared';
 import {
   ArenaDirector,
   type Banner,
@@ -10,8 +10,8 @@ import {
   type SfxName,
   cueFromEvent,
 } from '@sats-wars/three-game';
-import { boardView } from '@/lib/battle';
-import { useConnectionState, useMatchConnection, useSnapshot } from '@/lib/hooks';
+import { raidView } from '@sats-wars/ui';
+import { useConnectionState, useRaid, useRaidConnection, useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 import { ArenaHud } from './ArenaHud';
 import { Arena2D } from './Arena2D';
@@ -32,8 +32,8 @@ const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.A
 
 export function ArenaApp() {
   const { locale } = useI18n();
-  const conn = useMatchConnection('arena');
-  const snap = useSnapshot(conn);
+  const conn = useRaidConnection('arena');
+  const snap = useRaid(conn);
   const connState = useConnectionState(conn);
   const director = useMemo(() => new ArenaDirector(), []);
   const sfx = useMemo(() => new SfxEngine(), []);
@@ -76,20 +76,7 @@ export function ArenaApp() {
   useEffect(() => {
     const offBanner = director.onBanner((b) => setBanner(b));
     const offSound = director.onSound((name) => {
-      const map: Record<string, SfxName> = {
-        hit: 'hit',
-        thunder: 'thunder',
-        wind: 'wind',
-        capture: 'capture',
-        shield: 'shield',
-        charge: 'charge',
-        special: 'special',
-        victory: 'victory',
-        ko: 'ko',
-        intro: 'intro',
-      };
-      const s = map[name];
-      if (s) sfx.play(s);
+      sfx.play(name as SfxName);
     });
     return () => {
       offBanner();
@@ -107,15 +94,15 @@ export function ArenaApp() {
     return () => offs.forEach((o) => o());
   }, [conn, director]);
 
-  // A different campaign (initial load / next campaign): start the director
-  // from a calm stance; a finished campaign keeps its game-over banner up.
-  const lastMatch = useRef<string | null>(null);
+  // A different raid (initial load / next raid): start the director from a
+  // calm stance; a finished raid keeps its result banner up.
+  const lastRaid = useRef<string | null>(null);
   const syncToSnapshot = useCallback(
-    (s: PublicMatchSnapshot) => {
-      if (lastMatch.current === s.matchId || previewRef.current) return;
-      lastMatch.current = s.matchId;
+    (s: PublicRaidSnapshot) => {
+      if (lastRaid.current === s.raidId || previewRef.current) return;
+      lastRaid.current = s.raidId;
       director.reset();
-      if (s.status === 'FINISHED' && s.result) director.play({ kind: 'japanFallen', reachedWave: s.result.reachedWave });
+      if (s.status === 'ENDED' && s.result) director.play({ kind: 'raidEnded', result: s.result });
     },
     [director],
   );
@@ -153,6 +140,9 @@ export function ArenaApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, [preview, director]);
 
+  // The HUD clock and threat countdowns tick between server events.
+  useTicker(250);
+
   const enableAudio = async () => {
     setAudioOn(await sfx.unlock());
   };
@@ -167,10 +157,13 @@ export function ArenaApp() {
     );
   }
 
-  const view = boardView(snap);
-  // Both gods glow while the combo is ready (a cue for the crowd to fire it).
-  const g = view.comboReady ? 1 : 0.15 + 0.5 * (snap.combo / snap.config.comboGaugeMax);
-  const glow: Record<TeamId, number> = { RAIJIN: g, FUJIN: g };
+  const gameNow = conn!.gameNow();
+  const view = raidView(snap, gameNow);
+  const glow: Record<TeamId, number> = {
+    RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100),
+    FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
+  };
+  const threats = Object.fromEntries(Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]));
 
   return (
     <div
@@ -182,11 +175,13 @@ export function ArenaApp() {
       {use3d ? (
         <ArenaScene
           director={director}
-          regions={snap.regions}
+          cities={snap.cities}
           enemies={snap.enemies}
-          danger={view.danger}
-          cityHpMax={snap.config.cityHpMax}
+          telegraphs={snap.telegraphs}
+          threats={threats}
+          cityMaxHp={snap.config.cityMaxHp}
           glow={glow}
+          reserve={snap.reserveEnergy / 100}
           quality={settings.quality}
           reducedMotion={settings.reducedMotion}
           locale={locale}
@@ -198,7 +193,7 @@ export function ArenaApp() {
           onModelError={() => setModelError(true)}
         />
       ) : (
-        <Arena2D snap={snap} view={view} director={director} />
+        <Arena2D snap={snap} view={view} locale={locale} />
       )}
       <ArenaHud
         snap={snap}
@@ -209,7 +204,6 @@ export function ArenaApp() {
         stats={settings.showStats ? stats : null}
         renderer={use3d ? 'webgl' : '2d'}
         contextLost={contextLost}
-        reducedMotion={settings.reducedMotion}
         preview={preview}
       />
       {!audioOn && !settings.muted && (

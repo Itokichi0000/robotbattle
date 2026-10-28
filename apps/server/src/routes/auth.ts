@@ -22,7 +22,7 @@ export function registerAuthRoutes(app: FastifyInstance, services: Services): vo
     appendCookie(reply, `${BIND_COOKIE}=${binding}; Path=/api/auth/lightning; HttpOnly; SameSite=Lax; Max-Age=300${sessions.secure ? '; Secure' : ''}`);
   const bindingOf = (req: FastifyRequest) => readCookie(req.headers.cookie, BIND_COOKIE) ?? (req.headers['x-lnurl-binding'] as string | undefined) ?? null;
 
-  app.post('/api/auth/guest', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/auth/guest', { config: { rateLimit: { max: env.GUEST_SIGNUPS_PER_MINUTE, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = guestRequestSchema.parse(req.body ?? {});
     const { pilot, token, expiresAt } = pilots.guest(body);
     sessions.setCookie(reply, token, expiresAt);

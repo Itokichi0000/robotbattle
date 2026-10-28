@@ -9,8 +9,8 @@ export function LandingHeader() {
     <div className="flex flex-col gap-4">
       <p className="text-lg text-off/90">
         {L(
-          'エイリアンが日本に攻めてきた！ satsを送ると雷神と風神が出撃。会場のみんなで協力して、8つの地方を守りぬこう。ビットコインを知らなくても、ボタンを押すだけで遊べます。',
-          'Aliens are invading Japan! Send sats and RAIJIN & FUJIN strike back. Everyone at the venue is on the same team — defend all 8 regions. No bitcoin knowledge needed — just tap.',
+          '謎の侵蝕体 NULL CORE が日本の8都市を狙っている！ 会場のみんなで雷神と風神のコックピットに乗り込み、砲撃・防衛・電力・整備の4つの席で協力して8分間守りぬこう。ボタンを押すだけで遊べます。',
+          'NULL CORE is coming for Japan’s 8 cities! Everyone at the venue boards RAIJIN and FUJIN — gunner, guardian, router or engineer — and defends together for 8 minutes. Just tap to play.',
         )}
       </p>
       <div className="flex flex-wrap gap-3">
@@ -24,6 +24,9 @@ export function LandingHeader() {
         <a href="/arena" className="sw-btn flex items-center border border-line px-6 text-lg">
           {L('会場スクリーン', 'Arena screen')}
         </a>
+        <a href="/passport" className="sw-btn flex items-center border border-line px-6 text-lg">
+          🪪 {L('パイロット手帳', 'Passport')}
+        </a>
         <LanguageToggle />
       </div>
     </div>
@@ -36,24 +39,24 @@ export function LandingRules() {
     <div className="grid gap-4 md:grid-cols-3">
       {[
         [
-          L('みんなで協力', 'All on one team'),
+          L('4つの席で協力', 'Four seats, one crew'),
           L(
-            '1回 21 sats で雷神か風神が1回うごく。迷ったら「おすすめ」ボタンでOK。時間制限はなく、みんなの一手でゲームが進みます。',
-            'Each move costs 21 sats. Not sure what to do? Press Auto. There is no timer: the game advances with every paid move.',
+            '🎯砲撃（雷神で弱点を撃つ）🛡防衛（風神で街を守る）🔌電力（エネルギーをつなぐ）🔧整備（修理）。どの席もミニゲーム1回が数秒。いま必要な席は画面が教えてくれます。',
+            '🎯 Gunner (Raijin hits weak points), 🛡 Guardian (Fujin shields cities), 🔌 Router (energy), 🔧 Engineer (repairs). Each mission is a few-second minigame; the screen shows which seat is needed.',
           ),
         ],
         [
-          L('敵ターンは予告つき', 'Alien turns are announced'),
+          L('攻撃は予告つき', 'Attacks are announced'),
           L(
-            'みんなで8回うごくとエイリアンのターン。次にとられる地方には⚠が出るので、倒すか🛡結界で守ろう。⚡は1体に大ダメージ、🌀は全体攻撃、💥は合体技。',
-            'Every 8 moves the aliens strike. Regions about to fall show ⚠: defeat the aliens or raise a 🛡 barrier. ⚡ hits one, 🌀 hits all, 💥 is the combo.',
+            '敵は攻撃の前に⚠でねらう都市と残り秒数を見せます。間に合えば守れる！ 4都市を下回ると日本陥落。',
+            'Enemies show ⚠ target and countdown before they strike. Make it in time and the city is safe. Below 4 cities, Japan falls.',
           ),
         ],
         [
-          L('日本陥落まで', 'Until Japan falls'),
+          L('最終技 神雷風陣', 'Final special: SHINRAI FUJIN'),
           L(
-            'ウェーブごとに敵は強くなり、5地方とられたら日本陥落。何ウェーブ守れるかに挑戦！ 防衛戦は自動でくり返し、残高はずっと使えます。',
-            'Waves get tougher; 5 captured regions and Japan falls. How long can the venue hold? Campaigns loop automatically and your credit carries over.',
+            '最終決戦で砲撃・防衛・電力の3人がそろってSYNCが高いと、雷神と風神の合体技が発動。人数ではなく連携で勝つゲームです。',
+            'In the final wave, three different pilots (gunner, guardian, router) plus high SYNC fire the combined special. Teamwork wins, not head count.',
           ),
         ],
       ].map(([title, body]) => (
@@ -82,26 +85,26 @@ export function LandingTerms() {
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>
           {L(
-            'チャージしたsatsはゲーム内の出撃にだけ使えます。賞金・換金・払い戻し・抽選による景品はありません。',
-            'Topped-up sats can only be used for in-game moves. No prizes, cash-out, refunds or lotteries.',
+            '出撃パス（1作戦 21 sats）は、その作戦に参加する権利です。払った額で強くはならず、賞金・換金・払い戻し・抽選による景品はありません。',
+            'A raid pass (21 sats per raid) is the right to fly that raid. Paying never makes you stronger. No prizes, cash-out, refunds or lotteries.',
           )}
         </li>
         <li>
           {L(
-            '支払先はイベント運営者です。支払いが遅れて届いた場合も没収せず残高に加算します。残高は当日中ずっと使えます。',
-            'Payments go to the organisers. Late payments are never forfeited; they are added to your balance for the day.',
+            '支払先はイベント運営者です。作戦の締切後に届いた支払いは没収せず、次の作戦で使える出撃パスとして残します。',
+            'Payments go to the organisers. A payment that arrives after boarding closes is never forfeited; it becomes a pass for a later raid.',
           )}
         </li>
         <li>
           {L(
-            'ニックネームは任意で、本名は不要です。不適切な表示は運営が非表示にできます。',
-            'Nicknames are optional; staff can hide inappropriate names.',
+            'コールサインは任意で、本名は不要です。大画面には本人が許可したときだけ表示し、それ以外は PILOT-番号 で表示します。不適切な表示は運営が非表示にできます。',
+            'Callsigns are optional. They appear on the big screen only if you allow it (PILOT-number otherwise); staff can hide inappropriate names.',
           )}
         </li>
         <li>
           {L(
-            '支払い情報・IPアドレス・ウォレット識別子は会場画面に表示しません。請求書データは一定期間後に削除します。',
-            'Payment data, IP addresses and wallet identifiers are never shown publicly; invoice data is deleted after a retention period.',
+            'Lightningログイン（LNURL-auth）は鍵を持っていることの確認で、本人確認ではありません。秘密鍵やシードを入力させることは絶対にありません。支払い情報・IP・ウォレット識別子は会場画面に表示しません。',
+            'Lightning login (LNURL-auth) proves key possession, not identity. We never ask for seeds or private keys. Payment data, IPs and wallet identifiers are never shown publicly.',
           )}
         </li>
         <li>

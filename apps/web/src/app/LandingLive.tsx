@@ -1,46 +1,26 @@
 'use client';
-import { STATUS_LABELS } from '@sats-wars/shared';
-import { FallMeter, TurnGauge } from '@/components/DefenceBits';
-import { JapanMap2D } from '@/components/JapanMap2D';
-import { boardView } from '@/lib/battle';
-import { useMatchConnection, useSnapshot } from '@/lib/hooks';
+import { PHASE_LABELS, STATUS_LABELS } from '@sats-wars/shared';
+import { JapanMapMini, RaidHeader, raidView } from '@sats-wars/ui';
+import { usePilotsOnline, useRaid, useRaidConnection, useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 
 export function LandingLive() {
   const { L, locale } = useI18n();
-  const conn = useMatchConnection('spectator');
-  const snap = useSnapshot(conn);
-  if (!snap || !conn)
-    return <div className="sw-panel p-6 text-center text-off/70">{L('試合情報を読み込み中…', 'Loading match…')}</div>;
-  const v = boardView(snap);
-  const live = snap.status === 'LIVE';
+  const conn = useRaidConnection('spectator');
+  const snap = useRaid(conn);
+  const online = usePilotsOnline(conn);
+  useTicker(500);
+  if (!snap || !conn) return <div className="sw-panel p-6 text-center text-off/70">{L('作戦情報を読み込み中…', 'Loading raid…')}</div>;
+  const view = raidView(snap, conn.gameNow());
+  const label = snap.status === 'LIVE' ? PHASE_LABELS[snap.phase] : STATUS_LABELS[snap.status];
   return (
-    <div className="sw-panel p-4" data-testid="landing-live">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-black">
-          {STATUS_LABELS[snap.status][locale]}
-          <span className="ml-2 text-off/80">{L(`ウェーブ ${snap.wave}`, `Wave ${snap.wave}`)}</span>
-        </span>
-        <span className="text-sm">
-          <FallMeter fallen={v.fallenCount} limit={snap.config.fallLimit} locale={locale} />
-        </span>
-      </div>
-      {live && (
-        <div className="mt-1 text-sm">
-          <TurnGauge left={v.turnLeft} total={snap.config.actionsPerTurn} locale={locale} />
-        </div>
-      )}
-      <JapanMap2D
-        regions={snap.regions}
-        enemies={snap.enemies}
-        cityHpMax={snap.config.cityHpMax}
-        danger={v.danger}
-        locale={locale}
-        className="mx-auto mt-2 h-72 w-full"
-      />
-      <p className="mt-1 text-center text-xs text-off/65">
-        {L(`隊員 ${snap.playersOnline}人 参戦中`, `${snap.playersOnline} defenders online`)}
-        {snap.bestWave > 0 && L(` ・ 最高記録 ウェーブ${snap.bestWave}`, ` ・ best: wave ${snap.bestWave}`)}
+    <div className="sw-panel flex flex-col gap-2 p-4" data-testid="landing-live">
+      <span className="font-black">{L(label.ja, label.en)}</span>
+      <RaidHeader raid={snap} view={view} locale={locale} compact />
+      <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
+      <p className="text-center text-xs text-off/65">
+        {L(`搭乗 ${snap.crew.length}人・接続中 ${online}人`, `${snap.crew.length} aboard · ${online} online`)}
+        {snap.bestScore != null && L(` ・ 最高スコア ${Math.round(snap.bestScore)}`, ` · best score ${Math.round(snap.bestScore)}`)}
       </p>
     </div>
   );

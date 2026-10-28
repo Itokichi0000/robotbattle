@@ -1,58 +1,72 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import type { GameConfig, PublicMatchSnapshot } from '@sats-wars/shared';
-import { REGION_INFO, STATUS_LABELS } from '@sats-wars/shared';
+import type { GameConfig, PublicRaidSnapshot } from '@sats-wars/shared';
+import { PHASE_LABELS, ROLES, ROLE_LABELS, STATUS_LABELS } from '@sats-wars/shared';
+import { JapanMapMini, fmtClock, raidView } from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
 
 interface Overview {
-  snapshot: PublicMatchSnapshot;
-  paymentMode: string;
-  paymentsEnabled: boolean;
-  autoLoop: boolean;
-  demoBots: number;
-  actions: { actions: number; players: number };
-  credit: { outstanding: number; toppedUp: number; passes: number; spent: number; adjusted: number };
+  snapshot: PublicRaidSnapshot;
+  settings: {
+    paymentMode: string;
+    paymentsEnabled: boolean;
+    paymentIntegration: boolean;
+    joinStopped: boolean;
+    namesHidden: boolean;
+    autoLoop: boolean;
+    passMode: 'FREE' | 'PAID';
+    demoMode: boolean;
+    authMode: string;
+    timeScale: number;
+    demoBots: number;
+    demoBotSkill: number;
+    eventId: string;
+  };
+  crew: { total: number; bots: number; roles: Record<string, number> };
+  entitlements: Record<string, number>;
   invoices: Record<string, { count: number; sats: number }>;
-  passes: Record<string, { count: number; sats: number }>;
-  realtime: {
-    connections: number;
-    byRole: Record<string, number>;
-    arenas: Array<{
-      socketId: string;
-      fps: number;
-      frameMs: number;
-      renderer: string;
-      quality: string;
-    }>;
-  };
-  server: {
-    uptimeSec: number;
-    memoryMb: number;
-    eventLoopLagMs: number | null;
-    tickLagMs: number | null;
-  };
+  sponsored: Record<string, number>;
+  realtime: { connections: number; byRole: Record<string, number>; arenas: Array<{ socketId: string; fps: number; frameMs: number; renderer: string; quality: string }> };
+  server: { uptimeSec: number; memoryMb: number; eventLoopLagMs: number | null; tickLagMs: number | null };
   nextConfig: GameConfig;
+  broadcastTemplates: Record<string, { ja: string; en: string }>;
 }
 
+interface PilotRow {
+  id: string;
+  code: string;
+  callsign: string;
+  hidden: boolean;
+  showName: boolean;
+  authType: string;
+  sorties: number;
+  victories: number;
+  passCredits: number;
+  aboard: boolean;
+  role: string | null;
+  lastSeenAt: number;
+}
 interface InvoiceRow {
   id: string;
-  playerId: string;
+  pilotId: string;
+  raidId: string;
   amountSats: number;
   status: string;
   createdAt: number;
   expiresAt: number;
+  latePolicy: string | null;
   checkFailures: number;
   paymentHashPrefix: string;
 }
-interface PlayerRow {
-  id: string;
-  nickname: string;
-  nicknameHidden: boolean;
-  creditSats: number;
-  actionsTotal: number;
-  kills: number;
-  lastSeenAt: number;
+interface SponsoredRow {
+  idPrefix: string;
+  label: string;
+  raidId: string | null;
+  status: string;
+  issuedAt: number;
+  expiresAt: number;
+  redeemedAt: number | null;
 }
 interface AuditRow {
   id: number;
@@ -73,7 +87,8 @@ export function AdminApp() {
       setToken(null);
     }
   }, []);
-  const logout = () => {
+  // Stable: the dashboard's polling effect depends on it.
+  const logout = useCallback(() => {
     void api('/api/admin/logout', { body: {}, token }).catch(() => undefined);
     try {
       sessionStorage.removeItem(TOKEN_KEY);
@@ -81,7 +96,7 @@ export function AdminApp() {
       // ignore
     }
     setToken(null);
-  };
+  }, [token]);
   if (!token) {
     return (
       <Login
@@ -139,11 +154,13 @@ function Login({ onToken }: { onToken: (t: string) => void }) {
   );
 }
 
+
+type Tab = 'raid' | 'pilots' | 'passes' | 'monitor' | 'audit';
+
 function Dashboard({ token, onLogout }: { token: string; onLogout: () => void }) {
   const [ov, setOv] = useState<Overview | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
+  const [tab, setTab] = useState<Tab>('raid');
+  const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
     try {
       setOv(await api<Overview>('/api/admin/overview', { token }));
@@ -156,579 +173,383 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
     const id = setInterval(() => void load(), 2000);
     return () => clearInterval(id);
   }, [load]);
-
-  const command = async (body: Record<string, unknown>, confirmText?: string) => {
+  const cmd = async (body: Record<string, unknown>, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
-    setBusy(true);
+    setMsg(null);
     try {
-      await api('/api/admin/command', { token, body });
-      setMsg({ ok: true, text: `OK: ${String(body.command)}` });
+      await api('/api/admin/command', { body, token });
+      setMsg(`OK: ${String(body.command)}`);
       await load();
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof ApiError ? e.message : String(e) });
-    } finally {
-      setBusy(false);
+      setMsg(e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
     }
   };
-
-  if (!ov) return <div className="p-6">Loading…</div>;
-  const s = ov.snapshot;
-
+  if (!ov) return <p className="p-6">読み込み中… / Loading…</p>;
   return (
-    <div className="mx-auto max-w-6xl p-4">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4" data-testid="admin">
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <Logo size="sm" />
-        <div className="flex items-center gap-2 text-sm">
-          <span
-            className={`rounded-full px-3 py-1 font-bold ${ov.paymentMode === 'mock' ? 'bg-yellow-400/20 text-yellow-200' : 'bg-danger/20 text-danger'}`}
-          >
-            PAYMENT_MODE={ov.paymentMode}
-          </span>
-          <a
-            className="rounded border border-line px-3 py-1"
-            href="/arena"
-            target="_blank"
-            rel="noreferrer"
-          >
-            /arena
-          </a>
-          <button className="rounded border border-line px-3 py-1" onClick={onLogout}>
-            Logout
+        <nav className="flex flex-wrap gap-1">
+          {(
+            [
+              ['raid', '作戦'],
+              ['pilots', 'パイロット'],
+              ['passes', 'パス・決済'],
+              ['monitor', '監視'],
+              ['audit', '監査ログ'],
+            ] as Array<[Tab, string]>
+          ).map(([k, label]) => (
+            <button key={k} type="button" className={`sw-btn px-3 ${tab === k ? 'bg-teal text-navy' : 'bg-navy-3'}`} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
+              {label}
+            </button>
+          ))}
+          <button type="button" className="sw-btn bg-navy-3 px-3" onClick={onLogout}>
+            ログアウト
           </button>
-        </div>
+        </nav>
       </header>
-
+      <EmergencyBar ov={ov} cmd={cmd} />
       {msg && (
-        <p
-          className={`mb-3 rounded px-3 py-2 text-sm font-bold ${msg.ok ? 'bg-ok/15 text-ok' : 'bg-danger/15 text-danger'}`}
-        >
-          {msg.text}
+        <p className="rounded bg-navy-3 px-3 py-2 text-sm" role="status" data-testid="admin-msg">
+          {msg}
         </p>
       )}
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <section className="sw-panel p-4 md:col-span-2">
-          <h2 className="font-black">防衛戦 / Campaign</h2>
-          <p className="mt-1 font-mono text-xs text-off/70">
-            {s.matchId} · config {s.configVersion}
-          </p>
-          <div className="mt-2 flex flex-wrap items-baseline gap-4">
-            <span className="text-3xl font-black" data-testid="admin-status">
-              {STATUS_LABELS[s.status].ja} / {s.status}
-            </span>
-            <span className="text-xl" data-testid="admin-wave">
-              ウェーブ {s.wave} · 敵ターンまで {s.config.actionsPerTurn - s.actionsThisTurn}手 · 合体 {s.combo}/{s.config.comboGaugeMax}
-            </span>
-          </div>
-          {s.pauseReason && <p className="text-sm text-yellow-300">pause reason: {s.pauseReason}</p>}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Btn onClick={() => command({ command: 'START' })} disabled={busy || s.status !== 'CREATED'} testId="cmd-start">
-              スタート / Start
-            </Btn>
-            <Btn onClick={() => command({ command: 'PAUSE' })} disabled={busy || s.status !== 'LIVE'} testId="cmd-pause">
-              一時停止 / Pause
-            </Btn>
-            <Btn onClick={() => command({ command: 'RESUME' })} disabled={busy || s.status !== 'PAUSED'} testId="cmd-resume">
-              再開 / Resume
-            </Btn>
-            <Btn
-              onClick={() => command({ command: 'CANCEL' }, '防衛戦を中止します（残高は保持）。よろしいですか？ / Cancel this campaign?')}
-              disabled={busy || s.status === 'FINISHED' || s.status === 'CANCELLED'}
-              cls="bg-danger/80"
-            >
-              中止 / Cancel
-            </Btn>
-            <Btn
-              onClick={() => command({ command: 'NEXT_MATCH' })}
-              disabled={busy || !['FINISHED', 'CANCELLED', 'CREATED'].includes(s.status)}
-              testId="cmd-next"
-            >
-              次の防衛戦 / Next campaign
-            </Btn>
-          </div>
-          <label className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-black/30 p-3 text-sm">
-            <span>
-              自動ループ（無人運転）/ Auto-loop
-              <br />
-              <b className={ov.autoLoop ? 'text-ok' : 'text-yellow-300'}>{ov.autoLoop ? 'ON' : 'OFF'}</b>
-              <span className="ml-2 text-xs text-off/60">日本陥落後に自動で次を開始・再起動後10秒で自動再開</span>
-            </span>
-            <Btn onClick={() => command({ command: 'SET_AUTO_LOOP', enabled: !ov.autoLoop })} disabled={busy} testId="cmd-autoloop">
-              {ov.autoLoop ? '停止 / Off' : '有効 / On'}
-            </Btn>
-          </label>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4" data-testid="admin-regions">
-            {s.regions.map((r) => (
-              <div key={r.regionId} className={`rounded-lg p-2 ${r.fallen ? 'bg-fuchsia-900/50' : 'bg-black/30'}`}>
-                <b>{REGION_INFO[r.regionId].labelJa}</b>
-                <div>
-                  {r.fallen ? '👾 とられた' : `🏙 ${r.cityHp}/${s.config.cityHpMax}`}
-                  {r.shield > 0 && ` 🛡${r.shield}`}
-                </div>
-                <div className="text-xs text-off/70">🛸 {s.enemies.filter((e) => e.regionId === r.regionId).length}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="sw-panel flex flex-col gap-3 p-4">
-          <h2 className="font-black text-danger">緊急 / Emergency</h2>
-          <button
-            className="sw-btn bg-danger py-4 text-lg text-white"
-            onClick={() =>
-              command(
-                { command: 'EMERGENCY_STOP' },
-                '緊急停止：防衛戦を一時停止し、チャージ受付と自動ループを止めます / Emergency stop?',
-              )
-            }
-            data-testid="cmd-emergency"
-          >
-            ⛔ 緊急停止 / EMERGENCY STOP
-          </button>
-          <label className="flex items-center justify-between gap-2 rounded-lg bg-black/30 p-3">
-            <span>
-              決済受付 / Payments
-              <br />
-              <b className={ov.paymentsEnabled ? 'text-ok' : 'text-danger'}>
-                {ov.paymentsEnabled ? 'ON' : 'OFF'}
-              </b>
-            </span>
-            <Btn
-              onClick={() =>
-                command({ command: 'SET_PAYMENTS_ENABLED', enabled: !ov.paymentsEnabled })
-              }
-              disabled={busy}
-            >
-              {ov.paymentsEnabled ? '停止 / Stop' : '再開 / Enable'}
-            </Btn>
-          </label>
-          <BotsControl
-            current={ov.demoBots}
-            onApply={(n) => command({ command: 'SET_DEMO_BOTS', count: n })}
-          />
-          <p className="text-xs text-off/60">
-            復帰手順: docs/EVENT_OPERATIONS.md ・ 再起動後はPAUSEDで復元（自動ループONなら10秒後に自動再開）/ After a
-            restart the campaign is restored as PAUSED (auto-resumes after 10s when auto-loop is on).
-          </p>
-        </section>
-
-        <section className="sw-panel p-4">
-          <h2 className="font-black">残高・チャージ / Credit</h2>
-          <Table
-            rows={[
-              ['未使用残高 outstanding', `${ov.credit.outstanding} sats`],
-              ['チャージ topped up', `${ov.credit.toppedUp} sats`],
-              ['コード passes', `${ov.credit.passes} sats`],
-              ['出撃消費 spent', `${ov.credit.spent} sats`],
-              ['手動調整 adjusted', `${ov.credit.adjusted} sats`],
-            ]}
-            head={['credit', 'sats']}
-          />
-          <Table rows={Object.entries(ov.invoices).map(([k, v]) => [k, v.count, `${v.sats} sats`])} head={['invoices', 'count', 'sum']} />
-          <Table rows={Object.entries(ov.passes).map(([k, v]) => [k, v.count, `${v.sats} sats`])} head={['codes', 'count', 'sum']} />
-        </section>
-
-        <section className="sw-panel p-4">
-          <h2 className="font-black">この防衛戦 / This campaign</h2>
-          <Table
-            rows={[
-              ['moves (paid)', ov.actions.actions],
-              ['players who moved', ov.actions.players],
-              ['kills', s.stats.kills],
-              ['alien turns', s.stats.alienTurns],
-              ['captured / liberated', `${s.stats.regionsLost} / ${s.stats.regionsLiberated}`],
-              ['best wave (all time)', s.bestWave],
-            ]}
-            head={['metric', 'value']}
-          />
-        </section>
-
-        <section className="sw-panel p-4">
-          <h2 className="font-black">接続・性能 / Health</h2>
-          <Table
-            rows={[
-              ['sockets', ov.realtime.connections],
-              ...Object.entries(ov.realtime.byRole).map(
-                ([k, v]) => [`  ${k}`, v] as [string, number],
-              ),
-              ['event loop lag', `${ov.server.eventLoopLagMs ?? '-'} ms`],
-              ['tick lag', `${ov.server.tickLagMs ?? '-'} ms`],
-              ['memory', `${ov.server.memoryMb} MB`],
-              ['uptime', `${ov.server.uptimeSec}s`],
-            ]}
-            head={['metric', 'value']}
-          />
-          <h3 className="mt-3 text-sm font-bold">Arena screens</h3>
-          {ov.realtime.arenas.length === 0 ? (
-            <p className="text-sm text-yellow-300">
-              会場画面が接続されていません / No arena connected
-            </p>
-          ) : (
-            <Table
-              rows={ov.realtime.arenas.map((a) => [
-                a.renderer,
-                a.quality,
-                `${a.fps} fps`,
-                `${a.frameMs} ms`,
-              ])}
-              head={['renderer', 'quality', 'fps', 'frame']}
-            />
-          )}
-        </section>
-
-        <PassesPanel token={token} />
-        <InvoicesPanel token={token} />
-        <PlayersPanel token={token} />
-        <ConfigPanel token={token} config={ov.nextConfig} />
-        <AuditPanel token={token} />
-      </div>
-    </div>
+      {tab === 'raid' && <RaidTab ov={ov} cmd={cmd} />}
+      {tab === 'pilots' && <PilotsTab token={token} />}
+      {tab === 'passes' && <PassesTab token={token} ov={ov} />}
+      {tab === 'monitor' && <MonitorTab ov={ov} />}
+      {tab === 'audit' && <AuditTab token={token} />}
+    </main>
   );
 }
 
-function Btn({
-  children,
-  onClick,
-  disabled,
-  cls = 'bg-white/15',
-  testId,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  cls?: string;
-  testId?: string;
-}) {
+type Cmd = (body: Record<string, unknown>, confirmText?: string) => Promise<void>;
+
+/** Separate kill switches, always visible. Each is independent and audit-logged. */
+function EmergencyBar({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
+  const s = ov.settings;
   return (
-    <button
-      className={`sw-btn px-3 py-2 text-sm ${cls}`}
-      onClick={onClick}
-      disabled={disabled}
-      data-testid={testId}
-    >
-      {children}
+    <section className="sw-panel flex flex-wrap items-center gap-2 p-3" data-testid="kill-switches">
+      <button type="button" className="sw-btn bg-danger px-4 text-navy" onClick={() => void cmd({ command: 'EMERGENCY_STOP' }, '緊急停止：作戦一時停止・搭乗停止・決済停止・自動ループ停止。よろしいですか？')} data-testid="cmd-emergency">
+        🛑 緊急停止
+      </button>
+      <Toggle label="新規決済" on={s.paymentsEnabled} onChange={(v) => void cmd({ command: 'SET_PAYMENTS_ENABLED', enabled: v })} testId="sw-payments" />
+      <Toggle label="決済連携" on={s.paymentIntegration} onChange={(v) => void cmd({ command: 'SET_PAYMENT_INTEGRATION', enabled: v })} testId="sw-integration" />
+      <Toggle label="搭乗受付" on={!s.joinStopped} onChange={(v) => void cmd({ command: 'SET_JOIN_STOPPED', stopped: !v })} testId="sw-join" />
+      <Toggle label="名前表示" on={!s.namesHidden} onChange={(v) => void cmd({ command: 'SET_NAMES_HIDDEN', hidden: !v })} testId="sw-names" />
+      <Toggle label="自動ループ" on={s.autoLoop} onChange={(v) => void cmd({ command: 'SET_AUTO_LOOP', enabled: v })} testId="sw-autoloop" />
+      <span className="ml-auto text-xs text-muted">
+        PAYMENT_MODE={s.paymentMode} · AUTH={s.authMode} · {s.demoMode ? 'DEMO_MODE' : 'EVENT'} · {s.eventId}
+      </span>
+    </section>
+  );
+}
+
+function Toggle({ label, on, onChange, testId }: { label: string; on: boolean; onChange: (v: boolean) => void; testId?: string }) {
+  return (
+    <button type="button" className={`sw-btn px-3 text-sm ${on ? 'bg-ok/80 text-navy' : 'bg-danger/40'}`} onClick={() => onChange(!on)} aria-pressed={on} data-testid={testId}>
+      {label}：{on ? 'ON' : 'OFF'}
     </button>
   );
 }
 
-function Table({ rows, head }: { rows: Array<Array<string | number>>; head: string[] }) {
+function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
+  const snap = ov.snapshot;
+  const s = ov.settings;
+  const view = raidView(snap, snap.gameMs);
+  const [bots, setBots] = useState(String(s.demoBots));
+  const [skill, setSkill] = useState(String(s.demoBotSkill));
+  const [tpl, setTpl] = useState(Object.keys(ov.broadcastTemplates)[0] ?? 'CUSTOM');
+  const [ja, setJa] = useState('');
+  const [en, setEn] = useState('');
+  const phase = snap.status === 'LIVE' ? PHASE_LABELS[snap.phase].ja : STATUS_LABELS[snap.status].ja;
   return (
-    <table className="mt-2 w-full text-left text-sm">
-      <thead>
-        <tr className="text-off/60">
-          {head.map((h) => (
-            <th key={h} className="font-normal">
-              {h}
-            </th>
+    <div className="grid gap-4 md:grid-cols-2">
+      <section className="sw-panel flex flex-col gap-3 p-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-3xl font-black" data-testid="admin-status">
+            {phase}
+          </span>
+          <span className="font-mono text-xl">{fmtClock(view.timeLeftMs)}</span>
+        </div>
+        <p className="text-sm text-muted">
+          {snap.raidId} · {snap.configVersion} #{snap.configHash} · 搭乗 {ov.crew.total}（BOT {ov.crew.bots}）
+        </p>
+        <p className="text-sm">
+          {ROLES.map((r) => (
+            <span key={r} className="mr-3">
+              {ROLE_LABELS[r].icon} {ov.crew.roles[r] ?? 0}
+            </span>
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 ? (
-          <tr>
-            <td className="text-off/50">—</td>
-          </tr>
-        ) : (
-          rows.map((r, i) => (
-            <tr key={i} className="border-t border-white/5">
-              {r.map((c, j) => (
-                <td key={j} className="py-0.5 tabular-nums">
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))
+          SYNC {snap.sync} · 都市 {view.citiesStanding}/8 · NULL CORE {view.boss ? `${view.boss.hp}/${view.boss.hpMax}` : '-'}
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'OPEN_LOBBY' })} data-testid="cmd-open-lobby">
+            受付開始
+          </button>
+          <button className="sw-btn bg-amber text-navy" onClick={() => void cmd({ command: 'START' })} data-testid="cmd-start">
+            出撃開始
+          </button>
+          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: snap.status === 'PAUSED' ? 'RESUME' : 'PAUSE' })} data-testid="cmd-pause">
+            {snap.status === 'PAUSED' ? '再開' : '一時停止'}
+          </button>
+          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'END' }, '作戦を終了して結果を確定します。よろしいですか？')} data-testid="cmd-end">
+            終了
+          </button>
+          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'CANCEL' }, '作戦を中止します（記録なし・支払い済みはパス残高へ）。よろしいですか？')} data-testid="cmd-cancel">
+            中止
+          </button>
+          <button className="sw-btn bg-navy-3" onClick={() => void cmd({ command: 'NEXT_RAID' })} data-testid="cmd-next">
+            次の作戦
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          出撃パス：
+          <Toggle label={s.passMode === 'FREE' ? '無料イベント' : `有料 ${snap.ticketPriceSats} sats`} on={s.passMode === 'FREE'} onChange={(v) => void cmd({ command: 'SET_PASS_MODE', mode: v ? 'FREE' : 'PAID' })} testId="sw-passmode" />
+        </div>
+        {s.demoMode && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            デモBOT
+            <input className="w-16 rounded border border-line bg-navy px-2 py-1" value={bots} onChange={(e) => setBots(e.target.value)} data-testid="bots-input" />
+            腕前
+            <input className="w-16 rounded border border-line bg-navy px-2 py-1" value={skill} onChange={(e) => setSkill(e.target.value)} />
+            <button className="sw-btn bg-navy-3 px-3" onClick={() => void cmd({ command: 'SET_DEMO_BOTS', count: Number(bots) || 0, skill: Math.min(1, Math.max(0, Number(skill) || 0)) })} data-testid="bots-apply">
+              適用
+            </button>
+            速度 ×{s.timeScale}
+            {[1, 2, 4].map((x) => (
+              <button key={x} className="sw-btn bg-navy-3 px-2" onClick={() => void cmd({ command: 'SET_TIME_SCALE', speed: x })}>
+                ×{x}
+              </button>
+            ))}
+          </div>
         )}
-      </tbody>
-    </table>
-  );
-}
-
-function BotsControl({ current, onApply }: { current: number; onApply: (n: number) => void }) {
-  const [n, setN] = useState(current);
-  useEffect(() => setN(current), [current]);
-  return (
-    <div className="rounded-lg bg-black/30 p-3">
-      <div>
-        デモBOT / Demo bots: <b>{current}</b>
-      </div>
-      <div className="mt-2 flex gap-2">
-        <input
-          type="number"
-          min={0}
-          max={50}
-          value={n}
-          onChange={(e) => setN(Number(e.target.value))}
-          className="w-20 rounded bg-black/40 px-2"
-          data-testid="bots-input"
-        />
-        <Btn onClick={() => onApply(n)} testId="bots-apply">
-          適用 / Apply
-        </Btn>
-      </div>
-      <p className="mt-1 text-xs text-off/60">BOTは名前に「BOT」と付き、satsを使いません。BOTはおすすめの一手でゲームを進めてしまうため、通常は0（無人デモ・リハーサル用）。</p>
+      </section>
+      <section className="sw-panel p-4">
+        <JapanMapMini view={view} locale="ja" maxHp={snap.config.cityMaxHp} />
+      </section>
+      <section className="sw-panel flex flex-col gap-2 p-4 md:col-span-2" data-testid="broadcast-panel">
+        <h2 className="font-black">会場アナウンス（定型文優先）</h2>
+        <div className="flex flex-wrap gap-2">
+          <select className="rounded border border-line bg-navy px-2 py-2" value={tpl} onChange={(e) => setTpl(e.target.value)}>
+            {Object.entries(ov.broadcastTemplates).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.ja}
+              </option>
+            ))}
+            <option value="CUSTOM">自由入力（80文字まで）</option>
+          </select>
+          {tpl === 'CUSTOM' && (
+            <>
+              <input className="flex-1 rounded border border-line bg-navy px-2" placeholder="日本語" value={ja} maxLength={80} onChange={(e) => setJa(e.target.value)} />
+              <input className="flex-1 rounded border border-line bg-navy px-2" placeholder="English" value={en} maxLength={80} onChange={(e) => setEn(e.target.value)} />
+            </>
+          )}
+          <button className="sw-btn bg-teal px-3 text-navy" onClick={() => void cmd({ command: 'BROADCAST', template: tpl, ...(tpl === 'CUSTOM' ? { ja, en } : {}), seconds: 30 })} data-testid="broadcast-send">
+            表示（30秒）
+          </button>
+          <button className="sw-btn bg-navy-3 px-3" onClick={() => void cmd({ command: 'BROADCAST_CLEAR' })}>
+            消す
+          </button>
+        </div>
+        {snap.broadcast && <p className="text-sm">表示中：{snap.broadcast.messageJa}</p>}
+      </section>
     </div>
   );
 }
 
-function PassesPanel({ token }: { token: string }) {
-  const [count, setCount] = useState(10);
-  const [amount, setAmount] = useState(105);
-  const [minutes, setMinutes] = useState(720);
-  const [label, setLabel] = useState('venue');
-  const [codes, setCodes] = useState<string[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const issue = async () => {
-    setErr(null);
-    try {
-      const r = await api<{ codes: string[] }>('/api/admin/passes', {
-        token,
-        body: { count, amountSats: amount, expiresInMinutes: minutes, label },
-      });
-      setCodes(r.codes);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : String(e));
-    }
+function PilotsTab({ token }: { token: string }) {
+  const [rows, setRows] = useState<PilotRow[]>([]);
+  const load = useCallback(async () => setRows((await api<{ pilots: PilotRow[] }>('/api/admin/pilots', { token })).pilots), [token]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const hide = async (id: string, hidden: boolean) => {
+    await api(`/api/admin/pilots/${id}/name-visibility`, { body: { hidden }, token });
+    await load();
+  };
+  const credit = async (id: string) => {
+    const note = window.prompt('パスを1枚付与する理由（必須・監査ログに残ります）');
+    if (!note || note.trim().length < 3) return;
+    await api(`/api/admin/pilots/${id}/pass-credit`, { body: { delta: 1, note }, token });
+    await load();
   };
   return (
-    <section className="sw-panel p-4">
-      <h2 className="font-black">配布コード / Credit codes</h2>
-      <p className="text-xs text-off/60">会場で配るsatsの代わりに使えるコード。1枚＝指定satsの残高。</p>
-      <div className="mt-2 grid grid-cols-4 gap-2 text-sm">
-        <label>
-          sats/枚
-          <input
-            type="number"
-            min={21}
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
-            className="w-full rounded bg-black/40 px-2 py-1"
-          />
-        </label>
-        <label>
-          枚数
-          <input
-            type="number"
-            min={1}
-            max={200}
-            value={count}
-            onChange={(e) => setCount(Number(e.target.value))}
-            className="w-full rounded bg-black/40 px-2 py-1"
-          />
-        </label>
-        <label>
-          有効(分)
-          <input
-            type="number"
-            min={5}
-            value={minutes}
-            onChange={(e) => setMinutes(Number(e.target.value))}
-            className="w-full rounded bg-black/40 px-2 py-1"
-          />
-        </label>
-        <label>
-          ラベル
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="w-full rounded bg-black/40 px-2 py-1"
-          />
-        </label>
-      </div>
-      <Btn onClick={issue} testId="issue-passes">
-        発行 / Issue
-      </Btn>
-      {err && <p className="text-sm text-danger">{err}</p>}
-      {codes.length > 0 && (
-        <div className="mt-2 rounded bg-black/40 p-2">
-          <p className="text-xs text-yellow-200">
-            コードはこの画面でのみ表示されます。印刷・配布してください。/ Shown once — print now.
-          </p>
-          <pre className="mt-1 max-h-48 overflow-auto font-mono text-sm" data-testid="pass-codes">
+    <section className="sw-panel overflow-x-auto p-4" data-testid="pilots-tab">
+      <table className="w-full text-sm">
+        <thead className="text-left text-muted">
+          <tr>
+            <th>コード</th>
+            <th>コールサイン</th>
+            <th>認証</th>
+            <th>搭乗</th>
+            <th>出撃/勝利</th>
+            <th>パス残</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr key={p.id} className="border-t border-line">
+              <td className="font-mono">{p.code}</td>
+              <td className={p.hidden ? 'line-through opacity-60' : ''}>
+                {p.callsign} {p.showName ? '' : <span className="text-xs text-muted">(非公開)</span>}
+              </td>
+              <td>{p.authType}</td>
+              <td>{p.aboard ? (p.role ?? '○') : ''}</td>
+              <td>
+                {p.sorties}/{p.victories}
+              </td>
+              <td>{p.passCredits}</td>
+              <td className="flex gap-1 py-1">
+                <button className="sw-btn bg-navy-3 px-2 text-xs" onClick={() => void hide(p.id, !p.hidden)}>
+                  {p.hidden ? '名前を戻す' : '名前を隠す'}
+                </button>
+                <button className="sw-btn bg-navy-3 px-2 text-xs" onClick={() => void credit(p.id)}>
+                  パス+1
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function PassesTab({ token, ov }: { token: string; ov: Overview }) {
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [passes, setPasses] = useState<SponsoredRow[]>([]);
+  const [codes, setCodes] = useState<string[]>([]);
+  const [count, setCount] = useState('10');
+  const [label, setLabel] = useState('sponsored');
+  const load = useCallback(async () => {
+    setInvoices((await api<{ invoices: InvoiceRow[] }>('/api/admin/invoices', { token })).invoices);
+    setPasses((await api<{ passes: SponsoredRow[] }>('/api/admin/sponsored-passes', { token })).passes);
+  }, [token]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const issue = async () => {
+    const r = await api<{ codes: string[] }>('/api/admin/sponsored-passes', { body: { count: Math.max(1, Math.min(500, Number(count) || 1)), label }, token });
+    setCodes(r.codes);
+    await load();
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <section className="sw-panel p-4 text-sm">
+        <h2 className="font-black">この作戦の出撃パス</h2>
+        <p>{Object.entries(ov.entitlements).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'なし'}</p>
+        <p className="mt-1">
+          請求書：{Object.entries(ov.invoices).map(([k, v]) => `${k} ${v.count}件/${v.sats} sats`).join(' · ') || 'なし'}
+        </p>
+        <p className="mt-1">スポンサーパス：{Object.entries(ov.sponsored).map(([k, v]) => `${k} ${v}`).join(' · ') || 'なし'}</p>
+      </section>
+      <section className="sw-panel flex flex-col gap-2 p-4">
+        <h2 className="font-black">スポンサーパス発行（コードは1回だけ表示）</h2>
+        <div className="flex flex-wrap gap-2">
+          <input className="w-20 rounded border border-line bg-navy px-2" value={count} onChange={(e) => setCount(e.target.value)} aria-label="枚数" />
+          <input className="rounded border border-line bg-navy px-2" value={label} onChange={(e) => setLabel(e.target.value)} aria-label="ラベル" />
+          <button className="sw-btn bg-amber px-3 text-navy" onClick={() => void issue()} data-testid="issue-passes">
+            発行
+          </button>
+        </div>
+        {codes.length > 0 && (
+          <pre className="max-h-48 overflow-auto rounded bg-black/40 p-2 font-mono text-sm" data-testid="pass-codes">
             {codes.join('\n')}
           </pre>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function InvoicesPanel({ token }: { token: string }) {
-  const [rows, setRows] = useState<InvoiceRow[]>([]);
-  const load = useCallback(async () => {
-    try {
-      setRows((await api<{ invoices: InvoiceRow[] }>('/api/admin/invoices', { token })).invoices);
-    } catch {
-      // ignore
-    }
-  }, [token]);
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 5000);
-    return () => clearInterval(id);
-  }, [load]);
-  const recheck = async (id: string) => {
-    await api(`/api/admin/invoices/${id}/recheck`, { token, body: {} }).catch((e) => alert(String(e)));
-    await load();
-  };
-  const attention = rows.filter((r) => r.checkFailures > 0 || r.status === 'PENDING');
-  return (
-    <section className="sw-panel p-4 md:col-span-2">
-      <h2 className="font-black">確認中の請求書 / Pending invoices</h2>
-      {attention.length === 0 ? (
-        <p className="text-sm text-off/60">なし / none</p>
-      ) : (
-        <table className="mt-2 w-full text-sm">
-          <thead>
-            <tr className="text-left text-off/60">
-              <th>id</th>
-              <th>player</th>
-              <th>status</th>
-              <th>sats</th>
-              <th>hash</th>
-              <th>check fails</th>
-              <th />
-            </tr>
-          </thead>
+        )}
+        <ul className="max-h-48 overflow-auto text-xs">
+          {passes.map((p) => (
+            <li key={p.idPrefix} className="flex gap-2">
+              <span className="font-mono">{p.idPrefix}</span> {p.label} {p.status}
+              {p.status === 'ACTIVE' && (
+                <button
+                  className="underline"
+                  onClick={() =>
+                    void api(`/api/admin/sponsored-passes/${p.idPrefix}/revoke`, { body: {}, token }).then(load)
+                  }
+                >
+                  無効化
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="sw-panel overflow-x-auto p-4">
+        <h2 className="font-black">請求書（決済照合用・ハッシュ先頭のみ）</h2>
+        <table className="w-full text-xs">
           <tbody>
-            {attention.map((r) => (
-              <tr key={r.id} className="border-t border-white/5">
-                <td className="font-mono text-xs">{r.id.slice(-10)}</td>
-                <td className="font-mono text-xs">{r.playerId.slice(-8)}</td>
-                <td>{r.status}</td>
-                <td>{r.amountSats}</td>
-                <td className="font-mono text-xs">{r.paymentHashPrefix}…</td>
-                <td>{r.checkFailures}</td>
-                <td className="py-1">{r.status === 'PENDING' && <Btn onClick={() => recheck(r.id)}>再照会</Btn>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p className="mt-2 text-xs text-off/60">
-        遅れて届いた入金も没収せず自動で残高に加算されます。LNbits側で入金済みなのに反映されない場合は「再照会」、それでも駄目なら
-        プレイヤー一覧から手動で残高調整（監査ログに残ります）。運営画面から送金は行いません。
-      </p>
-    </section>
-  );
-}
-
-function PlayersPanel({ token }: { token: string }) {
-  const [rows, setRows] = useState<PlayerRow[]>([]);
-  const load = useCallback(async () => {
-    try {
-      setRows((await api<{ players: PlayerRow[] }>('/api/admin/players', { token })).players);
-    } catch {
-      // ignore
-    }
-  }, [token]);
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 5000);
-    return () => clearInterval(id);
-  }, [load]);
-  const toggle = async (p: PlayerRow) => {
-    await api(`/api/admin/players/${p.id}/nickname-visibility`, { token, body: { hidden: !p.nicknameHidden } });
-    await load();
-  };
-  const adjust = async (p: PlayerRow) => {
-    const raw = window.prompt(`${p.nickname} の残高を増減（sats、例: 105 / -21）`);
-    if (!raw) return;
-    const deltaSats = Number(raw);
-    if (!Number.isInteger(deltaSats) || deltaSats === 0) return alert('整数を入力してください');
-    const note = window.prompt('理由（必須・監査ログに残ります）') ?? '';
-    if (!note.trim()) return;
-    await api(`/api/admin/players/${p.id}/credit`, { token, body: { deltaSats, note } }).catch((e) => alert(String(e)));
-    await load();
-  };
-  return (
-    <section className="sw-panel p-4">
-      <h2 className="font-black">プレイヤー / Players ({rows.length})</h2>
-      <div className="mt-2 max-h-72 overflow-auto">
-        <table className="w-full text-sm">
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.id} className="border-t border-white/5">
-                <td className={p.nicknameHidden ? 'line-through opacity-50' : ''}>{p.nickname}</td>
-                <td className="text-xs tabular-nums">{p.creditSats} sats</td>
-                <td className="text-xs tabular-nums">
-                  {p.actionsTotal}回 · 撃破{p.kills}
-                </td>
-                <td className="whitespace-nowrap">
-                  <button className="text-xs underline" onClick={() => toggle(p)}>
-                    {p.nicknameHidden ? '表示' : '非表示'}
-                  </button>{' '}
-                  <button className="text-xs underline" onClick={() => adjust(p)}>
-                    残高調整
-                  </button>
+            {invoices.map((i) => (
+              <tr key={i.id} className="border-t border-line">
+                <td className="font-mono">{i.paymentHashPrefix}</td>
+                <td>{i.amountSats} sats</td>
+                <td>{i.status}</td>
+                <td>{i.latePolicy ?? ''}</td>
+                <td>{new Date(i.createdAt).toLocaleTimeString()}</td>
+                <td>
+                  {i.status === 'PENDING' && (
+                    <button className="underline" onClick={() => void api(`/api/admin/invoices/${i.id}/recheck`, { body: {}, token }).then(load)}>
+                      再照会
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
 
-function ConfigPanel({ token, config }: { token: string; config: GameConfig }) {
-  const [text, setText] = useState(() => JSON.stringify(config, null, 2));
-  const [msg, setMsg] = useState<string | null>(null);
-  const save = async () => {
-    try {
-      const parsed = JSON.parse(text) as unknown;
-      await api('/api/admin/next-config', { method: 'PUT', token, body: { config: parsed } });
-      setMsg('保存しました（次の防衛戦から適用）/ Saved for the next campaign');
-    } catch (e) {
-      setMsg(e instanceof ApiError ? e.message : String(e));
-    }
-  };
+function MonitorTab({ ov }: { ov: Overview }) {
   return (
-    <section className="sw-panel p-4 md:col-span-2">
-      <h2 className="font-black">次の防衛戦の設定 / Next campaign config</h2>
-      <p className="text-xs text-off/60">
-        進行中の防衛戦には反映されません。actionCostSats=1回の値段、actionsPerTurn=敵ターンまでの手数、topupOptionsSats=チャージ額の選択肢。/ Never applied to the running campaign.
-      </p>
-      <textarea
-        className="mt-2 h-64 w-full rounded bg-black/40 p-2 font-mono text-xs"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        spellCheck={false}
-      />
-      <div className="flex items-center gap-2">
-        <Btn onClick={save}>保存 / Save</Btn>
-        <Btn onClick={() => setText(JSON.stringify(config, null, 2))}>リセット / Reset</Btn>
-        {msg && <span className="text-sm">{msg}</span>}
+    <section className="sw-panel grid gap-2 p-4 text-sm md:grid-cols-2" data-testid="monitor-tab">
+      <div>
+        <h2 className="font-black">接続</h2>
+        <p>
+          合計 {ov.realtime.connections} · {Object.entries(ov.realtime.byRole).map(([k, v]) => `${k}:${v}`).join(' ')}
+        </p>
+        <ul>
+          {ov.realtime.arenas.map((a) => (
+            <li key={a.socketId}>
+              大画面 {a.renderer}/{a.quality} {a.fps.toFixed(0)}fps {a.frameMs.toFixed(1)}ms
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <h2 className="font-black">サーバー</h2>
+        <p>
+          稼働 {Math.round(ov.server.uptimeSec / 60)}分 · メモリ {ov.server.memoryMb}MB · イベントループ遅延 {ov.server.eventLoopLagMs ?? '-'}ms · tick遅延 {ov.server.tickLagMs ?? '-'}ms
+        </p>
+        <p className="mt-1 text-muted">次の作戦の設定：{ov.nextConfig.version}（進行中の作戦には反映しません）</p>
       </div>
     </section>
   );
 }
 
-function AuditPanel({ token }: { token: string }) {
+function AuditTab({ token }: { token: string }) {
   const [rows, setRows] = useState<AuditRow[]>([]);
   useEffect(() => {
-    const load = async () => {
-      try {
-        setRows((await api<{ entries: AuditRow[] }>('/api/admin/audit', { token })).entries);
-      } catch {
-        // ignore
-      }
-    };
-    void load();
-    const id = setInterval(() => void load(), 5000);
-    return () => clearInterval(id);
+    void api<{ entries: AuditRow[] }>('/api/admin/audit', { token }).then((r) => setRows(r.entries));
   }, [token]);
   return (
-    <section className="sw-panel p-4">
-      <h2 className="font-black">監査ログ / Audit log</h2>
-      <ul className="mt-2 max-h-72 overflow-auto text-xs">
-        {rows.map((r) => (
-          <li key={r.id} className="border-t border-white/5 py-0.5">
-            <span className="text-off/60">{new Date(r.timestamp).toLocaleTimeString()}</span>{' '}
-            <b>{r.action}</b> by {r.actor} {r.target_id ? `→ ${r.target_id.slice(-10)}` : ''}
-          </li>
-        ))}
-      </ul>
+    <section className="sw-panel overflow-x-auto p-4" data-testid="audit-tab">
+      <table className="w-full text-xs">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className="border-t border-line">
+              <td>{new Date(r.timestamp).toLocaleString()}</td>
+              <td>{r.actor}</td>
+              <td className="font-bold">{r.action}</td>
+              <td className="font-mono">{r.target_id ?? ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }

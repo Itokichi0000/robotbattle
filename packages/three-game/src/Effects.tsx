@@ -1,15 +1,16 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import type { RegionId, TeamId } from '@sats-wars/shared';
-import { otherTeam } from '@sats-wars/shared';
-import type { ArenaDirector, DirectorEffect } from './director';
-import { ADVANCE_FRACTION, ALIEN_COLOR, ROBOT_HOME, TEAM_COLORS, regionWorldPosition } from './layout';
+import type { TeamId } from '@sats-wars/shared';
+import type { ArenaDirector, DirectorEffect, FxTarget } from './director';
+import { ALIEN_COLOR, CORRUPT_RED, ROBOT_HOME, TEAM_COLORS, type TargetContext, resolveFxTarget } from './layout';
 
 export interface EffectsProps {
   director: ArenaDirector;
   maxParticles: number;
   reducedMotion: boolean;
+  /** Current enemies/telegraphs, read at render time to place effects. */
+  targets: () => TargetContext;
 }
 
 interface Particle {
@@ -27,18 +28,17 @@ interface Particle {
 interface Transient {
   kind: DirectorEffect['kind'];
   teamId: TeamId | null;
-  regionId: RegionId | null;
+  from: FxTarget | null;
+  to: FxTarget | null;
   start: number;
   duration: number;
   intensity: number;
   seed: number;
 }
 
-const CLASH_POINT = new THREE.Vector3(0, 2.6, 0.6);
-
-function robotPos(teamId: TeamId, advanced = 0): THREE.Vector3 {
+function robotPos(teamId: TeamId): THREE.Vector3 {
   const h = ROBOT_HOME[teamId];
-  return new THREE.Vector3(h.x * (1 - ADVANCE_FRACTION * advanced), 2.2, h.z);
+  return new THREE.Vector3(h.x, 2.2, h.z);
 }
 
 /** Jagged polyline from `a` to `b` (lightning). */
@@ -72,10 +72,12 @@ function seeded(seed: number): () => number {
 }
 
 /**
- * Particle sparks, shockwave rings, lightning bolts, wind vortices and auras.
- * Purely cosmetic; driven by director effect events.
+ * Particle sparks, shockwave rings, lightning bolts, wind vortices, enemy
+ * beams and auras. Purely cosmetic; driven by director effect events whose
+ * targets (city, enemy, robot, reserve) are resolved to positions every frame.
  */
-export function Effects({ director, maxParticles, reducedMotion }: EffectsProps) {
+export function Effects({ director, maxParticles, reducedMotion, targets }: EffectsProps) {
+  const where = (t: FxTarget | null) => resolveFxTarget(t, targets());
   const particles = useMemo<Particle[]>(
     () =>
       Array.from({ length: maxParticles }, () => ({
@@ -128,6 +130,29 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
     },
     [bolts],
   );
+  const beams = useMemo(
+    () =>
+      Array.from({ length: 10 }, () => {
+        const line = new THREE.Line(
+          new THREE.BufferGeometry(),
+          new THREE.LineBasicMaterial({ color: CORRUPT_RED, transparent: true, opacity: 0, blending: THREE.AdditiveBlending }),
+        );
+        line.visible = false;
+        line.frustumCulled = false;
+        return line;
+      }),
+    [],
+  );
+  useEffect(
+    () => () => {
+      for (const l of beams) {
+        l.geometry.dispose();
+        (l.material as THREE.Material).dispose();
+      }
+    },
+    [beams],
+  );
+  const domeRefs = useRef<Array<THREE.Mesh | null>>([]);
   const vortexRefs = useRef<Array<THREE.Mesh | null>>([]);
   const next = useRef(0);
 
@@ -137,7 +162,7 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
     color: string,
     speed: number,
     life: number,
-    opts: { gravity?: number; swirl?: number; spread?: number; up?: number } = {},
+    opts: { gravity?: number; swirl?: number; spread?: number; up?: number; toward?: THREE.Vector3 } = {},
   ) => {
     const c = new THREE.Color(color);
     const n = reducedMotion ? Math.ceil(count / 3) : count;
@@ -155,6 +180,7 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
         )
         .normalize()
         .multiplyScalar(speed * (0.4 + Math.random() * 0.8));
+      if (opts.toward) pt.v.add(opts.toward.clone().sub(origin).multiplyScalar(0.9 + Math.random() * 0.3));
       pt.life = 0;
       pt.maxLife = life * (0.6 + Math.random() * 0.6);
       pt.color.copy(c).offsetHSL(0, 0, (Math.random() - 0.3) * 0.25);
@@ -171,82 +197,73 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
           transients.current.push({
             kind: e.kind,
             teamId: e.teamId,
-            regionId: e.regionId,
+            from: e.from,
+            to: e.to,
             start: director.time,
             duration,
             intensity: e.intensity,
             seed: e.id * 7919,
           });
+        const to = where(e.to);
+        const from = where(e.from);
         switch (e.kind) {
           case 'impact':
-            // One hit landing (on an alien over the map, or on the other robot).
-            if (e.teamId) {
-              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.45).setY(2.4);
-              spawn(Math.round(14 * e.intensity), at, '#FFFFFF', 7, 0.45, { gravity: -8 });
-              spawn(Math.round(18 * e.intensity), at, TEAM_COLORS[e.teamId], 6, 0.6, { gravity: -6 });
+            if (to) {
+              spawn(Math.round(14 * e.intensity), to, '#FFFFFF', 7, 0.45, { gravity: -8 });
+              spawn(Math.round(18 * e.intensity), to, e.teamId ? TEAM_COLORS[e.teamId] : CORRUPT_RED, 6, 0.6, { gravity: -6 });
             }
             break;
-          case 'sparks': {
-            // Explosion: an alien destroyed (at its region) or a clash point.
-            const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : CLASH_POINT;
-            spawn(Math.round(90 * e.intensity), at, '#FFFFFF', 9, 0.9, { gravity: -9 });
-            spawn(Math.round(60 * e.intensity), at, TEAM_COLORS.RAIJIN, 7, 1.0, { gravity: -7 });
-            spawn(Math.round(60 * e.intensity), at, TEAM_COLORS.FUJIN, 7, 1.0, { gravity: -7 });
-            break;
-          }
-          case 'alienAttack':
-            // Alien beams hitting a city.
-            if (e.regionId) {
-              const at = regionWorldPosition(e.regionId, 0.3);
-              spawn(Math.round(70 * e.intensity), at, '#FF5D6C', 6, 0.9, { gravity: -4, up: 1.5 });
-              spawn(Math.round(40 * e.intensity), at, ALIEN_COLOR, 4, 1.1, { gravity: 1, up: 2 });
+          case 'sparks':
+          case 'explosion':
+            if (to) {
+              const k = e.kind === 'explosion' ? 1.4 : 1;
+              spawn(Math.round(90 * e.intensity * k), to, '#FFFFFF', 9, 0.9, { gravity: -9 });
+              spawn(Math.round(60 * e.intensity * k), to, ALIEN_COLOR, 7, 1.0, { gravity: -7 });
+              spawn(Math.round(40 * e.intensity * k), to, TEAM_COLORS.RAIJIN, 7, 1.0, { gravity: -7 });
+              add(0.9);
             }
             break;
-          case 'landing':
-            if (e.regionId) {
-              spawn(Math.round(40 * e.intensity), regionWorldPosition(e.regionId, 1.4), ALIEN_COLOR, 3, 1.2, {
-                gravity: -3,
-                spread: 0.5,
-              });
+          case 'cityBlast':
+            if (to) {
+              spawn(Math.round(80 * e.intensity), to, CORRUPT_RED, 5, 1.2, { gravity: -2, up: 2 });
+              spawn(Math.round(40 * e.intensity), to, '#555B6E', 2, 2.0, { gravity: 1, up: 2 });
+              add(1.2);
             }
+            break;
+          case 'beam':
+            add(0.7);
+            if (to) spawn(Math.round(40 * e.intensity), to, CORRUPT_RED, 5, 0.8, { gravity: -3, up: 1.5 });
+            break;
+          case 'shield':
+            add(0.9);
+            if (to) spawn(Math.round(24 * e.intensity), to, TEAM_COLORS.FUJIN, 3, 0.9, { gravity: 0.5, swirl: 5 });
+            break;
+          case 'energy':
+            if (from && to) spawn(Math.round(36 * e.intensity), from, e.teamId ? TEAM_COLORS[e.teamId] : '#FFE27A', 0.8, 1.1, { gravity: 0, toward: to, spread: 0.3 });
+            break;
+          case 'repair':
+            if (to) spawn(Math.round(30 * e.intensity), to, '#7DFFB2', 2, 1.2, { gravity: 1.5, spread: 0.6, up: 2 });
             break;
           case 'shockwave':
+          case 'syncPulse':
             add(0.9);
             break;
           case 'lightning':
             add(reducedMotion ? 0.25 : 0.45);
-            if (e.teamId) {
-              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.6);
-              spawn(40, at, TEAM_COLORS.RAIJIN, 6, 0.6);
-            }
+            if (to) spawn(40, to, TEAM_COLORS.RAIJIN, 6, 0.6);
             break;
           case 'wind':
             add(1.0);
-            if (e.teamId) {
-              const at = e.regionId ? regionWorldPosition(e.regionId, 0.8) : robotPos(otherTeam(e.teamId), 0.6);
-              spawn(50, at, TEAM_COLORS.FUJIN, 3, 1.2, {
-                gravity: 0.5,
-                swirl: 6,
-              });
-            }
+            if (to) spawn(50, to, TEAM_COLORS.FUJIN, 3, 1.2, { gravity: 0.5, swirl: 6 });
             break;
           case 'chargeAura':
             add(1.2);
-            if (e.teamId)
-              spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, {
-                gravity: 2.5,
-                spread: 0.4,
-                up: 3,
-              });
+            if (e.teamId) spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, { gravity: 2.5, spread: 0.4, up: 3 });
             break;
           case 'specialStorm':
             add(2.8 * Math.max(0.5, e.intensity));
             if (e.teamId === 'FUJIN') {
-              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, {
-                gravity: 3,
-                swirl: 9,
-                spread: 0.6,
-              });
+              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, { gravity: 3, swirl: 9, spread: 0.6 });
             } else if (e.teamId === 'RAIJIN') {
               spawn(160, robotPos('RAIJIN').setY(3.5), TEAM_COLORS.RAIJIN, 7, 1.8, { gravity: -5 });
             }
@@ -293,9 +310,7 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
 
     const t = director.time;
     transients.current = transients.current.filter((x) => t - x.start < x.duration);
-    const rings = transients.current.filter(
-      (x) => x.kind === 'shockwave' || x.kind === 'chargeAura',
-    );
+    const rings = transients.current.filter((x) => x.kind === 'shockwave' || x.kind === 'chargeAura' || x.kind === 'syncPulse' || x.kind === 'cityBlast');
     ringRefs.current.forEach((m, i) => {
       if (!m) return;
       const x = rings[i];
@@ -303,19 +318,47 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       if (!x) return;
       const u = (t - x.start) / x.duration;
       const mat = m.material as THREE.MeshBasicMaterial;
-      if (x.kind === 'shockwave') {
-        m.position.set(CLASH_POINT.x, 0.08, CLASH_POINT.z);
-        const s = 0.5 + u * 9 * x.intensity;
-        m.scale.set(s, s, s);
-        mat.color.set('#FFFFFF');
-      } else {
-        const p = robotPos(x.teamId ?? 'RAIJIN');
+      if (x.kind === 'chargeAura' || x.kind === 'syncPulse') {
+        const p = robotPos(x.teamId ?? (i % 2 ? 'FUJIN' : 'RAIJIN'));
         m.position.set(p.x, 0.1 + u * 3.5, p.z);
         const s = 1.6 - u * 0.6;
         m.scale.set(s, s, s);
-        mat.color.set(TEAM_COLORS[x.teamId ?? 'RAIJIN']);
+        mat.color.set(x.kind === 'syncPulse' ? '#FFE27A' : TEAM_COLORS[x.teamId ?? 'RAIJIN']);
+      } else {
+        const p = where(x.to) ?? new THREE.Vector3(0, 0.08, 0.6);
+        m.position.set(p.x, x.kind === 'cityBlast' ? p.y : 0.08, p.z);
+        const s = 0.5 + u * (x.kind === 'cityBlast' ? 3 : 9) * x.intensity;
+        m.scale.set(s, s, s);
+        mat.color.set(x.kind === 'cityBlast' ? CORRUPT_RED : '#FFFFFF');
       }
       mat.opacity = (1 - u) * 0.8;
+    });
+
+    const beamFx = transients.current.filter((x) => x.kind === 'beam');
+    beams.forEach((line, i) => {
+      const x = beamFx[i];
+      const a = x ? where(x.from) : null;
+      const b2 = x ? where(x.to) : null;
+      line.visible = !!(x && a && b2);
+      if (!x || !a || !b2) return;
+      const age = t - x.start;
+      const rng = seeded(x.seed + (reducedMotion ? 0 : Math.floor(age * 6)) * 31);
+      line.geometry.setFromPoints(boltPoints(a, b2, rng, 8, 0.15));
+      (line.material as THREE.LineBasicMaterial).opacity = (1 - age / x.duration) * x.intensity;
+    });
+
+    const domes = transients.current.filter((x) => x.kind === 'shield');
+    domeRefs.current.forEach((m, i) => {
+      if (!m) return;
+      const x = domes[i];
+      const p = x ? where(x.to) : null;
+      m.visible = !!(x && p);
+      if (!x || !p) return;
+      const u = (t - x.start) / x.duration;
+      m.position.copy(p);
+      const sc = 0.6 + u * 0.5;
+      m.scale.set(sc, sc, sc);
+      (m.material as THREE.MeshBasicMaterial).opacity = (1 - u) * 0.45;
     });
 
     const boltFx = transients.current.filter(
@@ -331,13 +374,12 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       const rng = seeded(x.seed + i * 131 + frame * 977);
       const target =
         x.kind === 'lightning'
-          ? x.regionId
-            ? regionWorldPosition(x.regionId, 0.6)
-            : robotPos('FUJIN', 0.6)
+          ? (where(x.to) ?? robotPos('FUJIN'))
           : robotPos('RAIJIN').add(new THREE.Vector3((rng() - 0.5) * 6, -2, (rng() - 0.5) * 4));
-      const from = target
-        .clone()
-        .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
+      const origin = x.kind === 'lightning' ? where(x.from) : null;
+      const from = origin
+        ? origin.clone().add(new THREE.Vector3(0, 2.5, 0))
+        : target.clone().add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
       const pts = boltPoints(from, target, rng, 16, 0.7);
       line.geometry.setFromPoints(pts);
       const mat = line.material as THREE.LineBasicMaterial;
@@ -354,8 +396,7 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       if (!x) return;
       const u = (t - x.start) / x.duration;
       const layer = i % 3;
-      const p =
-        x.kind === 'wind' ? (x.regionId ? regionWorldPosition(x.regionId, 0.2) : robotPos('RAIJIN', 0.6)) : robotPos('FUJIN');
+      const p = x.kind === 'wind' ? (where(x.to) ?? robotPos('FUJIN')) : robotPos('FUJIN');
       m.position.set(p.x, 0.6 + layer * 1.1 + u * 0.8, p.z);
       m.rotation.set(Math.PI / 2, 0, t * (6 + layer * 2));
       const s = (0.9 + layer * 0.35) * (0.6 + u * 0.8) * (x.kind === 'specialStorm' ? 1.5 : 1);
@@ -395,6 +436,15 @@ export function Effects({ director, maxParticles, reducedMotion }: EffectsProps)
       ))}
       {bolts.map((l, i) => (
         <primitive key={`bolt-${i}`} object={l} />
+      ))}
+      {beams.map((l, i) => (
+        <primitive key={`beam-${i}`} object={l} />
+      ))}
+      {Array.from({ length: 6 }, (_, i) => (
+        <mesh key={`dome-${i}`} ref={(m) => void (domeRefs.current[i] = m)} visible={false}>
+          <sphereGeometry args={[1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshBasicMaterial color={TEAM_COLORS.FUJIN} transparent opacity={0} wireframe depthWrite={false} blending={THREE.AdditiveBlending} />
+        </mesh>
       ))}
       {Array.from({ length: 6 }, (_, i) => (
         <mesh key={`vortex-${i}`} ref={(m) => void (vortexRefs.current[i] = m)} visible={false}>

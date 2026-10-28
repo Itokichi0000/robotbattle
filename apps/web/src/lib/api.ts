@@ -25,6 +25,8 @@ export async function api<T>(
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: opts.signal,
       cache: 'no-store',
+      // Pilot sessions live in an HttpOnly cookie set by the game server.
+      credentials: 'include',
     });
   } catch {
     throw new ApiError(0, 'NETWORK', 'サーバーに接続できません / Cannot reach the game server');
@@ -41,12 +43,6 @@ export async function api<T>(
     throw new ApiError(res.status, j.error ?? 'HTTP_ERROR', j.message ?? `HTTP ${res.status}`);
   }
   return json as T;
-}
-
-/** Random id for idempotent action retries. */
-export function newClientActionId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 /** Safe localStorage wrapper: private mode / blocked storage must not crash the UI. */

@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import { I18nProvider } from '@/lib/i18n';
+import '@sats-wars/ui/ui.css';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'SATS WARS — 雷神 vs 風神',
-  description: 'スマホで参加する日本列島陣取り × 会場大型スクリーンの3Dロボットバトル',
+  title: 'SATS WARS — EARTH DEFENSE',
+  description: '雷神と風神をみんなで操縦して日本の8都市を守る、8分間の協力レイド',
 };
 
 export const viewport: Viewport = {

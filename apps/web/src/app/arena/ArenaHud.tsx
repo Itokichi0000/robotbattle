@@ -1,27 +1,26 @@
 'use client';
-import type { PublicMatchSnapshot } from '@sats-wars/shared';
-import { REGION_INFO, SATS_EXPLAINER, TEAM_META } from '@sats-wars/shared';
+import type { PublicRaidSnapshot } from '@sats-wars/shared';
+import { ENEMY_LABELS, ONE_LINE_RULES, ROLES, ROLE_LABELS, SATS_EXPLAINER } from '@sats-wars/shared';
 import type { Banner, BannerTone, FrameStats } from '@sats-wars/three-game';
-import { ComboGauge, FallMeter, TurnGauge } from '@/components/DefenceBits';
+import { RaidHeader, ResultCard, RobotBars, type RaidView, cityName } from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
-import type { BoardView } from '@/lib/battle';
-import type { ConnectionState, MatchConnection } from '@/lib/connection';
+import type { ConnectionState, RaidConnection } from '@/lib/connection';
 import { useI18n } from '@/lib/i18n';
-import { ActionPopups, CheerBubbles } from './Popups';
+import { ActionPopups } from './Popups';
 
 const TONE_COLOR: Record<BannerTone, string> = {
   ally: '#FFE27A',
-  alien: '#C98BFF',
+  enemy: '#FF3B5C',
   neutral: '#EFF5FF',
-  RAIJIN: TEAM_META.RAIJIN.color,
-  FUJIN: TEAM_META.FUJIN.color,
+  RAIJIN: '#F7931A',
+  FUJIN: '#25C8D7',
 };
 
 /**
- * Venue HUD over the 3D (or 2D) scene. Designed for people walking past:
- * the how-to and the QR are ALWAYS on screen, and the only things that matter
- * (wave, moves until the alien turn, which region falls next) are huge.
+ * Venue HUD over the 3D (or 2D) scene, for people walking past: how to join
+ * and the QR are always visible, and the few things that matter (time, the
+ * next attack, NULL CORE, which seat is needed) are huge.
  */
 export function ArenaHud({
   snap,
@@ -32,192 +31,165 @@ export function ArenaHud({
   stats,
   renderer,
   contextLost,
-  reducedMotion,
   preview = false,
 }: {
-  /** Rehearsal mode: hide status overlays so cinematics stay visible. */
-  preview?: boolean;
-  snap: PublicMatchSnapshot;
-  view: BoardView;
-  conn: MatchConnection;
+  snap: PublicRaidSnapshot;
+  view: RaidView;
+  conn: RaidConnection;
   connState: ConnectionState;
   banner: Banner | null;
   stats: FrameStats | null;
   renderer: 'webgl' | '2d';
   contextLost: boolean;
-  reducedMotion: boolean;
+  /** Rehearsal mode: hide status overlays so cinematics stay visible. */
+  preview?: boolean;
 }) {
-  const { locale } = useI18n();
-  const c = snap.config;
-  const live = snap.status === 'LIVE';
+  const { locale, L } = useI18n();
   const playUrl = snap.playUrl || (typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play');
-  const ja = locale === 'ja';
-  const J = (jaText: string, en: string) => (
-    <>
-      {jaText}
-      <span className="ml-2 text-[0.55em] font-bold opacity-70">{en}</span>
-    </>
-  );
-  const boss = snap.enemies.some((e) => e.kind === 'MOTHERSHIP');
-  const landing = [...new Set(snap.incoming.map((l) => l.regionId))];
+  const lobby = snap.status === 'LOBBY_OPEN' || snap.status === 'CREATED';
+  const lobbyLeft = snap.lobbyEndsAt ? Math.max(0, Math.ceil((snap.lobbyEndsAt - Date.now()) / 1000)) : null;
+  const humans = snap.crew.filter((m) => !m.isBot).length;
+  const bots = snap.crew.length - humans;
+  const showBanner = !!banner;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 flex flex-col p-[1.2vw] text-off" style={{ fontSize: 'clamp(12px, 1.05vw, 26px)' }}>
-      {/* Top: wave & turn | title | danger */}
-      <div className="flex items-start gap-[1.2vw]">
-        <div className="w-[34%] rounded-2xl bg-black/50 p-[0.8vw] ring-1 ring-white/10 backdrop-blur-sm" data-testid="arena-wave">
-          <div className="sw-display text-[3.2em] font-black leading-none">
-            {ja ? `ウェーブ ${snap.wave}` : `WAVE ${snap.wave}`}
-            {boss && <span className="ml-3 text-[0.55em] text-fuchsia-300">🪐 {ja ? '母艦' : 'MOTHERSHIP'}</span>}
+    <div className="pointer-events-none absolute inset-0 z-10 flex flex-col p-[1.2vw] text-off" data-testid="arena-hud">
+      {/* top row */}
+      <div className="flex items-start justify-between gap-[1vw]">
+        <div className="flex flex-col gap-[0.6vh]">
+          <div className="origin-top-left scale-[0.9]">
+            <Logo size="md" />
           </div>
-          {live && (
-            <div className="mt-[0.4vw] grid gap-[0.2vw] text-[1.35em]">
-              <TurnGauge left={view.turnLeft} total={c.actionsPerTurn} locale={locale} />
-              <ComboGauge combo={snap.combo} max={c.comboGaugeMax} locale={locale} />
-            </div>
+          {connState !== 'connected' && (
+            <span className="rounded bg-danger/80 px-2 py-1 text-[1vw] font-bold" role="status">
+              {connState === 'offline' ? L('サーバー未接続', 'Server offline') : L('再接続中…', 'Reconnecting…')}
+            </span>
           )}
         </div>
-        <div className="flex flex-1 flex-col items-center text-center">
-          <div className="sw-display text-[2.4em] font-black leading-tight text-[#FFE27A]">{J('地球防衛軍', 'EARTH DEFENSE')}</div>
-          <div className="text-[1.2em] font-bold text-off/85">
-            {ja ? `隊員 ${snap.playersOnline}人 参戦中` : `${snap.playersOnline} defenders online`}
-            {snap.bestWave > 0 && <span className="ml-3 text-off/65">{ja ? `最高記録 ウェーブ${snap.bestWave}` : `Best: wave ${snap.bestWave}`}</span>}
+        {!lobby && (
+          <div className="w-[34vw] text-[1.2vw]">
+            <RaidHeader raid={snap} view={view} locale={locale} />
           </div>
-        </div>
-        <div className="w-[34%] rounded-2xl bg-black/50 p-[0.8vw] text-right ring-1 ring-white/10 backdrop-blur-sm" data-testid="arena-danger">
-          <div className="text-[1.5em]">
-            <FallMeter fallen={view.fallenCount} limit={c.fallLimit} locale={locale} />
-          </div>
-          {live && view.doomed.length > 0 ? (
-            <div className="mt-[0.3vw] rounded-lg bg-danger/35 px-2 py-1 text-[1.45em] font-black" data-testid="arena-doomed">
-              ⚠ {ja ? `${view.doomed.map((id) => REGION_INFO[id].shortJa).join('・')} が次の敵ターンでとられる！` : `${view.doomed.map((id) => REGION_INFO[id].labelEn).join(', ')} falls next turn!`}
-            </div>
-          ) : live ? (
-            <div className="mt-[0.3vw] text-[1.2em] font-bold text-off/75">{ja ? '今のところ安全。敵を減らそう！' : 'Safe for now. Thin them out!'}</div>
-          ) : null}
-          {live && landing.length > 0 && (
-            <div className="mt-[0.2vw] text-[1.1em] font-bold text-fuchsia-200">
-              🛸 {ja ? `次の着陸予告：${landing.map((id) => REGION_INFO[id].shortJa).join('・')}` : `Landing next: ${landing.map((id) => REGION_INFO[id].labelEn).join(', ')}`}
-            </div>
-          )}
-        </div>
+        )}
+        <JoinCard url={playUrl} lobby={lobby} joinOpen={snap.joinOpen} passMode={snap.passMode} price={snap.ticketPriceSats} demo={snap.demoMode} />
       </div>
 
-      <ActionPopups conn={conn} locale={locale} />
-      <CheerBubbles conn={conn} reducedMotion={reducedMotion} />
+      {/* banner */}
+      {!preview && showBanner && banner && (
+        <div className="pointer-events-none absolute inset-x-0 top-[30%] flex justify-center" data-testid="arena-banner">
+          <div key={`${banner.kind}-${banner.until}`} className="sw-banner-in rounded-2xl bg-black/55 px-[3vw] py-[1.4vh] text-center">
+            <div className="sw-display text-[4.2vw] leading-tight" style={{ color: TONE_COLOR[banner.tone] }}>
+              {locale === 'ja' ? banner.textJa : banner.textEn}
+            </div>
+            {(banner.subJa || banner.subEn) && <div className="text-[1.6vw] font-bold">{locale === 'ja' ? banner.subJa : banner.subEn}</div>}
+          </div>
+        </div>
+      )}
 
-      {/* Banner in the lower third, so it never hides the map */}
-      <div className="flex flex-1 items-end justify-center pb-[2vh]">
-        {banner && (
-          <div
-            key={banner.textJa + banner.until}
-            className="sw-banner-in rounded-2xl bg-black/65 px-[3vw] py-[1vw] text-center ring-2"
-            style={{ ['--tw-ring-color' as string]: TONE_COLOR[banner.tone] }}
-            data-testid="arena-banner"
-          >
-            <div className="sw-display text-[4.2em] font-black leading-tight" style={{ color: TONE_COLOR[banner.tone] }}>
-              {banner.textJa}
+      {/* broadcast */}
+      {snap.broadcast && (
+        <div className="absolute inset-x-[20%] top-[18%] rounded-xl bg-teal/90 px-[1.5vw] py-[1vh] text-center text-[1.8vw] font-black text-navy" role="status" data-testid="broadcast">
+          📢 {L(snap.broadcast.messageJa, snap.broadcast.messageEn)}
+        </div>
+      )}
+
+      {/* lobby */}
+      {lobby && !preview && (
+        <div className="absolute inset-x-[18%] top-[22%] flex flex-col items-center gap-[1.5vh] rounded-3xl bg-black/60 p-[2vw] text-center" data-testid="arena-lobby">
+          <h1 className="sw-display text-[3.6vw] leading-tight">{L('地球防衛作戦 パイロット募集中！', 'EARTH DEFENSE — pilots wanted!')}</h1>
+          <p className="text-[1.6vw] font-bold">{locale === 'ja' ? ONE_LINE_RULES.ja : ONE_LINE_RULES.en}</p>
+          <div className="grid grid-cols-4 gap-[1vw] text-[1.3vw]">
+            {ROLES.map((r) => (
+              <div key={r} className="rounded-xl bg-navy-3/80 px-[0.8vw] py-[1vh]">
+                <div className="text-[2.4vw]">{ROLE_LABELS[r].icon}</div>
+                <div className="font-black">{L(ROLE_LABELS[r].ja, ROLE_LABELS[r].en)}</div>
+                <div className="text-[1vw] text-muted">{L(ROLE_LABELS[r].doJa, ROLE_LABELS[r].doEn)}</div>
+                <div className="mt-1 text-[1.1vw]">👥 {view.crewByRole[r]}</div>
+              </div>
+            ))}
+          </div>
+          <p className="sw-display text-[3vw] text-amber" data-testid="arena-lobby-countdown">
+            {lobbyLeft !== null ? L(`出撃まで ${lobbyLeft}秒`, `Launch in ${lobbyLeft}s`) : L('最初のパイロットを待っています', 'Waiting for the first pilot')}
+          </p>
+          <p className="text-[1.3vw] text-muted">
+            {L(`搭乗 ${humans}人`, `${humans} aboard`)}
+            {bots > 0 ? L(`＋デモ機 ${bots}`, ` + ${bots} demo bots`) : ''}
+          </p>
+        </div>
+      )}
+
+      {/* live: threats (left) */}
+      {snap.status === 'LIVE' && !preview && (
+        <div className="mt-[1vh] flex w-[26vw] flex-col gap-[0.6vh]">
+          {snap.telegraphs
+            .slice()
+            .sort((a, b) => a.resolvesAt - b.resolvesAt)
+            .slice(0, 4)
+            .map((t) => {
+              const e = snap.enemies.find((x) => x.id === t.enemyId);
+              const secs = Math.max(0, Math.ceil((t.resolvesAt - conn.gameNow()) / 1000));
+              const lethal = t.targets.some((c) => view.threats[c]?.lethal);
+              return (
+                <div key={t.id} className={`rounded-xl px-[1vw] py-[0.6vh] text-[1.35vw] font-bold ${lethal ? 'sw-pulse bg-danger/80' : 'bg-black/55'}`} data-testid="arena-threat">
+                  ⚠ {e ? L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en) : ''} → {t.targets.map((c) => cityName(c, L)).join('・')} <span className="tabular-nums">{secs}s</span>
+                  {lethal && <span className="block text-[1vw]">{L('防衛席、シールドを！', 'Guardians, shield it!')}</span>}
+                </div>
+              );
+            })}
+          {view.needed && (
+            <div className="rounded-xl bg-amber/90 px-[1vw] py-[0.6vh] text-[1.4vw] font-black text-navy" data-testid="arena-needed">
+              {L('いま必要：', 'Needed now: ')}
+              {ROLE_LABELS[view.needed].icon} {L(ROLE_LABELS[view.needed].ja, ROLE_LABELS[view.needed].en)}
             </div>
-            {banner.subJa && <div className="text-[1.8em] font-black">{banner.subJa}</div>}
-            <div className="text-[1.3em] font-bold text-off/75">
-              {banner.textEn}
-              {banner.subEn ? ` — ${banner.subEn}` : ''}
-            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1" />
+
+      {/* bottom row */}
+      <div className="flex items-end justify-between gap-[1vw]">
+        <ActionPopups conn={conn} locale={locale} />
+        {!lobby && snap.status !== 'ENDED' && (
+          <div className="w-[30vw] text-[1.1vw]">
+            <RobotBars raid={snap} locale={locale} />
           </div>
         )}
       </div>
 
-      {/* Bottom: campaign stats | logo | how-to + QR (always visible) */}
-      <div className="flex items-end justify-between gap-[1.5vw]">
-        <div className="w-[30%] rounded-xl bg-black/45 px-3 py-2 text-[1.15em] font-bold" data-testid="arena-stats">
-          <div>
-            {ja
-              ? `撃破 ${snap.stats.kills}体 ・ 奪還 ${snap.stats.regionsLiberated} ・ 合体技 ${snap.stats.combos}`
-              : `${snap.stats.kills} kills ・ ${snap.stats.regionsLiberated} liberated ・ ${snap.stats.combos} combos`}
-          </div>
-          <div className="text-[0.85em] text-off/70">
-            {ja ? `みんなで ${snap.stats.actions}回 出撃 ・ 敵ターン ${snap.stats.alienTurns}回` : `${snap.stats.actions} moves together ・ ${snap.stats.alienTurns} alien turns`}
-          </div>
-        </div>
-        <div className="flex flex-col items-center opacity-90">
-          <Logo size="sm" />
-        </div>
-        <div className="pointer-events-auto flex items-center gap-[1vw] rounded-2xl bg-black/65 p-[0.8vw] ring-1 ring-white/15" data-testid="arena-qr">
-          <ol className="text-right text-[1.25em] font-black leading-snug">
-            <li>{J('① QRを読む', 'Scan')}</li>
-            <li>
-              {J('② 「おすすめで出撃」をタップ', 'Tap "Auto defend"')}
-              <span className="ml-1 text-amber">{c.actionCostSats} sats</span>
-            </li>
-            <li>{J('③ 名前が画面に出る！ みんなで日本を守ろう', 'Your name appears! Defend Japan together')}</li>
-            <li className="text-[0.62em] font-bold text-off/70">{SATS_EXPLAINER[locale]}</li>
-            <li className="text-[0.62em] font-bold text-off/70">
-              {ja ? '会場で配られたsatsで遊べます・時間制限なし・見るだけ＆応援は無料' : 'Use the sats handed out here · no time limit · watching & cheering are free'}
-            </li>
-            {snap.paymentMode === 'mock' && <li className="text-[0.7em] text-yellow-300">DEMO MODE（実決済なし）</li>}
-          </ol>
-          <QrCode
-            url={playUrl}
-            size={Math.round(Math.max(150, Math.min(260, (typeof window !== 'undefined' ? window.innerWidth : 1920) * 0.12)))}
-            label="参加用QRコード"
-          />
-        </div>
-      </div>
-
-      {/* Status overlays */}
-      {!preview && snap.status === 'CREATED' && (
-        <Overlay>
-          <Logo size="lg" />
-          <div className="mt-6 text-[2em] font-bold">{J('次の防衛戦を準備中', 'Next defence is being prepared')}</div>
-        </Overlay>
-      )}
-      {!preview && snap.status === 'PAUSED' && (
-        <Overlay>
-          <div className="text-[4em] font-black text-yellow-300">{J('一時停止中', 'PAUSED')}</div>
-          <div className="mt-2 text-[1.5em]">{J('しばらくお待ちください。残高は失われません。', 'Please wait. Your credit is safe.')}</div>
-        </Overlay>
-      )}
-      {!preview && snap.status === 'CANCELLED' && (
-        <Overlay>
-          <div className="text-[4em] font-black">{J('防衛戦 中止', 'DEFENCE CANCELLED')}</div>
-          <div className="mt-2 text-[1.5em]">{J('残高はそのまま次の防衛戦で使えます。', 'Your credit carries over to the next defence.')}</div>
-        </Overlay>
-      )}
-      {snap.status === 'FINISHED' && snap.result && (
-        <div className="absolute inset-x-0 top-[22%] flex justify-center">
-          <div className="rounded-2xl bg-black/75 px-[2vw] py-[0.8vw] text-center ring-1 ring-fuchsia-400/50" data-testid="arena-result">
-            <div className="sw-display text-[2.4em] font-black text-fuchsia-200">
-              {J(`ウェーブ${snap.result.reachedWave}まで守りぬいた！`, `Held out until wave ${snap.result.reachedWave}!`)}
-            </div>
-            <div className="mt-1 text-[1.3em] font-bold">
-              {ja
-                ? `撃破 ${snap.result.stats.kills}体 ・ 奪還 ${snap.result.stats.regionsLiberated}回 ・ みんなで ${snap.result.stats.actions}回 出撃`
-                : `${snap.result.stats.kills} kills ・ ${snap.result.stats.regionsLiberated} liberations ・ ${snap.result.stats.actions} moves`}
-            </div>
-            <div className="mt-1 text-[1.2em] font-bold text-off/80">
-              {J('まもなく次の防衛戦！ 残高はそのまま使えます', 'Next defence soon — your credit carries over')}
-            </div>
-          </div>
+      {/* results */}
+      {snap.status === 'ENDED' && snap.result && !preview && (
+        <div className="absolute inset-x-[25%] top-[14%] text-[1.3vw]" data-testid="arena-results">
+          <ResultCard result={snap.result} locale={locale} bestScore={snap.bestScore} />
+          <p className="mt-2 text-center text-[1.3vw] font-bold">{L('まもなく次の作戦。QRから搭乗しよう！', 'Next raid soon. Scan the QR to board!')}</p>
         </div>
       )}
 
-      {(connState !== 'connected' || contextLost || stats) && (
-        <div className="absolute right-2 top-[18%] rounded bg-black/60 px-2 py-1 font-mono text-[0.7em]">
-          {connState !== 'connected' && <div className="text-yellow-300">{connState}</div>}
-          {contextLost && <div className="text-yellow-300">WebGL lost → 2D</div>}
-          {stats && (
-            <div>
-              {renderer} {stats.fps}fps {stats.frameMs}ms rtt {Math.round(conn.rttMs)}ms
-            </div>
-          )}
+      {snap.status === 'PAUSED' && (
+        <div className="absolute inset-x-[30%] top-[45%] rounded-2xl bg-black/70 py-[2vh] text-center text-[2.4vw] font-black" role="status">
+          ⏸ {L('一時停止中', 'Paused')}
+        </div>
+      )}
+
+      {(stats || contextLost) && (
+        <div className="absolute right-2 bottom-2 rounded bg-black/60 px-2 py-1 font-mono text-xs" data-testid="arena-stats">
+          {renderer} {stats ? `${stats.fps.toFixed(0)}fps ${stats.frameMs.toFixed(1)}ms` : ''} {contextLost ? 'context lost → 2D' : ''}
         </div>
       )}
     </div>
   );
 }
 
-function Overlay({ children }: { children: React.ReactNode }) {
+function JoinCard({ url, lobby, joinOpen, passMode, price, demo }: { url: string; lobby: boolean; joinOpen: boolean; passMode: 'FREE' | 'PAID'; price: number; demo: boolean }) {
+  const { L, locale } = useI18n();
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy/55 text-center backdrop-blur-[2px]">{children}</div>
+    <div className="pointer-events-auto flex flex-col items-center gap-[0.5vh] rounded-2xl bg-black/60 p-[0.8vw]" data-testid="join-card">
+      <p className="text-[1.3vw] font-black">{joinOpen ? L('スマホで搭乗', 'Board with your phone') : L('次の作戦に搭乗', 'Board the next raid')}</p>
+      <QrCode url={url} size={lobby ? 220 : 150} caption={lobby} label={L('参加用QRコード', 'Join QR code')} />
+      <p className="text-[1vw] font-bold">
+        {demo ? L('デモ：無料', 'Demo: free') : passMode === 'FREE' ? L('今日は無料イベント', 'Free event today') : L(`出撃パス ${price} sats（1作戦）`, `Pass ${price} sats per raid`)}
+      </p>
+      {!demo && passMode === 'PAID' && <p className="max-w-[16vw] text-center text-[0.75vw] text-muted">{locale === 'ja' ? SATS_EXPLAINER.ja : SATS_EXPLAINER.en}</p>}
+    </div>
   );
 }

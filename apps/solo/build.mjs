@@ -19,9 +19,10 @@ const result = await build({
   logLevel: 'warning',
 });
 const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
-const css = readFileSync('src/styles.css', 'utf8');
-const html = `<title>SATS WARS 雷神 VS 風神</title>
-<meta name="description" content="SATS WARS — 雷神 vs 風神 のオフライン体験版">
+// Shared cockpit styles first, then the demo layout.
+const css = readFileSync('../../packages/ui/src/ui.css', 'utf8') + '\n' + readFileSync('src/styles.css', 'utf8');
+const html = `<title>SATS WARS Earth Defense</title>
+<meta name="description" content="SATS WARS — EARTH DEFENSE（雷神×風神の協力レイド）のオフライン体験版">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

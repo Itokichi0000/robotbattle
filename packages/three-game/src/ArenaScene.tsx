@@ -1,11 +1,12 @@
 import { Canvas } from '@react-three/fiber';
 import { useRef } from 'react';
 import * as THREE from 'three';
-import type { Enemy, RegionId, RegionState, TeamId } from '@sats-wars/shared';
+import type { CityState, Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import { Effects } from './Effects';
-import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS } from './layout';
-import { MapOverlay, type RegionDanger } from './MapOverlay';
+import { Enemies } from './Enemies';
+import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS, RESERVE_POSITION } from './layout';
+import { type CityThreat, MapOverlay } from './MapOverlay';
 import { ModelRobotActor } from './GlbRobotActor';
 import {
   ArenaStage,
@@ -18,13 +19,16 @@ import {
 
 export interface ArenaSceneProps {
   director: ArenaDirector;
-  regions: RegionState[];
+  cities: CityState[];
   enemies: Enemy[];
-  /** What the next alien turn will do (from engine rules), for warning glows. */
-  danger: Partial<Record<RegionId, RegionDanger>>;
-  cityHpMax: number;
-  /** 0..1 per robot: extra glow (e.g. combo gauge full). */
+  telegraphs: Telegraph[];
+  /** Incoming attacks per city (seconds left, lethal), for warning glows. */
+  threats: Partial<Record<RegionId, CityThreat>>;
+  cityMaxHp: number;
+  /** 0..1 per robot: extra glow (robot energy). */
   glow: Record<TeamId, number>;
+  /** 0..1 shared reserve energy (final special). */
+  reserve: number;
   quality: Quality;
   reducedMotion: boolean;
   locale: 'ja' | 'en';
@@ -37,12 +41,14 @@ export interface ArenaSceneProps {
 }
 
 /**
- * Venue 3D scene: hologram map of Japan with the invading UFOs behind, RAIJIN
- * and FUJIN (allies) in front.
+ * Venue 3D scene: RAIJIN and FUJIN side by side in front, the hologram of
+ * Japan's 8 defence cities between them, NULL CORE and its escorts beyond.
  * Pure presentation: everything shown comes from server state + director cues.
  */
 export function ArenaScene(props: ArenaSceneProps) {
-  const { director, regions, glow, quality, reducedMotion } = props;
+  const { director, glow, quality, reducedMotion } = props;
+  const live = useRef({ enemies: props.enemies, telegraphs: props.telegraphs });
+  live.current = { enemies: props.enemies, telegraphs: props.telegraphs };
   const q = QUALITY_SETTINGS[quality];
   const statsRef = useRef(props.onStats);
   statsRef.current = props.onStats;
@@ -73,15 +79,9 @@ export function ArenaScene(props: ArenaSceneProps) {
       <CameraRig director={director} reducedMotion={reducedMotion} />
       <LightingRig shadows={q.shadows} />
       <ArenaStage stars={q.stars} />
-      <MapOverlay
-        regions={regions}
-        enemies={props.enemies}
-        danger={props.danger}
-        cityHpMax={props.cityHpMax}
-        director={director}
-        reducedMotion={reducedMotion}
-        locale={props.locale}
-      />
+      <MapOverlay cities={props.cities} threats={props.threats} cityMaxHp={props.cityMaxHp} director={director} reducedMotion={reducedMotion} locale={props.locale} />
+      <Enemies enemies={props.enemies} telegraphs={props.telegraphs} director={director} reducedMotion={reducedMotion} />
+      <ReserveReactor level={props.reserve} />
       <ModelRobotActor
         teamId="RAIJIN"
         url={props.robotModels?.RAIJIN}
@@ -96,8 +96,25 @@ export function ArenaScene(props: ArenaSceneProps) {
         energyRatio={glow.FUJIN}
         onModelError={props.onModelError}
       />
-      <Effects director={director} maxParticles={q.particles} reducedMotion={reducedMotion} />
+      <Effects director={director} maxParticles={q.particles} reducedMotion={reducedMotion} targets={() => live.current} />
       <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
     </Canvas>
+  );
+}
+
+/** Shared reserve reactor between the robots: fills up for the final special. */
+function ReserveReactor({ level }: { level: number }) {
+  const h = 0.2 + Math.max(0, Math.min(1, level)) * 1.6;
+  return (
+    <group position={RESERVE_POSITION} name="reserve-reactor">
+      <mesh position={[0, 0.9, 0]}>
+        <cylinderGeometry args={[0.55, 0.55, 1.9, 24, 1, true]} />
+        <meshStandardMaterial color="#0E2240" transparent opacity={0.35} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, h / 2, 0]}>
+        <cylinderGeometry args={[0.45, 0.45, h, 24]} />
+        <meshStandardMaterial color="#FFE27A" emissive={new THREE.Color('#FFB020')} emissiveIntensity={0.6 + level} />
+      </mesh>
+    </group>
   );
 }

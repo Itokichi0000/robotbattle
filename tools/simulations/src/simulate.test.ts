@@ -1,24 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { aggregate, simulateCampaign } from './simulate';
+import { aggregate, simulateRaid } from './simulate';
 
-describe('campaign simulator', () => {
-  it('is deterministic per seed and always ends with Japan falling', () => {
-    const o = { seed: 7, autoShare: 0.6 };
-    const a = simulateCampaign(o);
-    expect(simulateCampaign(o)).toEqual(a);
-    expect(a.fell).toBe(true);
-    expect(a.reachedWave).toBeGreaterThanOrEqual(2);
-    // Only successful moves are charged.
-    expect(a.sats).toBe(a.actions * 21);
+const many = (pilots: number, mix: 'spread' | 'gunners' | 'no-support', skill: number, n = 6) =>
+  aggregate(Array.from({ length: n }, (_, i) => simulateRaid({ pilots, mix, skill, seed: 500 + i * 101 })));
+
+describe('raid balance (smoke)', () => {
+  it('is deterministic for a seed', () => {
+    const a = simulateRaid({ pilots: 9, mix: 'spread', skill: 0.65, seed: 42 });
+    const b = simulateRaid({ pilots: 9, mix: 'spread', skill: 0.65, seed: 42 });
+    expect(a).toEqual(b);
   });
 
-  it('choosing well lasts at least as long as random play, and campaigns are not endless', () => {
-    const n = 30;
-    const smart = aggregate(Array.from({ length: n }, (_, i) => simulateCampaign({ seed: i * 13 + 1, autoShare: 1 })));
-    const random = aggregate(Array.from({ length: n }, (_, i) => simulateCampaign({ seed: i * 13 + 1, autoShare: 0 })));
-    expect(smart.waveMean).toBeGreaterThanOrEqual(random.waveMean);
-    expect(random.waveMean).toBeGreaterThanOrEqual(3);
-    expect(smart.fellShare).toBe(1);
-    expect(smart.actionsMean).toBeLessThan(600);
-  }, 60_000);
+  it('a balanced crew of 9 usually wins; an all-gunner crew does worse', () => {
+    const spread = many(9, 'spread', 0.65);
+    const gunners = many(9, 'gunners', 0.65);
+    expect(spread.winRate).toBeGreaterThanOrEqual(0.5);
+    expect(spread.survivingMean).toBeGreaterThan(gunners.survivingMean);
+  });
+
+  it('a big crowd still has to cover the seats (fair-share normalisation)', { timeout: 60_000 }, () => {
+    const spread = many(40, 'spread', 0.65, 4);
+    const gunners = many(40, 'gunners', 0.65, 4);
+    expect(spread.winRate).toBeGreaterThan(gunners.winRate);
+  });
+
+  it('small crews get the assist AI', () => {
+    const solo = many(2, 'spread', 0.65, 3);
+    expect(solo.assistMean).toBeGreaterThan(0);
+  });
 });

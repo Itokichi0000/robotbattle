@@ -1,4 +1,4 @@
-/** Original SATS WARS emblem: a split disc — thunderbolt (RAIJIN) vs whirlwind (FUJIN). */
+/** Original SATS WARS emblem: a split disc — thunderbolt (RAIJIN) and whirlwind (FUJIN), side by side. */
 export function Emblem({ size = 64 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
@@ -42,7 +42,7 @@ export function Logo({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
           <span className="text-amber">SATS</span> <span className="text-teal">WARS</span>
         </div>
         <div className={`${sub} mt-1 font-bold tracking-[0.3em] text-off/90`}>
-          <span className="text-amber">雷神</span> VS <span className="text-teal">風神</span>
+          EARTH DEFENSE <span className="text-amber">雷神</span>×<span className="text-teal">風神</span>
         </div>
       </div>
     </div>
