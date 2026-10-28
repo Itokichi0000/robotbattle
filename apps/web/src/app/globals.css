@@ -1,0 +1,144 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-navy: #070d1a;
+  --color-navy-2: #0e1830;
+  --color-navy-3: #17233f;
+  --color-line: #2a3a5e;
+  --color-amber: #f7931a;
+  --color-amber-light: #ffc46b;
+  --color-teal: #25c8d7;
+  --color-teal-light: #8beaf2;
+  --color-off: #eff5ff;
+  --color-muted: #9aa8c7;
+  --color-danger: #ff5d6c;
+  --color-ok: #39d98a;
+  --font-sans: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo',
+    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Arial Black', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-navy);
+  color: var(--color-off);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.sw-large-text {
+  font-size: 118%;
+}
+
+.sw-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+.sw-panel {
+  background: linear-gradient(180deg, rgba(23, 35, 63, 0.92), rgba(14, 24, 48, 0.92));
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.sw-btn {
+  min-height: 48px;
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  transition:
+    transform 0.08s ease,
+    filter 0.15s ease,
+    opacity 0.15s;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
+}
+.sw-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+.sw-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sw-btn:focus-visible,
+.sw-focus:focus-visible {
+  outline: 3px solid var(--color-off);
+  outline-offset: 2px;
+}
+
+/* 3D map labels rendered via drei <Html> */
+.sw-map-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(7, 13, 26, 0.78);
+  border: 1px solid rgba(239, 245, 255, 0.25);
+  color: var(--color-off);
+  text-shadow: 0 1px 2px #000;
+}
+.sw-map-label[data-owner='RAIJIN'] {
+  border-color: var(--color-amber);
+}
+.sw-map-label[data-owner='FUJIN'] {
+  border-color: var(--color-teal);
+}
+.sw-map-label.is-contested {
+  border-style: dashed;
+  border-width: 2px;
+}
+.sw-map-label-contest:empty {
+  display: none;
+}
+.sw-map-label-contest {
+  color: #ffe08a;
+  font-size: 13px;
+}
+
+@keyframes sw-banner-in {
+  0% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.sw-banner-in {
+  animation: sw-banner-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes sw-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.sw-pulse {
+  animation: sw-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-banner-in,
+  .sw-pulse {
+    animation: none;
+  }
+}
+.sw-reduced-motion .sw-banner-in,
+.sw-reduced-motion .sw-pulse {
+  animation: none;
+}

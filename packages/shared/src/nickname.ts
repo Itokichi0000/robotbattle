@@ -25,7 +25,7 @@ const BLOCKED_SUBSTRINGS = [
 
 // Control chars, zero-width chars, bidi overrides.
 // eslint-disable-next-line no-control-regex
-const STRIP_RE = /[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁠-⁯﻿]/g;
+const STRIP_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
 const URL_LIKE_RE = /(https?:|www\.|\.com|\.jp|\.io|lnbc|lnurl|@)/i;
 
 export interface NicknameResult {

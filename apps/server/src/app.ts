@@ -153,14 +153,16 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   });
 
   registerPublicRoutes(app, services);
-  let realtime!: Realtime;
+  // Assigned after app.ready(); admin routes only read it at request time.
+  const holder: { realtime: Realtime | null } = { realtime: null };
   registerAdminRoutes(app, services, {
     isAllowedOrigin,
-    realtimeStats: () => realtime.stats(),
+    realtimeStats: () => holder.realtime!.stats(),
   });
 
   await app.ready();
-  realtime = createRealtime(app.server, services, isAllowedOrigin);
+  const realtime = createRealtime(app.server, services, isAllowedOrigin);
+  holder.realtime = realtime;
 
   const tick = () => {
     const now = mono.now();
