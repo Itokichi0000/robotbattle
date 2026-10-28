@@ -48,6 +48,11 @@ export interface RobotRig {
   backUnit: THREE.Object3D;
   /** Rest frame of the back unit (GLB skeletons only). */
   backRest?: JointRest;
+  /**
+   * GLB only: drum discs / wind ring that spin about their own bone axis (local +Y).
+   * When present they take the back-unit spin and the BackUnit mount stays still.
+   */
+  spinners?: { object: THREE.Object3D; rest: THREE.Quaternion; sign: 1 | -1 }[];
   /** Emissive materials whose intensity tracks energy / effects. */
   glowMaterials: THREE.MeshStandardMaterial[];
   baseGlow: number;

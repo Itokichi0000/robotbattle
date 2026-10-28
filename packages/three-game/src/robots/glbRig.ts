@@ -19,6 +19,13 @@ function captureRest(root: THREE.Object3D, joint: THREE.Object3D): JointRest {
 const REST_KEY = 'swRestPose';
 
 /**
+ * Bones that spin about their own axis with the clip's back-unit spin (RAIJIN's two
+ * thunder drums, FUJIN's wind ring; see tools/blender/robotkit/rig.py). `_R` turns the
+ * opposite way so the pair stays mirror-symmetric.
+ */
+export const SPIN_BONES = ['Drum_L', 'Drum_R', 'WindRing'] as const;
+
+/**
  * Rig view over a loaded GLB (same joint names as the procedural rigs), so the
  * procedural clips can drive it when the file has no clip of its own. Works for any
  * bone orientation: Blender-authored bones point along the limbs, so their rest
@@ -34,13 +41,22 @@ export function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): Rob
   }
   const backUnit = scene.getObjectByName('BackUnit') ?? new THREE.Object3D();
   // useGLTF caches the scene across mounts: keep the first (pristine) rest pose.
-  type Stored = { joints: Record<JointName, JointRest>; back: JointRest };
+  type Stored = {
+    joints: Record<JointName, JointRest>;
+    back: JointRest;
+    spin: Partial<Record<(typeof SPIN_BONES)[number], THREE.Quaternion>>;
+  };
   let stored = scene.userData[REST_KEY] as Stored | undefined;
   if (!stored) {
     scene.updateWorldMatrix(true, true);
     const rest = {} as Record<JointName, JointRest>;
     for (const name of JOINT_NAMES) rest[name] = captureRest(scene, joints[name]);
-    stored = { joints: rest, back: captureRest(scene, backUnit) };
+    const spin: Stored['spin'] = {};
+    for (const n of SPIN_BONES) {
+      const o = scene.getObjectByName(n);
+      if (o) spin[n] = o.quaternion.clone();
+    }
+    stored = { joints: rest, back: captureRest(scene, backUnit), spin };
     scene.userData[REST_KEY] = stored;
   }
   const glow: THREE.MeshStandardMaterial[] = [];
@@ -63,6 +79,13 @@ export function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): Rob
     rest: stored.joints,
     backUnit,
     backRest: stored.back,
+    spinners: SPIN_BONES.flatMap((n) => {
+      const o = scene.getObjectByName(n);
+      const rest = stored.spin[n];
+      return o && rest
+        ? [{ object: o, rest, sign: n.endsWith('_R') ? (-1 as const) : (1 as const) }]
+        : [];
+    }),
     glowMaterials: glow,
     baseGlow: Math.max(1.5, ...glow.map((m) => m.userData.swBaseGlow as number)),
     height: box.isEmpty() ? 4 : box.max.y - box.min.y,

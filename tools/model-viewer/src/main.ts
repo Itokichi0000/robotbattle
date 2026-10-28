@@ -50,6 +50,7 @@ interface RobotStats {
   materials: number;
   textures: { name: string; width: number; height: number }[];
   jointsFound: number;
+  boneNames: string[];
   clipsInFile: string[];
   height: number;
   width: number;
@@ -69,6 +70,7 @@ const robotParam = params.get('robot') ?? 'both';
 const kinds: Kind[] = robotParam === 'both' ? ['raijin', 'fujin'] : [robotParam as Kind];
 const source = (params.get('source') ?? 'glb') as 'glb' | 'procedural';
 const dir = params.get('dir') ?? '../../../apps/web/public/assets/robots/';
+const lod = params.get('lod'); // 1 | 2 → <robot>_lod1.glb / _lod2.glb
 let view = (params.get('view') ?? '45') as ViewName;
 let clip = (params.get('clip') ?? 'Idle') as ClipName;
 const frozenT = params.has('t') ? Number(params.get('t')) : null;
@@ -144,6 +146,7 @@ function emptyStats(src: 'glb' | 'procedural'): RobotStats {
     materials: 0,
     textures: [],
     jointsFound: 0,
+    boneNames: [],
     clipsInFile: [],
     height: 0,
     width: 0,
@@ -181,6 +184,7 @@ function measure(object: THREE.Object3D, stats: RobotStats): void {
   stats.materials = mats.size;
   stats.textures = [...tex.values()];
   stats.bones = bones.size;
+  stats.boneNames = [...bones].map((b) => b.name).sort();
   stats.jointsFound = JOINT_NAMES.filter((n) => object.getObjectByName(n)).length;
   const box = new THREE.Box3().setFromObject(object);
   stats.height = +(box.max.y - box.min.y).toFixed(3);
@@ -194,13 +198,14 @@ async function loadRobot(kind: Kind): Promise<Loaded> {
     measure(rig.root, stats);
     return { kind, object: rig.root, rig, mixer: null, clips: new Map(), stats };
   }
-  const url = new URL(`${kind}.glb`, new URL(dir, location.href)).href;
+  const file = `${kind}${lod ? `_lod${lod}` : ''}.glb`;
+  const url = new URL(file, new URL(dir, location.href)).href;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   const buf = await res.arrayBuffer();
   const gltf = await loader.parseAsync(buf, url.slice(0, url.lastIndexOf('/') + 1));
   const rig = rigFromScene(gltf.scene, kind);
-  if (!rig) throw new Error(`${kind}.glb: required joints missing`);
+  if (!rig) throw new Error(`${file}: required joints missing`);
   const stats = emptyStats('glb');
   stats.bytes = buf.byteLength;
   stats.clipsInFile = gltf.animations.map((a) => a.name);
@@ -288,6 +293,11 @@ function jointWorld(kind: Kind, joint: string): [number, number, number] | null 
   return [p.x, p.y, p.z];
 }
 
+function boneQuaternion(kind: Kind, name: string): [number, number, number, number] | null {
+  const o = robots.find((x) => x.kind === kind)?.object.getObjectByName(name);
+  return o ? [o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w] : null;
+}
+
 const api = {
   ready: false,
   error: null as string | null,
@@ -298,6 +308,7 @@ const api = {
   pose,
   coverage,
   jointWorld,
+  boneQuaternion,
   render: () => {
     renderer.render(scene, camera);
     api.drawCalls = renderer.info.render.calls;

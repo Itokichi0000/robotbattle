@@ -76,6 +76,10 @@ class Part:
         self.smooth_angle = smooth_angle
         self.bm = bmesh.new()
         self.materials = []
+        # Per-vertex bone index: a part is normally one rigid piece on one bone, but e.g. a
+        # hand's fingers can share an object while each finger follows its own bone.
+        self.bones = [bone]
+        self._bone_layer = self.bm.verts.layers.int.new("sw_bone")
 
     def _bevel_layer(self, bm):
         # Edge bevel weights live in a generic attribute since Blender 4.0.
@@ -87,16 +91,23 @@ class Part:
             self.materials.append(mat)
         return self.materials.index(mat)
 
-    def add(self, geom, mat, matrix=None, closed=True, bevel=None):
+    def add(self, geom, mat, matrix=None, closed=True, bevel=None, bone=None):
         """
         Place (verts, faces) with `matrix` and material `mat`.
         `bevel`: chamfer this primitive's hard edges (> 40°). Default: blocks and plates
         (≤ 12 faces, > 12 cm) that are not emissive; round primitives, rivets and glow strips
         stay unbevelled to save triangles.
+        `bone`: bind this primitive to another bone than the part's own (e.g. a finger).
         """
         verts, faces = geom
         m = matrix if matrix is not None else Matrix.Identity(4)
         bvs = [self.bm.verts.new(m @ Vector(v)) for v in verts]
+        b = bone or self.bone
+        if b not in self.bones:
+            self.bones.append(b)
+        bi = self.bones.index(b)
+        for v in bvs:
+            v[self._bone_layer] = bi
         new_faces = []
         for f in faces:
             try:
@@ -113,7 +124,11 @@ class Part:
         if bevel is None:
             pts = [v.co for f in new_faces for v in f.verts]
             span = max(max(p[i] for p in pts) - min(p[i] for p in pts) for i in range(3)) if pts else 0.0
-            bevel = len(faces) <= 12 and span > 0.12 and not mat.get("sw_glow", False)
+            # Thin plates/bands would collapse under a chamfer on both sides (zero-area faces →
+            # zero-length tangents), so they stay sharp.
+            local = [max(v[i] for v in verts) - min(v[i] for v in verts) for i in range(3)]
+            thick = min(local) >= 3 * self.bevel
+            bevel = len(faces) <= 12 and span > 0.12 and thick and not mat.get("sw_glow", False)
         if bevel and self.bevel > 0:
             bw = self._bevel_layer(self.bm)
             limit = math.radians(40)
@@ -134,6 +149,9 @@ class Part:
 
     def build(self, collection, armature_obj):
         me = bpy.data.meshes.new(self.name)
+        lay = self.bm.verts.layers.int.get("sw_bone")
+        owner = [v[lay] for v in self.bm.verts]
+        self.bm.verts.layers.int.remove(lay)
         self.bm.to_mesh(me)
         self.bm.free()
         for mat in self.materials:
@@ -158,8 +176,11 @@ class Part:
             mod.use_clamp_overlap = True
             mod.harden_normals = True
             mod.miter_outer = "MITER_ARC"
-        vg = obj.vertex_groups.new(name=self.bone)
-        vg.add(list(range(len(me.vertices))), 1.0, "REPLACE")
+        for i, bone in enumerate(self.bones):
+            vg = obj.vertex_groups.new(name=bone)
+            idx = [v for v, o in enumerate(owner) if o == i]
+            if idx:
+                vg.add(idx, 1.0, "REPLACE")
         obj.parent = armature_obj
         # N-gons (cylinder caps, plates) → triangles so the exporter can write MikkTSpace tangents.
         tri = obj.modifiers.new("Triangulate", "TRIANGULATE")
@@ -196,6 +217,8 @@ class Robot:
         right = self.part(f"{name}_R", f"{bone}_R", group, **kw)
         right.bm.free()
         right.bm = left.bm.copy()
+        right.bones = [b[:-2] + "_R" if b.endswith("_L") else b for b in left.bones]
+        right._bone_layer = right.bm.verts.layers.int.get("sw_bone")
         bmesh.ops.transform(right.bm, matrix=MIRROR_X, verts=right.bm.verts)
         bmesh.ops.reverse_faces(right.bm, faces=right.bm.faces)
         right.materials = list(left.materials)

@@ -45,6 +45,13 @@ const JOINTS = [
   'Foot_R',
   'BackUnit',
 ];
+const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'].flatMap((f) => [`${f}_L`, `${f}_R`]);
+const EXTRA_BONES: Record<(typeof ROBOTS)[number], string[]> = {
+  raijin: [...FINGERS, 'ShoulderArmor_L', 'ShoulderArmor_R', 'Drum_L', 'Drum_R'],
+  fujin: [...FINGERS, 'ShoulderArmor_L', 'ShoulderArmor_R', 'WindRing', 'BackFin_L', 'BackFin_R'],
+};
+const SPINNER: Record<(typeof ROBOTS)[number], string> = { raijin: 'Drum_L', fujin: 'WindRing' };
+const LOD_BUDGET = { 1: 20_000, 2: 7_000 } as const;
 const SHOTS = resolve(import.meta.dirname, '../../../test-results/model-viewer/shots');
 
 interface Stats {
@@ -55,6 +62,7 @@ interface Stats {
   materials: number;
   textures: { name: string; width: number; height: number }[];
   jointsFound: number;
+  boneNames: string[];
   clipsInFile: string[];
   height: number;
   bytes: number;
@@ -69,6 +77,7 @@ type Viewer = {
   pose(clip: string, t: number): void;
   coverage(): number;
   jointWorld(kind: string, joint: string): [number, number, number] | null;
+  boneQuaternion(kind: string, name: string): [number, number, number, number] | null;
   render(): void;
 };
 declare global {
@@ -91,16 +100,20 @@ async function open(page: Page, query: Record<string, string>): Promise<string[]
 }
 
 for (const robot of ROBOTS) {
-  test(`${robot}.glb: Khronos glTF-Validator reports no errors or warnings`, async () => {
-    const report = await validator.validateBytes(
-      new Uint8Array(readFileSync(resolve(GLB_DIR, `${robot}.glb`))),
-      { maxIssues: 100 },
-    );
-    const msgs = report.issues.messages
-      .filter((m) => m.severity <= 1)
-      .map((m) => `${m.code} ${m.pointer ?? ''}`);
-    expect(report.issues.numErrors, msgs.join('\n')).toBe(0);
-    expect(report.issues.numWarnings, msgs.join('\n')).toBe(0);
+  test(`${robot}.glb + LOD1/LOD2: Khronos glTF-Validator reports no errors or warnings`, async () => {
+    for (const file of [`${robot}.glb`, `${robot}_lod1.glb`, `${robot}_lod2.glb`]) {
+      const report = await validator.validateBytes(
+        new Uint8Array(readFileSync(resolve(GLB_DIR, file))),
+        {
+          maxIssues: 100,
+        },
+      );
+      const msgs = report.issues.messages
+        .filter((m) => m.severity <= 1)
+        .map((m) => `${file} ${m.code} ${m.pointer ?? ''}`);
+      expect(report.issues.numErrors, msgs.join('\n')).toBe(0);
+      expect(report.issues.numWarnings, msgs.join('\n')).toBe(0);
+    }
   });
 
   test(`${robot}.glb: structure, textures and four rendered views`, async ({ page }) => {
@@ -111,12 +124,13 @@ for (const robot of ROBOTS) {
     );
 
     expect(s.jointsFound).toBe(18); // every shared joint name resolves
-    expect(s.bones).toBe(19); // + BackUnit
+    // 19 game joints + fingers, shoulder armour and drums / wind ring / back fins (DESIGN_RULES).
+    expect(s.boneNames).toEqual(expect.arrayContaining([...JOINTS, ...EXTRA_BONES[robot]]));
     expect(s.skinnedMeshes).toBe(s.meshes); // every part is skinned to the rig
     expect(s.meshes).toBeGreaterThanOrEqual(25); // parts stay separate objects
     expect(s.triangles).toBeGreaterThan(10_000);
-    expect(s.triangles).toBeLessThanOrEqual(60_000); // ART_BIBLE target 30–60k, hard limit 100k
-    expect(s.materials).toBeLessThanOrEqual(2); // one atlas material (+ FUJIN's translucent veil)
+    expect(s.triangles).toBeLessThanOrEqual(50_000); // DESIGN_RULES: LOD0 ≤ 50k
+    expect(s.materials).toBe(1); // one atlas material
     expect(s.textures.length).toBe(4); // baseColor, ORM (shared with occlusion), normal, emissive
     for (const t of s.textures) {
       expect(t.width).toBeLessThanOrEqual(2048);
@@ -175,6 +189,18 @@ for (const robot of ROBOTS) {
     }
     console.log(`${robot}: max joint deviation ${worst.toExponential(2)} m (${worstAt})`);
     expect(worst).toBeLessThan(1e-3);
+    // The thunder drums / wind ring turn on their own bones during the special move.
+    const q = async (clip: string, t: number) =>
+      glb.evaluate(
+        ([c, time, kind, bone]) => {
+          window.__viewer.pose(c as string, time as number);
+          return window.__viewer.boneQuaternion(kind as string, bone as string)!;
+        },
+        [clip, t, robot, SPINNER[robot]] as const,
+      );
+    const [a0, a1] = [await q('Idle', 0), await q('Special', 1.2)];
+    const dot = Math.abs(a0.reduce((acc, v, i) => acc + v * a1[i]!, 0));
+    expect(2 * Math.acos(Math.min(1, dot)), `${SPINNER[robot]} spins`).toBeGreaterThan(0.01);
     // A pose far from rest still renders (skinned parts are not frustum-culled away).
     await glb.evaluate(() => {
       window.__viewer.pose('Special', 1.6);
@@ -183,5 +209,18 @@ for (const robot of ROBOTS) {
     expect(await glb.evaluate(() => window.__viewer.coverage())).toBeGreaterThan(0.05);
     await glb.screenshot({ path: resolve(SHOTS, `${robot}_glb_special.png`) });
     expect([...e1, ...e2]).toEqual([]);
+  });
+
+  test(`${robot}_lod1.glb / _lod2.glb: same skeleton, within budget, renders`, async ({ page }) => {
+    for (const level of [1, 2] as const) {
+      const errors = await open(page, { robot, source: 'glb', lod: String(level), view: '45' });
+      const s = await page.evaluate((k) => window.__viewer.stats[k]!, robot);
+      console.log(`${robot} LOD${level}: ${s.triangles} tris, ${(s.bytes / 1024).toFixed(0)} KB`);
+      expect(s.jointsFound).toBe(18);
+      expect(s.triangles).toBeLessThanOrEqual(LOD_BUDGET[level]);
+      expect(await page.evaluate(() => window.__viewer.coverage())).toBeGreaterThan(0.08);
+      await page.screenshot({ path: resolve(SHOTS, `${robot}_lod${level}_45.png`) });
+      expect(errors).toEqual([]);
+    }
   });
 }

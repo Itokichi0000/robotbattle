@@ -4,8 +4,8 @@
   "ok": true,
   "blend": {
     "stage": "detail",
-    "parts": 29,
-    "triangles": 26776,
+    "parts": 30,
+    "triangles": 26200,
     "groups": {
       "head": [
         "RJ_Head"
@@ -46,18 +46,33 @@
       ],
       "back": [
         "RJ_BackMount",
-        "RJ_DrumRing"
+        "RJ_Drum_L",
+        "RJ_Drum_R"
       ]
     }
   },
   "glb": {
-    "triangles": 26776,
+    "triangles": 26200,
     "materials": [
       "RJ_Body"
     ],
-    "height": 5.084,
-    "bytes": 3994456
+    "height": 5.134,
+    "bytes": 3724200
   },
+  "lods": [
+    {
+      "level": 1,
+      "triangles": 11484,
+      "parts": 30,
+      "bytes": 1451704
+    },
+    {
+      "level": 2,
+      "triangles": 6702,
+      "parts": 30,
+      "bytes": 851708
+    }
+  ],
   "checks": [
     {
       "check": "collections",
@@ -74,7 +89,7 @@
     {
       "check": "bones match shared skeleton",
       "ok": true,
-      "detail": "19 bones"
+      "detail": "33 bones"
     },
     {
       "check": "joint positions match the in-game rig",
@@ -89,14 +104,16 @@
         "Arm.L",
         "Leg.L",
         "BackUnit",
+        "Hand.L",
         "Arm.R",
-        "Leg.R"
+        "Leg.R",
+        "Hand.R"
       ]
     },
     {
       "check": "parts",
       "ok": true,
-      "detail": 29
+      "detail": 30
     },
     {
       "check": "head/torso/arms/legs/joints/back all present",
@@ -107,11 +124,11 @@
         "arms": 8,
         "legs": 6,
         "joints": 9,
-        "back": 2
+        "back": 3
       }
     },
     {
-      "check": "every part rigidly skinned to one existing bone",
+      "check": "every vertex rigidly skinned to one existing bone",
       "ok": true,
       "detail": []
     },
@@ -133,7 +150,7 @@
     {
       "check": "atlas UVs on every atlas part",
       "ok": true,
-      "detail": "29 parts []"
+      "detail": "30 parts []"
     },
     {
       "check": "baked images packed",
@@ -166,18 +183,18 @@
       "check": "source materials kept for re-baking",
       "ok": true,
       "detail": [
-        "RJ_Armor",
-        "RJ_ArmorWave",
+        "RJ_Copper",
         "RJ_Core",
+        "RJ_DrumSkin",
         "RJ_Glow",
-        "RJ_Gold",
-        "RJ_Iron"
+        "RJ_Iron",
+        "RJ_Vermilion"
       ]
     },
     {
-      "check": "triangle budget (≤ 60k target, 100k max)",
+      "check": "LOD0 triangle budget (≤ 50k, DESIGN_RULES)",
       "ok": true,
-      "detail": 26776
+      "detail": 26200
     },
     {
       "check": "GLB imports with one armature",
@@ -192,12 +209,12 @@
     {
       "check": "GLB parts",
       "ok": true,
-      "detail": 29
+      "detail": 30
     },
     {
       "check": "GLB triangles equal the .blend",
       "ok": true,
-      "detail": "26776 vs 26776"
+      "detail": "26200 vs 26200"
     },
     {
       "check": "GLB materials / textures",
@@ -207,12 +224,32 @@
     {
       "check": "GLB height 4.5–5.5 m, standing on the ground",
       "ok": true,
-      "detail": "5.084 m, min z -0.000"
+      "detail": "5.134 m, min z -0.000"
     },
     {
       "check": "GLB has no animation clips (procedural clips drive it)",
       "ok": true,
       "detail": 0
+    },
+    {
+      "check": "LOD1: same skeleton",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "LOD1: ≤ 20000 triangles",
+      "ok": true,
+      "detail": 11484
+    },
+    {
+      "check": "LOD2: same skeleton",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "LOD2: ≤ 7000 triangles",
+      "ok": true,
+      "detail": 6702
     }
   ]
 }

@@ -121,3 +121,39 @@ describe('glow on GLB materials', () => {
     expect(body.emissiveIntensity).toBeGreaterThan(2.8); // Special boosts glow
   });
 });
+
+describe('spinner bones (thunder drums / wind ring)', () => {
+  it('spin about their own axis while the BackUnit mount stays at rest', () => {
+    const scene = new THREE.Group();
+    const nodes: Record<string, THREE.Object3D> = {};
+    for (const n of [...JOINT_NAMES, 'BackUnit']) {
+      const o = new THREE.Object3D();
+      o.name = n;
+      nodes[n] = o;
+      scene.add(o);
+    }
+    const drum = new THREE.Object3D();
+    drum.name = 'Drum_R';
+    drum.position.set(-1, 4, -0.7);
+    drum.quaternion.setFromEuler(new THREE.Euler(1.2, 0.3, -0.4)); // arbitrary bone frame
+    nodes.BackUnit!.add(drum);
+    const onAxis = new THREE.Object3D();
+    onAxis.position.set(0, 0.5, 0); // along the bone's local +Y = spin axis
+    const offAxis = new THREE.Object3D();
+    offAxis.position.set(0.4, 0, 0);
+    drum.add(onAxis, offAxis);
+
+    const rig = rigFromScene(scene, 'raijin')!;
+    expect(rig.spinners?.map((s) => [s.object.name, s.sign])).toEqual([['Drum_R', -1]]);
+    scene.updateMatrixWorld(true);
+    const a0 = onAxis.getWorldPosition(new THREE.Vector3());
+    const b0 = offAxis.getWorldPosition(new THREE.Vector3());
+    const mount0 = nodes.BackUnit!.quaternion.clone();
+
+    applyClip(rig, 'Special', 1.0, 1.0); // fast spin
+    scene.updateMatrixWorld(true);
+    expect(onAxis.getWorldPosition(new THREE.Vector3()).distanceTo(a0)).toBeLessThan(1e-9);
+    expect(offAxis.getWorldPosition(new THREE.Vector3()).distanceTo(b0)).toBeGreaterThan(0.05);
+    expect(nodes.BackUnit!.quaternion.angleTo(mount0)).toBeLessThan(1e-9);
+  });
+});

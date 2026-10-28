@@ -2,7 +2,8 @@
 
 作成：2026-10-28　対象：`tools/blender/build_robot.py --robot raijin --stage base` の出力
 
-> この改善点を反映した詳細化版と FUJIN の結果は [MODELS.md](MODELS.md)。
+> **注**：このレビューの時点では、依頼に添付されていた設定画（現在の `docs/design/visual-bible-v01/`）を見落としており、
+> 手続き型モデルと ART_BIBLE を参考にしていた。設定画に合わせて作り直した最新版と比較は [MODELS.md](MODELS.md)。
 
 ## 1. 参考資料について
 

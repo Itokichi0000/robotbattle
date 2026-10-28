@@ -6,6 +6,11 @@ so the code-driven clips in animate.ts fit these models without retuning.
 Bones follow the limbs (arms/legs point down, the foot points forward, BackUnit
 points backward) like a normal game rig, so IK / mirroring work for animators.
 Every bone's local X axis is aligned to world +X: elbows and knees bend around X.
+
+On top of the 19 game joints, docs/design/visual-bible-v01/DESIGN_RULES_FOR_BLENDER.md asks
+for separate bones for the fingers, shoulder armour, thunder drums / wind ring and back fins
+(EXTRA_BONES). Spinner bones (Drum_L/R, WindRing) point along their spin axis, so rotating
+about the bone's own Y axis turns the drum disc / ring; the game does exactly that.
 """
 
 import bpy  # type: ignore
@@ -46,6 +51,53 @@ SKELETONS = {
 }
 
 
+def _fingers(hand_x, xs, knuckle_y, knuckle_z, tip_y, tip_z, thumb):
+    names = ("Index_L", "Middle_L", "Ring_L", "Pinky_L")
+    out = [
+        (n, "Hand_L", (x, knuckle_y, knuckle_z), (x, tip_y, tip_z), "Hand.L") for n, x in zip(names, xs, strict=True)
+    ]
+    out.append(("Thumb_L", "Hand_L", thumb[0], thumb[1], "Hand.L"))
+    return out
+
+
+# Per-robot extra bones (left side; _R mirrors are added automatically).
+EXTRA_BONES = {
+    "raijin": [
+        ("ShoulderArmor_L", "UpperArm_L", (1.22, 0, 3.5), (1.62, 0, 3.8), "Arm.L"),
+        *_fingers(
+            1.22,
+            [1.22 + (i - 1.5) * 0.158 for i in range(4)],
+            -0.31,
+            1.70,
+            -0.31,
+            1.40,
+            ((0.92, -0.12, 1.72), (0.92, -0.30, 1.56)),
+        ),
+        # Thunder drum behind the shoulder; the bone points along the drum axis (forward-out).
+        ("Drum_L", "BackUnit", (1.0, 0.70, 4.15), (1.0 + 0.3 * 0.309, 0.70 - 0.3 * 0.951, 4.15), "BackUnit"),
+    ],
+    "fujin": [
+        ("ShoulderArmor_L", "UpperArm_L", (0.9, 0, 3.72), (1.2, 0.12, 4.02), "Arm.L"),
+        *_fingers(
+            0.9,
+            [0.9 + (i - 1.5) * 0.055 for i in range(4)],
+            -0.04,
+            1.78,
+            -0.06,
+            1.58,
+            ((0.82, -0.06, 1.88), (0.80, -0.16, 1.74)),
+        ),
+        ("BackFin_L", "BackUnit", (0.14, 0.58, 3.62), (0.52, 0.78, 3.12), "BackUnit"),
+    ],
+}
+# Centre bones (no mirror).
+EXTRA_CENTRE = {
+    "raijin": [],
+    "fujin": [("WindRing", "BackUnit", (0, 0.62, 3.25), (0, 0.92, 3.25), "BackUnit")],
+}
+SPIN_BONES = ("Drum_L", "Drum_R", "WindRing")
+
+
 def _mirror(p):
     return (-p[0], p[1], p[2])
 
@@ -61,7 +113,10 @@ def _with_right_side(spec):
 
 
 def bone_spec(key):
-    return _with_right_side(SKELETONS[key])
+    return _with_right_side(SKELETONS[key] + EXTRA_BONES[key]) + EXTRA_CENTRE[key]
+
+
+GAME_JOINTS = [b[0] for b in _with_right_side(SKELETONS["raijin"])]
 
 
 def bone_head(key, name):

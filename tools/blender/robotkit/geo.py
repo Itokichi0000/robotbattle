@@ -183,3 +183,38 @@ def segments_xz(points, width, depth):
         v, f = tbox(width, depth, length)
         out.append((v, f, m))
     return out
+
+
+def tomoe(radius, count=3, sweep_deg=150.0, steps=16, depth=0.012):
+    """
+    Mitsudomoe (三つ巴) drum-head crest: `count` comma shapes swirling around Z, each a
+    prism `depth` thick (front face at z = +depth/2). Traditional pattern drawn from
+    scratch (the RAIJIN sheet shows it on the thunder drums). Returns [(verts, faces), ...].
+    Each comma has a round head near the centre and a tail that spirals outward and tapers
+    to a point near the rim, passing outside the next comma's head.
+    """
+    d, h, tip = 0.38 * radius, 0.24 * radius, 0.95 * radius
+    sweep = math.radians(sweep_deg)
+    out = []
+    for k in range(count):
+        a0 = math.tau * k / count
+        pts = []
+        for i in range(steps + 1):  # outer edge, tip → head
+            s = 1 - i / steps
+            th, r = -sweep * s, (d + h) + (tip - d - h) * s
+            pts.append((r * math.cos(th), r * math.sin(th)))
+        for i in range(1, steps):  # rounded head (outer → inner, leading side)
+            b = math.pi * i / steps
+            pts.append((d + h * math.cos(b), h * math.sin(b)))
+        for i in range(steps):  # inner edge spiralling out to the tip
+            s = i / steps
+            th, r = -sweep * s, (d - h) + (tip - d + h) * s
+            pts.append((r * math.cos(th), r * math.sin(th)))
+        ca, sa = math.cos(a0), math.sin(a0)
+        rot = [(x * ca - y * sa, x * sa + y * ca) for x, y in pts]
+        n = len(rot)
+        verts = [(x, y, -depth / 2) for x, y in rot] + [(x, y, depth / 2) for x, y in rot]
+        faces = [tuple(reversed(range(n))), tuple(range(n, 2 * n))]
+        faces += [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+        out.append((verts, faces))
+    return out

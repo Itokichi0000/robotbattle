@@ -4,8 +4,8 @@
   "ok": true,
   "blend": {
     "stage": "detail",
-    "parts": 29,
-    "triangles": 15624,
+    "parts": 31,
+    "triangles": 18086,
     "groups": {
       "head": [
         "FJ_Head"
@@ -45,20 +45,35 @@
         "FJ_Shoulder_R"
       ],
       "back": [
-        "FJ_WindRing",
-        "FJ_WindVeil"
+        "FJ_BackFin_L",
+        "FJ_BackFin_R",
+        "FJ_BackHub",
+        "FJ_WindRing"
       ]
     }
   },
   "glb": {
-    "triangles": 15624,
+    "triangles": 18086,
     "materials": [
-      "FJ_Body",
-      "FJ_Veil"
+      "FJ_Body"
     ],
-    "height": 5.227,
-    "bytes": 2342864
+    "height": 5.001,
+    "bytes": 3245280
   },
+  "lods": [
+    {
+      "level": 1,
+      "triangles": 15606,
+      "parts": 31,
+      "bytes": 1636780
+    },
+    {
+      "level": 2,
+      "triangles": 6692,
+      "parts": 31,
+      "bytes": 806364
+    }
+  ],
   "checks": [
     {
       "check": "collections",
@@ -75,7 +90,7 @@
     {
       "check": "bones match shared skeleton",
       "ok": true,
-      "detail": "19 bones"
+      "detail": "34 bones"
     },
     {
       "check": "joint positions match the in-game rig",
@@ -90,14 +105,16 @@
         "Arm.L",
         "Leg.L",
         "BackUnit",
+        "Hand.L",
         "Arm.R",
-        "Leg.R"
+        "Leg.R",
+        "Hand.R"
       ]
     },
     {
       "check": "parts",
       "ok": true,
-      "detail": 29
+      "detail": 31
     },
     {
       "check": "head/torso/arms/legs/joints/back all present",
@@ -108,11 +125,11 @@
         "arms": 8,
         "legs": 6,
         "joints": 9,
-        "back": 2
+        "back": 4
       }
     },
     {
-      "check": "every part rigidly skinned to one existing bone",
+      "check": "every vertex rigidly skinned to one existing bone",
       "ok": true,
       "detail": []
     },
@@ -134,7 +151,7 @@
     {
       "check": "atlas UVs on every atlas part",
       "ok": true,
-      "detail": "28 parts []"
+      "detail": "31 parts []"
     },
     {
       "check": "baked images packed",
@@ -160,26 +177,24 @@
       "check": "parts share the atlas material",
       "ok": true,
       "detail": [
-        "FJ_Body",
-        "FJ_Veil"
+        "FJ_Body"
       ]
     },
     {
       "check": "source materials kept for re-baking",
       "ok": true,
       "detail": [
-        "FJ_Armor",
         "FJ_Core",
-        "FJ_Dark",
         "FJ_Glow",
-        "FJ_Silver",
-        "FJ_Veil"
+        "FJ_GoldEdge",
+        "FJ_Navy",
+        "FJ_Porcelain"
       ]
     },
     {
-      "check": "triangle budget (≤ 60k target, 100k max)",
+      "check": "LOD0 triangle budget (≤ 50k, DESIGN_RULES)",
       "ok": true,
-      "detail": 15624
+      "detail": 18086
     },
     {
       "check": "GLB imports with one armature",
@@ -194,27 +209,47 @@
     {
       "check": "GLB parts",
       "ok": true,
-      "detail": 29
+      "detail": 31
     },
     {
       "check": "GLB triangles equal the .blend",
       "ok": true,
-      "detail": "15624 vs 15624"
+      "detail": "18086 vs 18086"
     },
     {
       "check": "GLB materials / textures",
       "ok": true,
-      "detail": "['FJ_Body', 'FJ_Veil'] / [(2048, 2048), (2048, 2048), (2048, 2048), (2048, 2048)]"
+      "detail": "['FJ_Body'] / [(2048, 2048), (2048, 2048), (2048, 2048), (2048, 2048)]"
     },
     {
       "check": "GLB height 4.5–5.5 m, standing on the ground",
       "ok": true,
-      "detail": "5.227 m, min z 0.003"
+      "detail": "5.001 m, min z 0.003"
     },
     {
       "check": "GLB has no animation clips (procedural clips drive it)",
       "ok": true,
       "detail": 0
+    },
+    {
+      "check": "LOD1: same skeleton",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "LOD1: ≤ 20000 triangles",
+      "ok": true,
+      "detail": 15606
+    },
+    {
+      "check": "LOD2: same skeleton",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "LOD2: ≤ 7000 triangles",
+      "ok": true,
+      "detail": 6692
     }
   ]
 }

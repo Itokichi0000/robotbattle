@@ -7,6 +7,7 @@ import { JOINT_NAMES } from './build';
 const _euler = new THREE.Euler();
 const _delta = new THREE.Quaternion();
 const _offset = new THREE.Vector3();
+const _yAxis = new THREE.Vector3(0, 1, 0);
 
 /**
  * Pose a joint whose rest frame is not the identity (GLB bones point along the limbs).
@@ -281,7 +282,14 @@ export function applyClip(
       rest.position.z + (q?.[2] ?? 0),
     );
   }
-  if (rig.backRest?.frame && rig.backRest.parentFrameInv)
+  if (rig.spinners?.length) {
+    // Drums / ring turn on their own axes; the BackUnit mount stays at rest.
+    if (rig.backRest) setFramed(rig.backUnit, rig.backRest, 0, 0, 0, undefined);
+    for (const sp of rig.spinners)
+      sp.object.quaternion
+        .copy(sp.rest)
+        .multiply(_delta.setFromAxisAngle(_yAxis, pose.backSpin * sp.sign));
+  } else if (rig.backRest?.frame && rig.backRest.parentFrameInv)
     setFramed(rig.backUnit, rig.backRest, 0, 0, pose.backSpin, undefined);
   else rig.backUnit.rotation.z = pose.backSpin;
   const k = pose.glow * (1 + energyGlow);

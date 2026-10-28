@@ -97,7 +97,52 @@ def _circuit(size, cells=12, seed=7):
     return img
 
 
-GENERATORS = {"seigaiha": _seigaiha, "circuit": _circuit}
+def _nodes(size, count=26, seed=11):
+    """
+    Lightning-Network-like motif: glowing nodes joined to their nearest neighbours by thin
+    straight routes (an abstract graph, not a real topology). Tileable.
+    """
+    rnd = random.Random(seed)
+    pts = []
+    while len(pts) < count:  # Poisson-disc style spacing so nodes do not clump
+        p = (rnd.random(), rnd.random())
+        if all(
+            min(abs(p[0] - q[0]), 1 - abs(p[0] - q[0])) ** 2 + min(abs(p[1] - q[1]), 1 - abs(p[1] - q[1])) ** 2 > 0.012
+            for q in pts
+        ):
+            pts.append(p)
+    img = np.zeros((size, size), dtype=np.float32)
+    y, x = np.mgrid[0:size, 0:size].astype(np.float32) / size
+
+    def wrap_d(a, b):
+        d = (a - b + 0.5) % 1.0 - 0.5
+        return d
+
+    edges = set()
+    for i, p in enumerate(pts):
+        near = sorted(
+            range(len(pts)),
+            key=lambda j: wrap_d(pts[j][0], p[0]) ** 2 + wrap_d(pts[j][1], p[1]) ** 2,
+        )[1:3]
+        for j in near:
+            edges.add((min(i, j), max(i, j)))
+    line_w = 0.006
+    for i, j in edges:
+        p, q = pts[i], pts[j]
+        vx, vy = wrap_d(q[0], p[0]), wrap_d(q[1], p[1])
+        px, py = wrap_d(x, p[0]), wrap_d(y, p[1])
+        L2 = vx * vx + vy * vy
+        t = np.clip((px * vx + py * vy) / L2, 0, 1)
+        d = np.hypot(px - t * vx, py - t * vy)
+        np.maximum(img, np.clip(1.0 - (d - line_w) * size / 1.5, 0, 1) * 0.85, out=img)
+    for p in pts:
+        d = np.hypot(wrap_d(x, p[0]), wrap_d(y, p[1]))
+        r = 0.022 + 0.012 * rnd.random()
+        np.maximum(img, np.clip(1.0 - (d - r) * size / 1.5, 0, 1), out=img)
+    return img
+
+
+GENERATORS = {"seigaiha": _seigaiha, "circuit": _circuit, "nodes": _nodes}
 
 
 def pattern_image(kind, size=512):
@@ -220,6 +265,8 @@ def detail(
     pattern_color=None,
     pattern_strength=0.0,
     pattern_patches=0.0,
+    pattern_tint=None,
+    seam_glow=None,
     bump=0.35,
 ):
     """Add procedural detail to a source material in place."""
@@ -234,6 +281,24 @@ def detail(
         g.link(base_out, compat.bsdf_input(g.bsdf, "Base Color"))
         base = base_out
         height = g.math("MULTIPLY", pm, -1.0)
+        if seam_glow:
+            # Glowing seams between armour blocks ("PoW" stacked-block look), in patches.
+            color, strength, patches = seam_glow
+            seam = pm
+            if patches:
+                obj, _n = g.coords()
+                nz = g.node("ShaderNodeTexNoise")
+                nz.inputs["Scale"].default_value = patches
+                nz.inputs["Detail"].default_value = 1.0
+                g.link(obj, nz.inputs["Vector"])
+                ramp = g.node("ShaderNodeMapRange", interpolation_type="SMOOTHSTEP")
+                ramp.inputs["From Min"].default_value = 0.52  # roughly a third of the seams glow
+                ramp.inputs["From Max"].default_value = 0.60
+                g.link(nz.outputs["Fac"], ramp.inputs["Value"])
+                seam = g.math("MULTIPLY", pm, ramp.outputs["Result"])
+            col = g.mix_color(seam, (0, 0, 0, 1), (*color, 1.0))
+            g.link(col, compat.bsdf_input(g.bsdf, "Emission Color", "Emission"))
+            compat.bsdf_input(g.bsdf, "Emission Strength").default_value = strength
 
     if pattern:
         pat = tiled_mask(g, pattern_image(pattern), pattern_scale)
@@ -258,6 +323,9 @@ def detail(
             h = g.math("MULTIPLY", mask, 0.5)
             height = h if height is None else g.math("ADD", height, h)
         else:  # glowing traces
+            if pattern_tint:  # darken the albedo under the traces so they read on light armour
+                tinted = g.mix_color(mask, base, (*pattern_tint, 1.0))
+                g.link(tinted, compat.bsdf_input(g.bsdf, "Base Color"))
             col = g.mix_color(mask, (0, 0, 0, 1), (*pattern_color, 1.0))
             g.link(col, compat.bsdf_input(g.bsdf, "Emission Color", "Emission"))
             compat.bsdf_input(g.bsdf, "Emission Strength").default_value = pattern_strength

@@ -10,6 +10,16 @@ import { inspect, parseGlb, REQUIRED_JOINTS } from '../inspect_glb.mjs';
  */
 const ROOT = resolve(import.meta.dirname, '../../..');
 const PARTS = ['head', 'torso', 'arms', 'legs', 'joints', 'back'];
+const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'].flatMap((f) => [`${f}_L`, `${f}_R`]);
+// Extra bones required by docs/design/visual-bible-v01/DESIGN_RULES_FOR_BLENDER.md.
+const EXTRA: Record<string, string[]> = {
+  raijin: [...FINGERS, 'ShoulderArmor_L', 'ShoulderArmor_R', 'Drum_L', 'Drum_R'],
+  fujin: [...FINGERS, 'ShoulderArmor_L', 'ShoulderArmor_R', 'WindRing', 'BackFin_L', 'BackFin_R'],
+};
+const load = (file: string) =>
+  parseGlb(
+    new Uint8Array(readFileSync(resolve(ROOT, `apps/web/public/assets/robots/${file}`))),
+  ) as GltfJson;
 
 interface GltfJson {
   extensionsRequired?: string[];
@@ -27,18 +37,19 @@ interface GltfJson {
 }
 
 describe.each(['raijin', 'fujin'])('%s.glb (committed asset)', (robot) => {
-  const json = parseGlb(
-    new Uint8Array(readFileSync(resolve(ROOT, `apps/web/public/assets/robots/${robot}.glb`))),
-  ) as GltfJson;
+  const json = load(`${robot}.glb`);
   const report = inspect(json);
 
   it('has every shared joint, one skin and stays inside the triangle budget', () => {
     expect(report.missingJoints).toEqual([]);
     expect(json.skins).toHaveLength(1);
     const jointNames = json.skins[0]!.joints.map((i) => json.nodes[i]!.name);
-    expect(jointNames).toEqual(expect.arrayContaining([...REQUIRED_JOINTS, 'BackUnit']));
+    expect(jointNames).toEqual(
+      expect.arrayContaining([...REQUIRED_JOINTS, 'BackUnit', ...EXTRA[robot]!]),
+    );
+    expect(jointNames.length).toBeLessThanOrEqual(64);
     expect(report.triangles).toBeGreaterThan(10_000);
-    expect(report.triangles).toBeLessThanOrEqual(60_000);
+    expect(report.triangles).toBeLessThanOrEqual(50_000); // DESIGN_RULES LOD0
   });
 
   it('keeps head / torso / arms / legs / joints / back as separate skinned parts', () => {
@@ -49,12 +60,10 @@ describe.each(['raijin', 'fujin'])('%s.glb (committed asset)', (robot) => {
     for (const g of PARTS) expect(groups).toContain(g);
   });
 
-  it('uses one atlas material with WebP textures (+ FUJIN translucent veil)', () => {
-    const opaque = json.materials.filter((m) => m.alphaMode !== 'BLEND');
-    expect(opaque).toHaveLength(1);
-    expect(opaque[0]!.normalTexture).toBeDefined();
-    expect(opaque[0]!.emissiveTexture).toBeDefined();
-    expect(json.materials.length).toBe(robot === 'fujin' ? 2 : 1);
+  it('uses one atlas material with WebP textures', () => {
+    expect(json.materials).toHaveLength(1);
+    expect(json.materials[0]!.normalTexture).toBeDefined();
+    expect(json.materials[0]!.emissiveTexture).toBeDefined();
     expect(json.images.length).toBe(4);
     for (const img of json.images) expect(img.mimeType).toBe('image/webp');
     expect(json.extensionsRequired).toContain('EXT_texture_webp');
@@ -72,5 +81,19 @@ describe.each(['raijin', 'fujin'])('%s.glb (committed asset)', (robot) => {
       }
     expect(normalMapped).toBeGreaterThanOrEqual(25);
     expect(json.animations ?? []).toHaveLength(0);
+  });
+
+  it.each([
+    [1, 20_000],
+    [2, 7_000],
+  ])('LOD%i keeps the skeleton and stays under %i triangles', (level, budget) => {
+    const lod = load(`${robot}_lod${level}.glb`);
+    const r = inspect(lod);
+    expect(r.missingJoints).toEqual([]);
+    expect(r.triangles).toBeLessThanOrEqual(budget);
+    expect(r.triangles).toBeLessThan(report.triangles);
+    // Far LODs drop the normal map (decimation leaves zero-area UV triangles; see export_lods).
+    expect(lod.materials[0]!.normalTexture).toBeUndefined();
+    expect(lod.images).toHaveLength(3);
   });
 });

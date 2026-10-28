@@ -14,6 +14,7 @@ Options:
                           detail = adds bevels/greebles and the baked texture atlas
     --no-render           skip preview renders (fast iteration)
     --previews-only       re-render the previews from the saved .blend (no rebuild / re-bake)
+    --lods-only           re-export <robot>_lod1/_lod2.glb from the saved .blend
     --skip-blend / --skip-glb
 """
 
@@ -64,6 +65,8 @@ def parse_args():
     ap.add_argument("--glb-dir", default=os.path.join(REPO, "apps", "web", "public", "assets", "robots"))
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--previews-only", action="store_true")
+    ap.add_argument("--lods-only", action="store_true")
+    ap.add_argument("--no-lods", action="store_true", help="skip <robot>_lod1.glb / _lod2.glb")
     ap.add_argument("--skip-blend", action="store_true")
     ap.add_argument("--skip-glb", action="store_true")
     ap.add_argument(
@@ -131,14 +134,11 @@ def build_one(key, args):
 
     glb_path = os.path.join(args.glb_dir, f"{key}.glb")
     if not args.skip_glb:
-        export.export_glb(
-            glb_path,
-            [arm, *objs],
-            export_image_format=args.image_format,
-            export_image_quality=90,
-            export_jpeg_quality=90,
-        )
+        fmt = {"export_image_format": args.image_format, "export_image_quality": 90, "export_jpeg_quality": 90}
+        export.export_glb(glb_path, [arm, *objs], **fmt)
         stats["glb_bytes"] = os.path.getsize(glb_path)
+        if not args.no_lods:
+            stats["lods"] = export.export_lods(glb_path, arm, objs, **fmt)
 
     # Preview stage lives in its own collection so it never ends up in the GLB.
     pv = bpy.data.collections.new("Preview")
@@ -184,12 +184,30 @@ def previews_only(key, args):
     export.write_json(stats_path, stats)
 
 
+def lods_only(key, args):
+    import json
+
+    out_dir = os.path.join(args.models_dir, key)
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(out_dir, f"{key}.blend"))
+    arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+    objs = [o for o in bpy.data.objects if o.type == "MESH" and o.get("sw_part")]
+    fmt = {"export_image_format": args.image_format, "export_image_quality": 90, "export_jpeg_quality": 90}
+    lods = export.export_lods(os.path.join(args.glb_dir, f"{key}.glb"), arm, objs, **fmt)
+    stats_path = os.path.join(out_dir, f"{key}_stats.json")
+    with open(stats_path, encoding="utf-8") as f:
+        stats = json.load(f)
+    stats["lods"] = lods
+    export.write_json(stats_path, stats)
+
+
 def main():
     args = parse_args()
     keys = DESIGNS if args.robot == "all" else (args.robot,)
     for key in keys:
         if args.previews_only:
             previews_only(key, args)
+        elif args.lods_only:
+            lods_only(key, args)
         else:
             build_one(key, args)
     print("[build] done")

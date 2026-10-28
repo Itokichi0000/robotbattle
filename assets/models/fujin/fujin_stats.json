@@ -1,42 +1,43 @@
 {
   "blender": "4.0.2",
-  "objects": 29,
-  "bones": 19,
-  "triangles": 15624,
+  "objects": 31,
+  "bones": 34,
+  "triangles": 18086,
   "triangles_per_object": {
-    "FJ_Chest": 1432,
+    "FJ_BackFin_L": 48,
+    "FJ_BackFin_R": 48,
+    "FJ_BackHub": 448,
+    "FJ_Chest": 2366,
     "FJ_Elbow_L": 156,
     "FJ_Elbow_R": 156,
     "FJ_Foot_L": 252,
     "FJ_Foot_R": 252,
     "FJ_Forearm_L": 412,
     "FJ_Forearm_R": 412,
-    "FJ_Hand_L": 240,
-    "FJ_Hand_R": 240,
-    "FJ_Head": 1216,
+    "FJ_Hand_L": 1132,
+    "FJ_Hand_R": 1132,
+    "FJ_Head": 1420,
     "FJ_HipJoint_L": 288,
     "FJ_HipJoint_R": 288,
-    "FJ_Hips": 340,
+    "FJ_Hips": 596,
     "FJ_Knee_L": 112,
     "FJ_Knee_R": 112,
     "FJ_Neck": 284,
-    "FJ_Pauldron_L": 496,
-    "FJ_Pauldron_R": 496,
-    "FJ_Shin_L": 264,
-    "FJ_Shin_R": 264,
+    "FJ_Pauldron_L": 236,
+    "FJ_Pauldron_R": 236,
+    "FJ_Shin_L": 592,
+    "FJ_Shin_R": 592,
     "FJ_Shoulder_L": 288,
     "FJ_Shoulder_R": 288,
     "FJ_Spine": 700,
-    "FJ_Thigh_L": 172,
-    "FJ_Thigh_R": 172,
-    "FJ_UpperArm_L": 364,
-    "FJ_UpperArm_R": 364,
-    "FJ_WindRing": 4200,
-    "FJ_WindVeil": 1364
+    "FJ_Thigh_L": 412,
+    "FJ_Thigh_R": 412,
+    "FJ_UpperArm_L": 408,
+    "FJ_UpperArm_R": 408,
+    "FJ_WindRing": 3600
   },
   "materials": [
-    "FJ_Body",
-    "FJ_Veil"
+    "FJ_Body"
   ],
   "images": [
     {
@@ -69,24 +70,40 @@
     }
   ],
   "bbox_min": [
-    -1.46,
+    -1.754,
     -0.581,
     0.003
   ],
   "bbox_max": [
-    1.46,
-    0.811,
-    5.23
+    1.754,
+    0.843,
+    5.004
   ],
-  "height": 5.227,
+  "height": 5.001,
   "robot": "fujin",
   "stage": "detail",
-  "glb_bytes": 2342864,
+  "glb_bytes": 3245280,
+  "lods": [
+    {
+      "level": 1,
+      "triangles": 15606,
+      "budget": 20000,
+      "texture": 1024,
+      "bytes": 1636780
+    },
+    {
+      "level": 2,
+      "triangles": 6692,
+      "budget": 7000,
+      "texture": 512,
+      "bytes": 806364
+    }
+  ],
   "previews": [
     "assets/models/fujin/previews/fujin_front.jpg",
     "assets/models/fujin/previews/fujin_side.jpg",
     "assets/models/fujin/previews/fujin_back.jpg",
     "assets/models/fujin/previews/fujin_45.jpg"
   ],
-  "build_seconds": 805.1
+  "build_seconds": 812.5
 }

@@ -84,25 +84,19 @@ def validate_blend(path, key, rep):
     bad_skin, bad_mesh, nan = [], [], []
     for o in parts:
         mods = [m for m in o.modifiers if m.type == "ARMATURE"]
-        vg = o.vertex_groups
-        bone = o.get("sw_bone")
-        weights_ok = True
-        if len(vg) == 1 and vg[0].name == bone:
-            gi = vg[0].index
-            for v in o.data.vertices:
-                w = [g.weight for g in v.groups if g.group == gi]
-                if not w or abs(w[0] - 1.0) > 1e-6:
-                    weights_ok = False
-                    break
-        else:
-            weights_ok = False
-        if not (o.parent == arm and len(mods) == 1 and mods[0].object == arm and bone in bones and weights_ok):
+        names = {g.index: g.name for g in o.vertex_groups}
+        weights_ok = o.get("sw_bone") in names.values() and set(names.values()) <= set(bones)
+        for v in o.data.vertices:  # rigid: every vertex 100% on exactly one bone
+            if len(v.groups) != 1 or abs(v.groups[0].weight - 1.0) > 1e-6:
+                weights_ok = False
+                break
+        if not (o.parent == arm and len(mods) == 1 and mods[0].object == arm and weights_ok):
             bad_skin.append(o.name)
         if o.data.validate(verbose=False):  # True = it had to fix something
             bad_mesh.append(o.name)
         if any(not all(math.isfinite(c) for c in v.co) for v in o.data.vertices):
             nan.append(o.name)
-    rep.check("every part rigidly skinned to one existing bone", not bad_skin, bad_skin)
+    rep.check("every vertex rigidly skinned to one existing bone", not bad_skin, bad_skin)
     rep.check("mesh data valid", not bad_mesh, bad_mesh)
     rep.check("no NaN vertices", not nan, nan)
     rep.check("no text / logo objects", not [o for o in bpy.data.objects if o.type == "FONT"])
@@ -112,7 +106,9 @@ def validate_blend(path, key, rep):
         body = f"{pre}_Body"
         atlas_parts = [o for o in parts if any(sl.material and sl.material.name == body for sl in o.material_slots)]
         no_uv = [o.name for o in atlas_parts if "UVMap" not in o.data.uv_layers]
-        rep.check("atlas UVs on every atlas part", len(atlas_parts) >= 25 and not no_uv, f"{len(atlas_parts)} parts {no_uv}")
+        rep.check(
+            "atlas UVs on every atlas part", len(atlas_parts) >= 25 and not no_uv, f"{len(atlas_parts)} parts {no_uv}"
+        )
         imgs = [i for i in bpy.data.images if i.name.startswith(f"{pre}_")]
         rep.check("baked images packed", imgs and all(i.packed_file for i in imgs), [i.name for i in imgs])
         rep.check(
@@ -125,7 +121,7 @@ def validate_blend(path, key, rep):
         sources = [m.name for m in bpy.data.materials if m.use_fake_user]
         rep.check("source materials kept for re-baking", len(sources) >= 4, sources)
     tris = tris_of(parts)
-    rep.check("triangle budget (≤ 60k target, 100k max)", tris <= 60000, tris)
+    rep.check("LOD0 triangle budget (≤ 50k, DESIGN_RULES)", tris <= 50000, tris)
     return {"stage": stage, "parts": len(parts), "triangles": tris, "groups": groups}
 
 
@@ -163,6 +159,23 @@ def validate_glb(path, key, blend_tris, rep):
     return {"triangles": tris, "materials": sorted(mats), "height": round(height, 3), "bytes": os.path.getsize(path)}
 
 
+LOD_BUDGETS = {1: 20_000, 2: 7_000}  # DESIGN_RULES_FOR_BLENDER.md (LOD0 ≤ 50k is checked on the .blend)
+
+
+def validate_lod(path, key, level, rep):
+    print(f"[validate] {path}")
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=path)
+    arms = [o for o in bpy.data.objects if o.type == "ARMATURE"]
+    meshes = [o for o in bpy.data.objects if o.type == "MESH" and any(m.type == "ARMATURE" for m in o.modifiers)]
+    bones = {b.name for b in arms[0].data.bones} if arms else set()
+    spec = {b[0] for b in rig.bone_spec(key)}
+    tris = tris_of(meshes)
+    rep.check(f"LOD{level}: same skeleton", len(arms) == 1 and spec <= bones, sorted(spec - bones))
+    rep.check(f"LOD{level}: ≤ {LOD_BUDGETS[level]} triangles", tris <= LOD_BUDGETS[level], tris)
+    return {"level": level, "triangles": tris, "parts": len(meshes), "bytes": os.path.getsize(path)}
+
+
 def script_args():
     """Arguments after `--` (blender -P script.py -- ...), or argv[1:] when run with the bpy module."""
     if "--" in sys.argv:
@@ -187,12 +200,14 @@ def main():
         rep = Report()
         blend = validate_blend(os.path.join(args.models_dir, key, f"{key}.blend"), key, rep)
         glb = validate_glb(os.path.join(args.glb_dir, f"{key}.glb"), key, blend["triangles"], rep)
+        lods = [validate_lod(os.path.join(args.glb_dir, f"{key}_lod{n}.glb"), key, n, rep) for n in LOD_BUDGETS]
         out = {
             "robot": key,
             "blender": bpy.app.version_string,
             "ok": rep.ok,
             "blend": blend,
             "glb": glb,
+            "lods": lods,
             "checks": rep.checks,
         }
         path = os.path.join(args.models_dir, key, f"{key}_validation.json")

@@ -41,6 +41,8 @@
   `validate_robot.py` で再読込検証（パーツ別オブジェクト、共通スケルトン、剛体スキン、2048 アトラスのベイク、WebP）
 - ✅ three.js 表示テスト `tools/model-viewer`（`pnpm models:test`）：GLB 読込・構造・4方向描画・手続き型クリップでの関節一致
 - ✅ 手続き型アニメーションがボーン向きの異なる GLB スケルトンも正しく動かす（`robots/glbRig.ts`、ユニットテスト）
+- ✅ 設定画 `docs/design/visual-bible-v01/` に合わせて雷神・風神を作り直し（追加ボーン：指・肩装甲・雷鼓・風環・背面フィン、LOD1/LOD2）
+- ⬜ 設定画のアリーナ（鳥居・石段・浮遊灯籠・LED リング、`03_ARENA_Event_Design_Sheet.png`）の 3D 化
 - ⬜ アリーナで Blender 版 GLB を既定にする（`apps/web/public/assets/robots/manifest.json` を置くだけ。**オーナー判断待ち**）
 - ⬜ 人間アーティストによる造形の最終判断・ベイク済みアニメーション、`arena.glb`、LOD、KTX2 圧縮
 - ⬜ ポストプロセス（控えめなブルーム）、必殺技専用カメラワークの強化

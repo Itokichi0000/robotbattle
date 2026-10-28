@@ -1,36 +1,37 @@
 {
   "blender": "4.0.2",
-  "objects": 29,
-  "bones": 19,
-  "triangles": 26776,
+  "objects": 30,
+  "bones": 33,
+  "triangles": 26200,
   "triangles_per_object": {
-    "RJ_BackMount": 44,
-    "RJ_Chest": 3176,
-    "RJ_DrumRing": 7684,
+    "RJ_BackMount": 1592,
+    "RJ_Chest": 3332,
+    "RJ_Drum_L": 2168,
+    "RJ_Drum_R": 2168,
     "RJ_Elbow_L": 264,
     "RJ_Elbow_R": 264,
     "RJ_Foot_L": 552,
     "RJ_Foot_R": 552,
-    "RJ_Forearm_L": 828,
-    "RJ_Forearm_R": 828,
-    "RJ_Hand_L": 928,
-    "RJ_Hand_R": 928,
-    "RJ_Head": 2164,
+    "RJ_Forearm_L": 720,
+    "RJ_Forearm_R": 720,
+    "RJ_Hand_L": 1408,
+    "RJ_Hand_R": 1408,
+    "RJ_Head": 2480,
     "RJ_HipJoint_L": 288,
     "RJ_HipJoint_R": 288,
-    "RJ_Hips": 1128,
-    "RJ_Knee_L": 160,
-    "RJ_Knee_R": 160,
+    "RJ_Hips": 1844,
+    "RJ_Knee_L": 268,
+    "RJ_Knee_R": 268,
     "RJ_Neck": 284,
-    "RJ_Pauldron_L": 1020,
-    "RJ_Pauldron_R": 1020,
+    "RJ_Pauldron_L": 540,
+    "RJ_Pauldron_R": 540,
     "RJ_Shin_L": 696,
     "RJ_Shin_R": 696,
     "RJ_Shoulder_L": 288,
     "RJ_Shoulder_R": 288,
-    "RJ_Spine": 704,
-    "RJ_Thigh_L": 272,
-    "RJ_Thigh_R": 272,
+    "RJ_Spine": 500,
+    "RJ_Thigh_L": 392,
+    "RJ_Thigh_R": 392,
     "RJ_UpperArm_L": 500,
     "RJ_UpperArm_R": 500
   },
@@ -68,24 +69,40 @@
     }
   ],
   "bbox_min": [
-    -2.06,
-    -0.745,
+    -2.041,
+    -0.715,
     -0.0
   ],
   "bbox_max": [
-    2.06,
-    1.05,
-    5.084
+    2.041,
+    1.068,
+    5.134
   ],
-  "height": 5.084,
+  "height": 5.134,
   "robot": "raijin",
   "stage": "detail",
-  "glb_bytes": 3994456,
+  "glb_bytes": 3724200,
+  "lods": [
+    {
+      "level": 1,
+      "triangles": 11484,
+      "budget": 20000,
+      "texture": 1024,
+      "bytes": 1451704
+    },
+    {
+      "level": 2,
+      "triangles": 6702,
+      "budget": 7000,
+      "texture": 512,
+      "bytes": 851708
+    }
+  ],
   "previews": [
     "assets/models/raijin/previews/raijin_front.jpg",
     "assets/models/raijin/previews/raijin_side.jpg",
     "assets/models/raijin/previews/raijin_back.jpg",
     "assets/models/raijin/previews/raijin_45.jpg"
   ],
-  "build_seconds": 747.5
+  "build_seconds": 878.7
 }
