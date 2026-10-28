@@ -1,144 +1,171 @@
 import type {
+  CityState,
   Enemy,
-  EnemyKind,
-  EnemyStats,
+  EnergySink,
+  Facility,
   GameConfig,
-  MatchState,
+  RaidPhase,
+  RaidState,
   RegionId,
-  RegionState,
-  ResolvedAction,
+  RepairTarget,
+  RobotId,
+  RobotState,
+  Role,
+  Telegraph,
+  Weakpoint,
 } from '@sats-wars/shared';
-import { REGION_IDS } from '@sats-wars/shared';
+import { CITY_INFO, REGION_IDS } from '@sats-wars/shared';
 
-/** Alien stats for a wave: HP and attack grow a little every wave. */
-export function enemyStats(c: GameConfig, kind: EnemyKind, wave: number): EnemyStats {
-  const base: EnemyStats = kind === 'SCOUT' ? c.scout : kind === 'WALKER' ? c.walker : c.mothership;
-  const w = Math.max(0, wave - 1);
-  return {
-    hp: Math.round(base.hp * (1 + c.hpGrowthPerWave * w)),
-    attack: Math.round(base.attack * (1 + c.attackGrowthPerWave * w)),
-  };
+/** Read-only view the helpers need (also buildable from a public snapshot). */
+export type Board = Pick<
+  RaidState,
+  'config' | 'cities' | 'robots' | 'enemies' | 'telegraphs' | 'bossId' | 'reserveEnergy' | 'jammedUntil' | 'gameMs' | 'phase'
+>;
+
+export const ms = (seconds: number) => seconds * 1000;
+
+export function standingCities(cities: Record<RegionId, CityState>): RegionId[] {
+  return REGION_IDS.filter((id) => !cities[id].destroyed);
 }
 
-export function waveSize(c: GameConfig, wave: number): number {
-  return c.waveBase + c.waveGrowth * wave;
+/** A facility works while its city stands. */
+export function facilityActive(b: Pick<Board, 'cities'>, f: Facility): boolean {
+  const id = REGION_IDS.find((r) => CITY_INFO[r].facility === f)!;
+  return !b.cities[id].destroyed;
 }
 
-export function isBossWave(c: GameConfig, wave: number): boolean {
-  return wave % c.bossEvery === 0;
+/** Phase for a game time (combat only). */
+export function phaseAt(c: GameConfig, gameMs: number): RaidPhase {
+  const p = c.phaseStartsSeconds;
+  if (gameMs >= ms(p.FINAL_WAVE)) return 'FINAL_WAVE';
+  if (gameMs >= ms(p.WAVE_3)) return 'WAVE_3';
+  if (gameMs >= ms(p.WAVE_2)) return 'WAVE_2';
+  if (gameMs >= ms(p.WAVE_1)) return 'WAVE_1';
+  return 'INTRO_TRAINING';
 }
 
-/** Wave landings per alien turn (spreading from captured regions comes on top). */
-export function landingsPerTurn(c: GameConfig, wave: number): number {
-  return 1 + Math.floor((wave - 1) / c.landingsStepWaves);
+/** Pilots seen (boarded, asked for or finished a task) within the active window. */
+export function activePilotIds(s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>): string[] {
+  const since = s.gameMs - ms(s.config.activeWindowSeconds);
+  return Object.values(s.pilots)
+    .filter((p) => p.lastActiveAt >= since)
+    .map((p) => p.pilotId);
 }
 
-export interface RegionThreat {
-  regionId: RegionId;
-  /** City damage at the next alien turn, after the barrier. */
-  damageNext: number;
-  willFall: boolean;
-  enemies: number;
-  enemyHp: number;
-  /** Aliens announced to land here next turn. */
-  landing: number;
+/** Enemy HP multiplier from the (smoothed) number of active pilots. */
+export function difficultyScale(c: GameConfig, activePilots: number): number {
+  return Math.min(c.difficultyMaxScale, Math.max(c.difficultyMinScale, activePilots / c.difficultyReferencePilots));
 }
 
 /**
- * What the next alien turn will do, region by region. This is exactly what
- * the engine will apply (no randomness in attacks), so screens can show it as
- * a promise: "Tohoku falls next turn unless you act".
+ * Crowd normalisation per seat: a seat runs at full strength with up to
+ * `roleFairShare` of the active crew in it (at least one pilot). More pilots
+ * succeeding in the same seat recently share that strength, so spreading over
+ * all four seats is always stronger than piling onto one.
  */
-export function threats(s: Pick<MatchState, 'regions' | 'enemies' | 'incoming'>): Record<RegionId, RegionThreat> {
-  const out = {} as Record<RegionId, RegionThreat>;
+export function roleScale(s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>, role: Role, includePilotId?: string): number {
+  const since = s.gameMs - ms(s.config.activeWindowSeconds);
+  const ids = new Set(
+    Object.values(s.pilots)
+      .filter((p) => (p.lastSuccessAt[role] ?? -Infinity) >= since)
+      .map((p) => p.pilotId),
+  );
+  if (includePilotId) ids.add(includePilotId);
+  const fair = Math.max(1, activePilotIds(s).length * s.config.roleFairShare);
+  return Math.min(1, fair / Math.max(1, ids.size));
+}
+
+/** Seat effect multiplier of a robot: health, damaged component and stored energy. */
+export function robotPower(c: GameConfig, r: RobotState): number {
+  const health = 0.6 + (0.4 * r.health) / 100;
+  const component = r.componentDamaged ? c.damagedComponentFactor : 1;
+  return health * component * (1 + (c.energyBoostMax * r.energy) / 100);
+}
+
+export const ROBOT_FOR_ROLE: Partial<Record<Role, RobotId>> = { GUNNER: 'RAIJIN', GUARDIAN: 'FUJIN' };
+
+export function liveEnemies(b: Pick<Board, 'enemies'>): Enemy[] {
+  return b.enemies.filter((e) => e.hp > 0);
+}
+
+/** Threats in the order they will land. */
+export function upcomingTelegraphs(b: Pick<Board, 'telegraphs'>): Telegraph[] {
+  return [...b.telegraphs].sort((a, z) => a.resolvesAt - z.resolvesAt || a.id - z.id);
+}
+
+/** Damage each city would take from the pending telegraphs (after current shields). */
+export function pendingCityDamage(b: Pick<Board, 'telegraphs' | 'cities' | 'enemies'>): Partial<Record<RegionId, number>> {
+  const raw: Partial<Record<RegionId, number>> = {};
+  for (const t of b.telegraphs) {
+    const e = b.enemies.find((x) => x.id === t.enemyId);
+    const dmg = Math.round(t.damage * (1 - (e?.weaken ?? 0)));
+    for (const id of t.targets) raw[id] = (raw[id] ?? 0) + dmg;
+  }
+  const out: Partial<Record<RegionId, number>> = {};
   for (const id of REGION_IDS) {
-    const r = s.regions[id];
-    const here = s.enemies.filter((e) => e.regionId === id);
-    const raw = r.fallen ? 0 : here.reduce((a, e) => a + e.attack, 0);
-    const damageNext = Math.max(0, raw - r.shield);
-    out[id] = {
-      regionId: id,
-      damageNext,
-      willFall: !r.fallen && damageNext > 0 && damageNext >= r.cityHp,
-      enemies: here.length,
-      enemyHp: here.reduce((a, e) => a + e.hp, 0),
-      landing: s.incoming.filter((l) => l.regionId === id).length,
-    };
+    const d = (raw[id] ?? 0) - b.cities[id].shield;
+    if (d > 0 && !b.cities[id].destroyed) out[id] = d;
   }
   return out;
 }
 
-export interface PlannedAction {
-  action: ResolvedAction;
-  regionId: RegionId;
-  enemyId?: number;
+// ---------------------------------------------------------------------------
+// Recommendations ("今の緊急ミッション") — also the default target of a seat
+// ---------------------------------------------------------------------------
+
+export function recommendGunnerTarget(b: Board): { enemyId: number; weakpoint: Weakpoint } | null {
+  const enemies = liveEnemies(b);
+  if (!enemies.length) return null;
+  const boss = enemies.find((e) => e.id === b.bossId);
+  const pending = pendingCityDamage(b);
+  const lethal = (t: Telegraph) => t.targets.some((id) => (pending[id] ?? 0) >= b.cities[id].hp);
+  // Stop an escort whose attack would destroy a city; otherwise the boss is the job.
+  const urgent = upcomingTelegraphs(b).find((t) => t.enemyId !== b.bossId && lethal(t) && enemies.some((e) => e.id === t.enemyId));
+  if (urgent) return { enemyId: urgent.enemyId, weakpoint: 'CORE' };
+  if (boss) return { enemyId: boss.id, weakpoint: boss.weaken < b.config.gunner.armWeakenMax && boss.partHits.ARM < 2 ? 'ARM' : 'CORE' };
+  const next = upcomingTelegraphs(b).find((t) => enemies.some((e) => e.id === t.enemyId));
+  if (next) return { enemyId: next.enemyId, weakpoint: 'CORE' };
+  return { enemyId: [...enemies].sort((a, z) => a.hp - z.hp || a.id - z.id)[0]!.id, weakpoint: 'CORE' };
 }
 
-/**
- * The "おすすめ" button: a sensible move for someone who just wants to help.
- * 1. Fire the combo when it is ready and worth it.
- * 2. Save the region in the most danger: kill what can be killed, sweep a
- *    crowd with FUJIN, or raise a barrier if it cannot be saved in time.
- * 3. Otherwise liberate the easiest captured region, then thin out aliens.
- * Deterministic for a given state (ties broken by region order / enemy id).
- */
-/** The parts of the state the hint helpers read (also buildable from a public snapshot). */
-export type Board = Pick<MatchState, 'config' | 'regions' | 'enemies' | 'incoming' | 'combo' | 'actionsThisTurn'>;
-
-export function recommendAction(s: Board): PlannedAction | null {
-  const c = s.config;
-  const th = threats(s);
-  const enemiesIn = (id: RegionId) => s.enemies.filter((e) => e.regionId === id);
-  const standing = REGION_IDS.filter((id) => !s.regions[id].fallen);
-  const danger = (id: RegionId) => th[id].damageNext / Math.max(1, s.regions[id].cityHp);
-  const hot = standing.filter((id) => enemiesIn(id).length > 0).sort((a, b) => danger(b) - danger(a));
-  const actionsLeft = Math.max(1, c.actionsPerTurn - s.actionsThisTurn);
-
-  if (s.combo >= c.comboGaugeMax) {
-    const best = [...REGION_IDS]
-      .filter((id) => enemiesIn(id).length > 0)
-      .sort((a, b) => th[b].enemyHp - th[a].enemyHp)[0];
-    if (best && (enemiesIn(best).length >= 2 || enemiesIn(best).some((e) => e.kind === 'MOTHERSHIP'))) {
-      return { action: 'COMBO', regionId: best };
-    }
+/** The threat a GUARDIAN should cover: soonest one that would really hurt. */
+export function recommendGuardianTarget(b: Board): { telegraphId: number; cityId: RegionId } | { cityId: RegionId } {
+  const pending = pendingCityDamage(b);
+  for (const t of upcomingTelegraphs(b)) {
+    const city = t.targets.find((id) => (pending[id] ?? 0) > 0);
+    if (city) return { telegraphId: t.id, cityId: city };
   }
-
-  const strike = (id: RegionId): PlannedAction => {
-    const here = enemiesIn(id);
-    if (here.length >= 3 && c.fujinDamage * here.length > c.raijinDamage) return { action: 'FUJIN', regionId: id };
-    // Prefer an alien this hit finishes (removes its attack now), else the hardest hitter.
-    const killable = here.filter((e) => e.hp <= c.raijinDamage).sort((a, b) => b.attack - a.attack || a.id - b.id)[0];
-    const target = killable ?? [...here].sort((a, b) => b.attack - a.attack || a.hp - b.hp || a.id - b.id)[0]!;
-    return { action: 'RAIJIN', regionId: id, enemyId: target.id };
-  };
-
-  const top = hot[0];
-  if (top && danger(top) > 0) {
-    const region = s.regions[top];
-    const canKillInTime = th[top].enemyHp <= c.raijinDamage * actionsLeft;
-    if (th[top].willFall && !canKillInTime && region.shield === 0) return { action: 'SHIELD', regionId: top };
-    return strike(top);
-  }
-
-  const captured = REGION_IDS.filter((id) => s.regions[id].fallen && enemiesIn(id).length > 0).sort(
-    (a, b) => th[a].enemyHp - th[b].enemyHp,
-  );
-  if (captured[0]) return strike(captured[0]);
-
-  const any = [...REGION_IDS].filter((id) => enemiesIn(id).length > 0).sort((a, b) => th[b].enemyHp - th[a].enemyHp)[0];
-  if (any) return strike(any);
-
-  // Nothing to hit: protect where the next landing comes down.
-  const landing = standing.filter((id) => th[id].landing > 0 && s.regions[id].shield === 0)[0];
-  if (landing) return { action: 'SHIELD', regionId: landing };
-  return null;
+  const first = upcomingTelegraphs(b)[0];
+  if (first) return { telegraphId: first.id, cityId: first.targets[0]! };
+  // No threat: pre-shield the weakest standing city.
+  const standing = standingCities(b.cities).sort((a, z) => b.cities[a].hp + b.cities[a].shield - (b.cities[z].hp + b.cities[z].shield));
+  return { cityId: standing[0] ?? 'kanto' };
 }
 
-/** Regions still standing. */
-export function standingRegions(regions: Record<RegionId, RegionState>): RegionId[] {
-  return REGION_IDS.filter((id) => !regions[id].fallen);
+export function recommendSink(b: Board): EnergySink {
+  const late = b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE';
+  if (late && b.reserveEnergy < b.config.special.energyMinimum) return 'RESERVE';
+  return b.robots.RAIJIN.energy <= b.robots.FUJIN.energy ? 'RAIJIN' : 'FUJIN';
 }
 
-export function totalEnemyHp(enemies: Enemy[]): number {
-  return enemies.reduce((a, e) => a + e.hp, 0);
+export function recommendRepair(b: Board): RepairTarget {
+  if (b.jammedUntil > b.gameMs) return { type: 'UNJAM' };
+  const robots = (['RAIJIN', 'FUJIN'] as const).filter((r) => b.robots[r].componentDamaged);
+  if (robots.length) return { type: 'ROBOT', robot: robots.sort((a, z) => b.robots[a].health - b.robots[z].health)[0]! };
+  const rebuild = REGION_IDS.find((id) => b.cities[id].destroyed && b.cities[id].rebuildReadyAt <= b.gameMs);
+  if (rebuild) return { type: 'CITY', cityId: rebuild };
+  const hurt = standingCities(b.cities)
+    .filter((id) => b.cities[id].hp < b.config.cityMaxHp)
+    .sort((a, z) => b.cities[a].hp - b.cities[z].hp);
+  if (hurt[0]) return { type: 'CITY', cityId: hurt[0] };
+  return { type: 'ROBOT', robot: b.robots.RAIJIN.health <= b.robots.FUJIN.health ? 'RAIJIN' : 'FUJIN' };
+}
+
+/** Which seat the raid needs most right now (shown as "必要な役割"). */
+export function neededRole(b: Board): Role {
+  const pending = pendingCityDamage(b);
+  if (Object.keys(pending).length) return 'GUARDIAN';
+  if (b.jammedUntil > b.gameMs || b.robots.RAIJIN.componentDamaged || b.robots.FUJIN.componentDamaged) return 'ENGINEER';
+  if ((b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE') && b.reserveEnergy < b.config.special.energyMinimum) return 'ROUTER';
+  return 'GUNNER';
 }

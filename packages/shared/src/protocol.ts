@@ -1,105 +1,260 @@
 import { z } from 'zod';
 import type { GameConfig } from './config';
-import type { GameEvent } from './events';
+import type { CrewMember, GameEvent } from './events';
 import type {
-  ActionResult,
-  CampaignResult,
-  CampaignStats,
+  CityState,
   Enemy,
-  Landing,
-  MatchStatus,
-  RegionState,
+  PilotStats,
+  RaidPhase,
+  RaidResult,
+  RaidStats,
+  RaidStatus,
+  RobotState,
+  SpecialState,
+  Task,
+  TaskResult,
+  Telegraph,
 } from './state';
-import { PLAYER_ACTIONS } from './state';
+import { DIRECTIONS, ENERGY_SINKS, ROBOTS, ROLES, WEAKPOINTS } from './state';
 import { REGION_IDS } from './regions';
 
 // ---------------------------------------------------------------------------
-// Public snapshot (safe for the venue screen: no payment data, nicknames moderated)
+// Public snapshot (safe for the venue screen: no payment data, moderated names)
 // ---------------------------------------------------------------------------
-
-export interface PublicMatchSnapshot {
-  matchId: string;
-  configVersion: string;
-  config: GameConfig;
-  status: MatchStatus;
-  pausedFrom: MatchStatus | null;
-  pauseReason: string | null;
-  clockMs: number;
-  gameMs: number;
-  liveStartClock: number | null;
-  /** True while the game clock advances. */
-  running: boolean;
-  /** Server epoch ms when this snapshot was produced. */
-  serverTime: number;
-  wave: number;
-  waveRemaining: number;
-  actionsThisTurn: number;
-  combo: number;
-  /** In REGION_IDS order. */
-  regions: RegionState[];
-  enemies: Enemy[];
-  incoming: Landing[];
-  stats: CampaignStats;
-  result: CampaignResult | null;
-  lastSeq: number;
-  recentEvents: GameEvent[];
-  /** Players active in the last few minutes (everyone is on the same side). */
-  playersOnline: number;
-  /** Best wave reached by any campaign (all-time on this server). */
-  bestWave: number;
-  paymentsEnabled: boolean;
-  paymentMode: PaymentMode;
-  playUrl: string;
-}
-
-/** Lightweight heartbeat so clients keep timers aligned without full snapshots. */
-export interface ClockTick {
-  matchId: string;
-  status: MatchStatus;
-  clockMs: number;
-  gameMs: number;
-  liveStartClock: number | null;
-  running: boolean;
-  serverTime: number;
-  lastSeq: number;
-}
 
 export const PAYMENT_MODES = ['mock', 'lnbits'] as const;
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 
-// ---------------------------------------------------------------------------
-// REST
-// ---------------------------------------------------------------------------
+/** How pilots get into a raid: free event, or a 21-sat pass (sponsored passes always work). */
+export const PASS_MODES = ['FREE', 'PAID'] as const;
+export type PassMode = (typeof PASS_MODES)[number];
 
-export const NICKNAME_MAX_LENGTH = 12;
-
-export const joinRequestSchema = z.object({
-  nickname: z.string().max(64).optional().default(''),
-  /** Random per-device id; limits duplicate players per device. */
-  deviceId: z.string().min(8).max(128).optional(),
-});
-export type JoinRequest = z.infer<typeof joinRequestSchema>;
-
-export interface JoinResponse {
-  playerId: string;
-  /** Bearer token. Store client-side; sent as Authorization header. */
-  token: string;
-  nickname: string;
-  creditSats: number;
+export interface Broadcast {
+  id: string;
+  messageJa: string;
+  messageEn: string;
+  until: number;
 }
 
-export const nicknameChangeSchema = z.object({ nickname: z.string().max(64) });
+export interface PublicRaidSnapshot {
+  raidId: string;
+  configVersion: string;
+  configHash: string;
+  config: GameConfig;
+  status: RaidStatus;
+  phase: RaidPhase;
+  pausedFrom: RaidStatus | null;
+  pauseReason: string | null;
+  clockMs: number;
+  gameMs: number;
+  liveStartClock: number | null;
+  /** True while the raid clock advances. */
+  running: boolean;
+  /** Server epoch ms when this snapshot was produced. */
+  serverTime: number;
+  cities: CityState[];
+  robots: RobotState[];
+  reserveEnergy: number;
+  jammedUntil: number;
+  enemies: Enemy[];
+  telegraphs: Telegraph[];
+  bossId: number | null;
+  sync: number;
+  special: SpecialState;
+  stats: RaidStats;
+  result: RaidResult | null;
+  crew: CrewMember[];
+  lastSeq: number;
+  recentEvents: GameEvent[];
+  // ---- server-side additions ----
+  /** Lobby epoch ms at which the raid auto-starts (null when not counting down). */
+  lobbyEndsAt: number | null;
+  /** Boarding (new pilots) is open right now. */
+  joinOpen: boolean;
+  passMode: PassMode;
+  ticketPriceSats: number;
+  paymentsEnabled: boolean;
+  paymentMode: PaymentMode;
+  playUrl: string;
+  eventId: string;
+  broadcast: Broadcast | null;
+  /** Operators hid all pilot names on the venue screen. */
+  namesHidden: boolean;
+  demoMode: boolean;
+  /** Best total score for this config hash (same-rules leaderboard). */
+  bestScore: number | null;
+}
 
-export const topupRequestSchema = z.object({ amountSats: z.number().int().positive() });
+/** Lightweight heartbeat so clients keep timers aligned without full snapshots. */
+export interface ClockTick {
+  raidId: string;
+  status: RaidStatus;
+  clockMs: number;
+  gameMs: number;
+  liveStartClock: number | null;
+  running: boolean;
+  serverTime: number;
+  lastSeq: number;
+}
+
+// ---------------------------------------------------------------------------
+// Pilots, sessions, passport
+// ---------------------------------------------------------------------------
+
+export const CALLSIGN_MAX_LENGTH = 20;
+export const AVATAR_PRESETS = ['standard', 'visor', 'samurai', 'aero', 'medic', 'scout'] as const;
+export type AvatarPreset = (typeof AVATAR_PRESETS)[number];
+
+export const AUTH_TYPES = ['GUEST', 'LIGHTNING', 'MOCK'] as const;
+export type AuthType = (typeof AUTH_TYPES)[number];
+
+export const guestRequestSchema = z.object({
+  callsign: z.string().max(64).optional().default(''),
+  /** Random per-device id; limits duplicate guests per device. */
+  deviceId: z.string().min(8).max(128).optional(),
+});
+
+export const profilePatchSchema = z.object({
+  callsign: z.string().max(64).optional(),
+  avatar: z.enum(AVATAR_PRESETS).optional(),
+  showNameOnArena: z.boolean().optional(),
+  locale: z.enum(['ja', 'en']).optional(),
+  reducedMotion: z.boolean().optional(),
+  assistMode: z.boolean().optional(),
+});
+export type ProfilePatch = z.infer<typeof profilePatchSchema>;
+
+export interface PilotProfile {
+  pilotId: string;
+  callsign: string;
+  avatar: AvatarPreset;
+  authType: AuthType;
+  /** Lightning key linked (LNURL-auth). Not an identity check. */
+  lightningLinked: boolean;
+  rank: number;
+  sorties: number;
+  victories: number;
+  titles: string[];
+  showNameOnArena: boolean;
+  locale: 'ja' | 'en';
+  reducedMotion: boolean;
+  assistMode: boolean;
+  createdAt: number;
+}
+
+export interface SessionResponse {
+  pilot: PilotProfile;
+  /** Bearer token for non-browser clients; browsers use the HttpOnly cookie. */
+  token: string;
+}
+
+export interface RaidSeat {
+  raidId: string;
+  boarded: boolean;
+  /** Pass granted for this raid (FREE event, SPONSORED pass or LIGHTNING payment). */
+  entitled: boolean;
+  entitlementSource: 'FREE' | 'SPONSORED' | 'LIGHTNING' | 'DEMO' | 'CREDIT' | null;
+  role: (typeof ROLES)[number] | null;
+  robot: (typeof ROBOTS)[number] | null;
+  task: Task | null;
+  cooldownUntil: number;
+  roleChangeReadyAt: number;
+  stats: PilotStats | null;
+}
+
+export interface MeResponse {
+  pilot: PilotProfile;
+  seat: RaidSeat;
+  pendingInvoice: InvoiceResponse | null;
+  /** Unused pass credit from a raid that ended before the pilot could board. */
+  passCredits: number;
+}
+
+export interface PassportEntry {
+  raidId: string;
+  eventId: string;
+  outcome: RaidResult['outcome'];
+  role: (typeof ROLES)[number];
+  score: number;
+  titles: string[];
+  endedAt: number;
+}
+
+export interface PassportResponse {
+  pilot: PilotProfile;
+  history: PassportEntry[];
+  rankNameJa: string;
+  rankNameEn: string;
+  nextRankAt: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Raid actions
+// ---------------------------------------------------------------------------
+
+export const boardRequestSchema = z.object({
+  role: z.enum(ROLES),
+  robot: z.enum(ROBOTS).optional(),
+});
+
+export const roleChangeSchema = z.object({
+  role: z.enum(ROLES),
+  robot: z.enum(ROBOTS).optional(),
+});
+
+const repairSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('ROBOT'), robot: z.enum(ROBOTS) }),
+  z.object({ type: z.literal('CITY'), cityId: z.enum(REGION_IDS) }),
+  z.object({ type: z.literal('UNJAM') }),
+]);
+
+export const taskRequestSchema = z.object({
+  enemyId: z.number().int().min(0).optional(),
+  weakpoint: z.enum(WEAKPOINTS).optional(),
+  telegraphId: z.number().int().min(0).optional(),
+  cityId: z.enum(REGION_IDS).optional(),
+  sink: z.enum(ENERGY_SINKS).optional(),
+  repair: repairSchema.optional(),
+  difficulty: z.enum(['EASY', 'NORMAL']).optional(),
+});
+
+export const taskInputSchema = z.discriminatedUnion('role', [
+  z.object({ role: z.literal('GUNNER'), stopAtMs: z.number().min(0).max(600_000) }),
+  z.object({ role: z.literal('GUARDIAN'), direction: z.enum(DIRECTIONS), releaseAtMs: z.number().min(0).max(600_000) }),
+  z.object({ role: z.literal('ROUTER'), path: z.array(z.number().int().min(0).max(64)).min(1).max(16) }),
+  z.object({ role: z.literal('ENGINEER'), sequence: z.array(z.number().int().min(0).max(64)).max(16) }),
+]);
+
+export const taskSubmitSchema = z.object({
+  taskId: z.string().min(1).max(80),
+  /** Idempotency key: retries with the same id return the stored result. */
+  clientSubmissionId: z.string().min(8).max(64),
+  input: taskInputSchema,
+});
+
+export interface TaskResponse {
+  code: string;
+  task: Task | null;
+  cooldownUntil: number;
+  gameMs: number;
+}
+
+export interface SubmitResponse {
+  result: TaskResult;
+  duplicate: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Passes & payments
+// ---------------------------------------------------------------------------
 
 export const INVOICE_STATUSES = ['PENDING', 'PAID', 'EXPIRED', 'FAILED', 'CANCELLED'] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 export interface InvoiceResponse {
   invoiceId: string;
+  raidId: string;
   amountSats: number;
-  /** Actions this top-up buys. */
-  actions: number;
   bolt11: string;
   expiresAt: number;
   status: InvoiceStatus;
@@ -108,47 +263,17 @@ export interface InvoiceResponse {
   memo: string;
 }
 
-export interface TopupStatusResponse {
+export interface InvoiceStatusResponse {
   invoiceId: string;
   status: InvoiceStatus;
-  creditSats: number;
+  entitled: boolean;
 }
 
-export const redeemPassRequestSchema = z.object({ code: z.string().min(4).max(64) });
-export interface RedeemPassResponse {
-  addedSats: number;
-  creditSats: number;
-}
-
-export const actionRequestSchema = z.object({
-  clientActionId: z.string().min(8).max(64),
-  action: z.enum(PLAYER_ACTIONS),
-  regionId: z.enum(REGION_IDS).optional(),
-  enemyId: z.number().int().min(0).optional(),
-});
-export type ActionRequest = z.infer<typeof actionRequestSchema>;
-
-export interface ActionResponse {
-  result: ActionResult;
-  creditSats: number;
-  /** True when this clientActionId was already processed (no second charge). */
-  duplicate: boolean;
-}
+export const sponsoredRedeemSchema = z.object({ code: z.string().min(4).max(64) });
 
 export const CHEER_EMOJIS = ['📣', '🔥', '⚡', '🌀', '👏', '💪'] as const;
 export type CheerEmoji = (typeof CHEER_EMOJIS)[number];
 export const cheerRequestSchema = z.object({ emoji: z.enum(CHEER_EMOJIS).optional() });
-
-export interface MeResponse {
-  playerId: string;
-  nickname: string;
-  creditSats: number;
-  actionsThisCampaign: number;
-  actionsTotal: number;
-  kills: number;
-  pendingInvoice: InvoiceResponse | null;
-  lastResults: ActionResult[];
-}
 
 export interface ApiError {
   error: string;
@@ -159,14 +284,14 @@ export interface ApiError {
 // Socket.IO
 // ---------------------------------------------------------------------------
 
-export const ROOM_ROLES = ['arena', 'player', 'spectator', 'admin'] as const;
+export const ROOM_ROLES = ['arena', 'pilot', 'spectator', 'admin'] as const;
 export type RoomRole = (typeof ROOM_ROLES)[number];
 
-export const joinRoomSchema = z.object({
+export const subscribeSchema = z.object({
   role: z.enum(ROOM_ROLES),
   token: z.string().max(256).optional(),
 });
-export type JoinRoomRequest = z.infer<typeof joinRoomSchema>;
+export type SubscribeRequest = z.infer<typeof subscribeSchema>;
 
 export const arenaStatusSchema = z.object({
   fps: z.number().min(0).max(1000),
@@ -184,30 +309,30 @@ export interface ServerNotice {
 }
 
 export interface CheerPush {
-  nickname: string;
+  callsign: string;
   emoji: string;
 }
 
-export interface CreditPush {
-  creditSats: number;
+/** Sent to one pilot when their pass for the current raid is granted. */
+export interface EntitlementPush {
+  raidId: string;
+  source: RaidSeat['entitlementSource'];
   invoiceId: string | null;
-  invoiceStatus: InvoiceStatus | null;
-  addedSats: number;
 }
 
 export interface ServerToClientEvents {
-  matchSnapshot: (snapshot: PublicMatchSnapshot) => void;
-  matchEvent: (event: GameEvent) => void;
-  clockTick: (tick: ClockTick) => void;
-  cheer: (cheer: CheerPush) => void;
-  presence: (playersOnline: number) => void;
-  credit: (credit: CreditPush) => void;
-  serverNotice: (notice: ServerNotice) => void;
+  'raid:snapshot': (snapshot: PublicRaidSnapshot) => void;
+  'raid:event': (event: GameEvent) => void;
+  'raid:clock': (tick: ClockTick) => void;
+  'raid:cheer': (cheer: CheerPush) => void;
+  'raid:presence': (pilotsOnline: number) => void;
+  'pilot:entitlement': (e: EntitlementPush) => void;
+  'server:notice': (notice: ServerNotice) => void;
 }
 
 export interface ClientToServerEvents {
-  joinRoom: (req: JoinRoomRequest, ack?: (res: { ok: boolean; error?: string }) => void) => void;
-  requestSnapshot: (ack?: (snapshot: PublicMatchSnapshot) => void) => void;
-  timeSync: (clientSentAt: number, ack: (serverTime: number) => void) => void;
-  arenaStatus: (status: ArenaStatus) => void;
+  'raid:subscribe': (req: SubscribeRequest, ack?: (res: { ok: boolean; error?: string }) => void) => void;
+  'raid:request-snapshot': (ack?: (snapshot: PublicRaidSnapshot) => void) => void;
+  'time:sync': (clientSentAt: number, ack: (serverTime: number) => void) => void;
+  'arena:status': (status: ArenaStatus) => void;
 }

@@ -1,5 +1,5 @@
 import type { GameEvent } from './events';
-import type { ClockTick, PublicMatchSnapshot } from './protocol';
+import type { ClockTick, PublicRaidSnapshot } from './protocol';
 import { isClockRunning } from './time';
 
 export type ApplyResult = 'applied' | 'duplicate' | 'gap' | 'ignored';
@@ -7,20 +7,20 @@ export type ApplyResult = 'applied' | 'duplicate' | 'gap' | 'ignored';
 const MAX_RECENT = 30;
 
 /**
- * Client-side mirror of the public match state.
+ * Client-side mirror of the public raid state.
  * - Starts from a full snapshot, then applies seq-numbered events.
  * - Duplicate events (seq <= lastSeq) are ignored, so redelivery is harmless.
- * - A gap (seq > lastSeq + 1, other match, or clock tick ahead of us) returns
+ * - A gap (seq > lastSeq + 1, other raid, or clock tick ahead of us) returns
  *   'gap' and the caller must request a fresh snapshot.
- * The store never computes game rules; it only applies server post-state patches.
+ * The store never computes game rules; it only takes the server's post-state.
  */
-export class MatchStore {
-  private snap: PublicMatchSnapshot | null = null;
+export class RaidStore {
+  private snap: PublicRaidSnapshot | null = null;
   private listeners = new Set<() => void>();
   private eventListeners = new Set<(e: GameEvent) => void>();
   version = 0;
 
-  get snapshot(): PublicMatchSnapshot | null {
+  get snapshot(): PublicRaidSnapshot | null {
     return this.snap;
   }
 
@@ -40,9 +40,9 @@ export class MatchStore {
     for (const l of this.listeners) l();
   }
 
-  applySnapshot(next: PublicMatchSnapshot): ApplyResult {
+  applySnapshot(next: PublicRaidSnapshot): ApplyResult {
     const cur = this.snap;
-    if (cur && cur.matchId === next.matchId && next.lastSeq < cur.lastSeq) return 'ignored';
+    if (cur && cur.raidId === next.raidId && next.lastSeq < cur.lastSeq) return 'ignored';
     this.snap = next;
     this.notify();
     return 'applied';
@@ -51,48 +51,54 @@ export class MatchStore {
   /** @param serverNow client's estimate of the server's epoch ms (for clock anchoring) */
   applyEvent(e: GameEvent, serverNow: number): ApplyResult {
     const cur = this.snap;
-    if (!cur || cur.matchId !== e.matchId) return 'gap';
+    if (!cur || cur.raidId !== e.raidId) return 'gap';
     if (e.seq <= cur.lastSeq) return 'duplicate';
     if (e.seq !== cur.lastSeq + 1) return 'gap';
-    const next: PublicMatchSnapshot = { ...cur, lastSeq: e.seq };
     const p = e.patch;
-    if (p.status !== undefined) {
-      next.status = p.status;
-      next.running = isClockRunning(p.status);
-      if (p.status !== 'PAUSED') next.pauseReason = null;
-    }
-    if (p.pausedFrom !== undefined) next.pausedFrom = p.pausedFrom;
-    if (p.liveStartClock !== undefined) next.liveStartClock = p.liveStartClock;
-    if (p.wave !== undefined) next.wave = p.wave;
-    if (p.waveRemaining !== undefined) next.waveRemaining = p.waveRemaining;
-    if (p.actionsThisTurn !== undefined) next.actionsThisTurn = p.actionsThisTurn;
-    if (p.combo !== undefined) next.combo = p.combo;
-    if (p.regions !== undefined) next.regions = p.regions;
-    if (p.enemies !== undefined) next.enemies = p.enemies;
-    if (p.incoming !== undefined) next.incoming = p.incoming;
-    if (p.stats !== undefined) next.stats = p.stats;
-    if (p.result !== undefined) next.result = p.result;
-    if (e.type === 'MATCH_STATUS_CHANGED' && e.data.to === 'PAUSED') next.pauseReason = e.data.reason;
-    // Re-anchor the clock at the event time.
-    next.clockMs = e.t;
-    next.gameMs = e.gameMs;
-    next.serverTime = serverNow;
-    next.recentEvents = [...cur.recentEvents, e].slice(-MAX_RECENT);
+    const next: PublicRaidSnapshot = {
+      ...cur,
+      lastSeq: e.seq,
+      status: p.status,
+      phase: p.phase,
+      running: isClockRunning(p.status),
+      pausedFrom: p.pausedFrom,
+      liveStartClock: p.liveStartClock,
+      cities: p.cities,
+      robots: p.robots,
+      reserveEnergy: p.reserveEnergy,
+      jammedUntil: p.jammedUntil,
+      enemies: p.enemies,
+      telegraphs: p.telegraphs,
+      bossId: p.bossId,
+      sync: p.sync,
+      special: p.special,
+      stats: p.stats,
+      result: p.result,
+      crew: p.crew ?? cur.crew,
+      pauseReason: p.status === 'PAUSED' ? cur.pauseReason : null,
+      // Re-anchor the clock at the event time.
+      clockMs: e.t,
+      gameMs: e.gameMs,
+      serverTime: serverNow,
+      recentEvents: [...cur.recentEvents, e].slice(-MAX_RECENT),
+    };
+    if (e.type === 'RAID_STATUS_CHANGED' && e.data.to === 'PAUSED') next.pauseReason = e.data.reason;
     this.snap = next;
     this.notify();
     for (const l of this.eventListeners) l(e);
     return 'applied';
   }
 
-  applyPresence(playersOnline: number): void {
+  /** Server-side fields that change without a game event (presence, broadcast, join state...). */
+  applyPatch(patch: Partial<PublicRaidSnapshot>): void {
     if (!this.snap) return;
-    this.snap = { ...this.snap, playersOnline };
+    this.snap = { ...this.snap, ...patch };
     this.notify();
   }
 
   applyClock(tick: ClockTick): ApplyResult {
     const cur = this.snap;
-    if (!cur || cur.matchId !== tick.matchId) return 'gap';
+    if (!cur || cur.raidId !== tick.raidId) return 'gap';
     if (tick.lastSeq > cur.lastSeq) return 'gap';
     if (tick.lastSeq < cur.lastSeq) return 'ignored';
     this.snap = {

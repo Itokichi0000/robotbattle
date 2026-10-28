@@ -1,116 +1,138 @@
-import type { GameConfig, MatchState, PlayerAction, RegionId } from '@sats-wars/shared';
-import { REGION_IDS, makeGameConfig } from '@sats-wars/shared';
-import { createMatchState, mulberry32, reduce } from '@sats-wars/game-engine';
+import type { GameConfig, RaidResult, RaidState, Role } from '@sats-wars/shared';
+import { makeGameConfig } from '@sats-wars/shared';
+import { type EngineCommand, createRaidState, mulberry32, reduce, solveTask } from '@sats-wars/game-engine';
 
 /**
- * EARTH DEFENSE campaign simulator. Time does not exist in the rules (aliens
- * move every `actionsPerTurn` actions), so the result depends only on how
- * good the choices are, not on how many people play. A crowd is modelled as
- * a mix: a share of actions use the "おすすめ" button, the rest are a casual
- * tap on a random alien/region.
+ * Raid simulator: N simulated pilots play the real engine for 8 minutes.
+ * Each pilot waits for their cooldown, thinks for a moment, asks for the
+ * default (recommended) mission of their seat, plays the minigame with a given
+ * skill and submits. Hypothesis check, not proof: venue playtests decide.
  */
-export interface CampaignOptions {
+export type RoleMix = 'spread' | 'gunners' | 'no-support';
+
+export interface RaidSimOptions {
+  pilots: number;
+  mix: RoleMix;
+  /** Probability of a clean minigame run. */
+  skill: number;
   seed: number;
   config?: Partial<GameConfig>;
-  /** Share of actions taken with the おすすめ (AUTO) button, 0..1. */
-  autoShare: number;
-  /** Safety cap. */
-  maxActions?: number;
 }
 
-export interface CampaignSim {
-  reachedWave: number;
-  wavesCleared: number;
-  actions: number;
-  alienTurns: number;
-  regionsLost: number;
-  regionsLiberated: number;
-  combos: number;
-  kills: number;
-  sats: number;
-  /** Ended by Japan falling (false = hit the action cap). */
-  fell: boolean;
+export interface RaidSim {
+  outcome: RaidResult['outcome'];
+  reason: RaidResult['reason'];
+  survivingCities: number;
+  bossHpLeftRatio: number;
+  clearSeconds: number | null;
+  special: RaidResult['special'];
+  score: number;
+  syncAverage: number;
+  assistActions: number;
+  tasks: number;
 }
 
-function casual(s: MatchState, rnd: () => number): { action: PlayerAction; regionId?: RegionId } {
-  const withAliens = REGION_IDS.filter((id) => s.enemies.some((e) => e.regionId === id));
-  const pick = <T,>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)]!;
-  if (s.combo >= s.config.comboGaugeMax && withAliens.length && rnd() < 0.5) return { action: 'COMBO', regionId: pick(withAliens) };
-  const r = rnd();
-  if (r < 0.15) {
-    const standing = REGION_IDS.filter((id) => !s.regions[id].fallen && s.regions[id].shield === 0);
-    if (standing.length) return { action: 'SHIELD', regionId: pick(standing) };
-  }
-  if (!withAliens.length) return { action: 'AUTO' };
-  return { action: r < 0.6 ? 'RAIJIN' : 'FUJIN', regionId: pick(withAliens) };
+const SPREAD: Role[] = ['GUNNER', 'GUARDIAN', 'ROUTER', 'GUNNER', 'ENGINEER', 'GUARDIAN', 'GUNNER', 'ROUTER', 'GUARDIAN', 'ENGINEER'];
+const NO_SUPPORT: Role[] = ['GUNNER', 'GUARDIAN'];
+
+export function roleFor(mix: RoleMix, i: number): Role {
+  if (mix === 'gunners') return 'GUNNER';
+  const list = mix === 'spread' ? SPREAD : NO_SUPPORT;
+  return list[i % list.length]!;
 }
 
-export function simulateCampaign(o: CampaignOptions): CampaignSim {
-  const cfg = makeGameConfig(o.config ?? {});
-  const rnd = mulberry32((o.seed * 2654435761) >>> 0);
-  let s = reduce(createMatchState('sim', cfg, o.seed), { type: 'START', t: 0 }).state;
-  const cap = o.maxActions ?? 20_000;
-  let t = 0;
-  while (s.status === 'LIVE' && s.stats.actions < cap) {
-    t += 1000;
-    const choice = rnd() < o.autoShare ? { action: 'AUTO' as const } : casual(s, rnd);
-    let r = reduce(s, { type: 'ACT', t, participantId: 'x', nickname: 'sim', ...choice });
-    // A refused casual tap is free; the person then just presses おすすめ.
-    if (r.outcome.kind === 'action' && !r.outcome.result.ok) {
-      r = reduce(s, { type: 'ACT', t, participantId: 'x', nickname: 'sim', action: 'AUTO' });
+export function simulateRaid(o: RaidSimOptions): RaidSim {
+  const config = makeGameConfig(o.config ?? {});
+  const rand = mulberry32((o.seed * 2654435761) >>> 0);
+  let state: RaidState = createRaidState(`sim-${o.seed}`, config, o.seed);
+  const run = (cmd: EngineCommand) => {
+    const r = reduce(state, cmd);
+    state = r.state;
+    return r;
+  };
+  for (let i = 0; i < o.pilots; i++) run({ type: 'BOARD', t: 0, pilotId: `p${i}`, callsign: `P${i}`, role: roleFor(o.mix, i), isBot: true });
+  run({ type: 'OPEN_LOBBY', t: 0 });
+  run({ type: 'START', t: 0 });
+
+  type Plan = { at: number; pilotId: string; step: 'request' | 'submit'; taskId?: string; input?: unknown };
+  const queue: Plan[] = Array.from({ length: o.pilots }, (_, i) => ({ at: 1500 + rand() * 4000, pilotId: `p${i}`, step: 'request' as const }));
+  const end = config.matchSeconds * 1000 + 1;
+  let guard = 0;
+  while (state.status === 'LIVE' && guard++ < 200_000) {
+    queue.sort((a, z) => a.at - z.at);
+    const next = queue.shift();
+    if (!next || next.at > end) break;
+    const t = Math.round(next.at);
+    if (next.step === 'request') {
+      const r = run({ type: 'REQUEST_TASK', t, pilotId: next.pilotId });
+      if (r.outcome.kind === 'task' && r.outcome.code === 'OK' && r.outcome.task) {
+        const task = r.outcome.task;
+        const sink = task.target.kind === 'ENERGY' ? task.target.sink : undefined;
+        const input = solveTask(task.params, o.skill, rand, 900, sink);
+        const playMs = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 2500 + rand() * 3000;
+        queue.push({ at: t + playMs + 150, pilotId: next.pilotId, step: 'submit', taskId: task.taskId, input });
+      } else if (r.outcome.kind === 'task') {
+        const wait = r.outcome.code === 'COOLDOWN' ? Math.max(500, r.outcome.cooldownUntil - state.gameMs) : 3000;
+        queue.push({ at: t + wait + rand() * 1500, pilotId: next.pilotId, step: 'request' });
+      }
+    } else {
+      run({ type: 'SUBMIT_TASK', t, pilotId: next.pilotId, taskId: next.taskId!, input: next.input as never });
+      // Cooldown, then a few seconds to look at the screen and decide.
+      queue.push({ at: t + config.normalActionCooldownSeconds * 1000 + 1000 + rand() * 3000, pilotId: next.pilotId, step: 'request' });
     }
-    s = r.state;
   }
+  if (state.status === 'LIVE') run({ type: 'TICK', t: end });
+  const r = state.result!;
+  const boss = state.enemies.find((e) => e.id === state.bossId);
   return {
-    reachedWave: s.wave,
-    wavesCleared: Math.max(0, s.wave - 1),
-    actions: s.stats.actions,
-    alienTurns: s.stats.alienTurns,
-    regionsLost: s.stats.regionsLost,
-    regionsLiberated: s.stats.regionsLiberated,
-    combos: s.stats.combos,
-    kills: s.stats.kills,
-    sats: s.stats.actions * cfg.actionCostSats,
-    fell: s.status === 'FINISHED',
+    outcome: r.outcome,
+    reason: r.reason,
+    survivingCities: r.survivingCities,
+    bossHpLeftRatio: boss ? boss.hp / boss.hpMax : 0,
+    clearSeconds: r.clearTimeMs === null ? null : Math.round(r.clearTimeMs / 1000),
+    special: r.special,
+    score: r.score.total,
+    syncAverage: r.syncAverage,
+    assistActions: r.stats.assistActions,
+    tasks: r.stats.tasks,
   };
 }
 
 export interface Aggregate {
   n: number;
-  waveMean: number;
-  waveP10: number;
-  waveP50: number;
-  waveP90: number;
-  actionsMean: number;
-  actionsP50: number;
-  satsMean: number;
-  regionsLostMean: number;
-  liberatedMean: number;
-  combosMean: number;
-  fellShare: number;
+  winRate: number;
+  citiesLostRate: number;
+  timeoutRate: number;
+  survivingMean: number;
+  bossLeftMean: number;
+  clearMean: number | null;
+  scoreMean: number;
+  syncMean: number;
+  specialActivated: number;
+  specialFallback: number;
+  specialFailed: number;
+  assistMean: number;
 }
 
-const quantile = (xs: number[], q: number) => {
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(q * s.length))] ?? NaN;
-};
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 
-export function aggregate(sims: CampaignSim[]): Aggregate {
-  const waves = sims.map((x) => x.reachedWave);
-  const actions = sims.map((x) => x.actions);
+export function aggregate(sims: RaidSim[]): Aggregate {
+  const n = sims.length;
+  const share = (f: (x: RaidSim) => boolean) => sims.filter(f).length / Math.max(1, n);
+  const clears = sims.filter((x) => x.clearSeconds !== null).map((x) => x.clearSeconds!);
   return {
-    n: sims.length,
-    waveMean: mean(waves),
-    waveP10: quantile(waves, 0.1),
-    waveP50: quantile(waves, 0.5),
-    waveP90: quantile(waves, 0.9),
-    actionsMean: mean(actions),
-    actionsP50: quantile(actions, 0.5),
-    satsMean: mean(sims.map((x) => x.sats)),
-    regionsLostMean: mean(sims.map((x) => x.regionsLost)),
-    liberatedMean: mean(sims.map((x) => x.regionsLiberated)),
-    combosMean: mean(sims.map((x) => x.combos)),
-    fellShare: sims.filter((x) => x.fell).length / Math.max(1, sims.length),
+    n,
+    winRate: share((x) => x.outcome === 'SUCCEEDED'),
+    citiesLostRate: share((x) => x.reason === 'CITIES_LOST'),
+    timeoutRate: share((x) => x.reason === 'TIMEOUT'),
+    survivingMean: mean(sims.map((x) => x.survivingCities)),
+    bossLeftMean: mean(sims.map((x) => x.bossHpLeftRatio)),
+    clearMean: clears.length ? mean(clears) : null,
+    scoreMean: mean(sims.map((x) => x.score)),
+    syncMean: mean(sims.map((x) => x.syncAverage)),
+    specialActivated: share((x) => x.special === 'ACTIVATED'),
+    specialFallback: share((x) => x.special === 'FALLBACK'),
+    specialFailed: share((x) => x.special === 'FAILED'),
+    assistMean: mean(sims.map((x) => x.assistActions)),
   };
 }
