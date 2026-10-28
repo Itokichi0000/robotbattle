@@ -36,8 +36,13 @@
 
 - ✅ 演出リハーサルモード（`/arena?preview=1&speed=0.25`）で必殺技・KO・勝利のカメラ/VFXを目視確認し、カメラ構図とバナー位置を修正
 - ✅ アートバイブル、共通スケルトン/クリップ名、GLB読込経路（欠けたクリップは procedural）、GLB検査ツール、仮GLB書き出し
-- 🟡 `tools/blender/generate_robots.py`（未実行：Blender未導入）
-- ⬜ 人間アーティストによる造形・リグ・アニメーション仕上げ、`raijin.glb`/`fujin.glb`/`arena.glb`、LOD、圧縮
+- ✅ クラウドコンテナで Blender を実行（apt の Blender 4.0.2 CLI、互換確認に bpy 5.2.3 LTS）
+- ✅ `tools/blender/build_robot.py`：RAIJIN / FUJIN を bpy で生成 → `.blend` 保存・GLB 書き出し・4方向プレビュー・
+  `validate_robot.py` で再読込検証（パーツ別オブジェクト、共通スケルトン、剛体スキン、2048 アトラスのベイク、WebP）
+- ✅ three.js 表示テスト `tools/model-viewer`（`pnpm models:test`）：GLB 読込・構造・4方向描画・手続き型クリップでの関節一致
+- ✅ 手続き型アニメーションがボーン向きの異なる GLB スケルトンも正しく動かす（`robots/glbRig.ts`、ユニットテスト）
+- ⬜ アリーナで Blender 版 GLB を既定にする（`apps/web/public/assets/robots/manifest.json` を置くだけ。**オーナー判断待ち**）
+- ⬜ 人間アーティストによる造形の最終判断・ベイク済みアニメーション、`arena.glb`、LOD、KTX2 圧縮
 - ⬜ ポストプロセス（控えめなブルーム）、必殺技専用カメラワークの強化
 
 ## Phase 4：Lightning決済と本番管理 — 実装済み・実決済未検証 🟡
@@ -54,6 +59,8 @@
 - ⬜ セキュリティレビュー（外部）、アクセシビリティ監査（スクリーンリーダー）
 
 ## 次の優先タスク（次セッションはここから）
+
+0. Blender 版ロボットの採用判断（`docs/models/MODELS.md` を確認 → 採用なら manifest.json を追加し、会場 GPU で FPS 計測）。
 
 1. 実機確認：スマホ2〜3台 + 会場PC（GPU）で `pnpm start`、遅延と FPS を TEST_PLAN に記録。
 2. 人間プレイテスト → BALANCE_REPORT と比較し `GameConfig` 再調整（DECISION_LOG に記録）。

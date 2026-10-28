@@ -20,7 +20,10 @@
     "format:check": "prettier --check .",
     "simulate": "pnpm --filter @sats-wars/simulations simulate",
     "e2e": "playwright test -c tests/e2e/playwright.config.ts",
-    "solo": "pnpm --filter @sats-wars/solo build"
+    "solo": "pnpm --filter @sats-wars/solo build",
+    "models:build": "blender -b --factory-startup --python-exit-code 1 -P tools/blender/build_robot.py --",
+    "models:validate": "blender -b --factory-startup --python-exit-code 1 -P tools/blender/validate_robot.py --",
+    "models:test": "pnpm --filter @sats-wars/model-viewer e2e"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

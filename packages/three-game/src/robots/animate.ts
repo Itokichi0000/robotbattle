@@ -284,6 +284,8 @@ export function applyClip(
   if (rig.backRest?.frame && rig.backRest.parentFrameInv)
     setFramed(rig.backUnit, rig.backRest, 0, 0, pose.backSpin, undefined);
   else rig.backUnit.rotation.z = pose.backSpin;
-  const glow = rig.baseGlow * pose.glow * (1 + energyGlow);
-  for (const m of rig.glowMaterials) m.emissiveIntensity = glow;
+  const k = pose.glow * (1 + energyGlow);
+  // GLB materials keep their authored ratios (e.g. FUJIN's dim veil vs. its bright body).
+  for (const m of rig.glowMaterials)
+    m.emissiveIntensity = ((m.userData.swBaseGlow as number | undefined) ?? rig.baseGlow) * k;
 }

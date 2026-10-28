@@ -58,10 +58,26 @@ UI：黒紺 `#070D1A`、オフホワイト `#EFF5FF`。
 ## アセット仕様（GLB差し替え）
 
 - ファイル：`apps/web/public/assets/robots/raijin.glb`, `fujin.glb`, `arena.glb`（任意で `*_lod1.glb`）。
+  アリーナは同じ場所に `manifest.json`（`{"RAIJIN":"raijin.glb","FUJIN":"fujin.glb"}`）がある時だけ GLB を使う。
 - glTF 2.0、メートル単位、+Y up、前方 +Z（Blender では -Y 前方で書き出し時に変換）。
 - 予算：各ロボ ≤ 100k tri（目標 30–60k）、ボーン ≤ 64、テクスチャ ≤ 2K（PBR: baseColor / ORM / normal / emissive）。
-- アニメーションは上記クリップ名でベイク（IK・制約はベイク済み）。Blender 独自ノード不可。Draco/Meshopt 圧縮は要検証。
-- 検査：`tools/blender/inspect_glb.mjs`（ボーン名・クリップ名・tri数をチェック）。
-- 自動生成（`tools/blender/generate_robots.py`）はたたき台。**会場品質には人間のアーティストによる造形・アニメーションの仕上げが必要。**
+- アニメーション：上記クリップ名でベイクしたものが GLB にあればそれを再生し、無いクリップは手続き型
+  （`animate.ts`）で動かす。Blender 側のボーンは手足に沿った向きでよい（`robots/glbRig.ts` がレストの向きを吸収）。
+  IK・制約はベイク済みで書き出すこと。Blender 独自ノード不可。Draco/Meshopt 圧縮は要検証。
+- 検査：`tools/blender/inspect_glb.mjs`（ボーン名・クリップ名・tri数）、`tools/blender/validate_robot.py`（Blender で再読込）、
+  `pnpm models:test`（three.js 表示テスト）。
+
+### Blender 生成モデル（2026-10-28）
+
+`tools/blender/build_robot.py`（bpy、ヘッドレス）で RAIJIN / FUJIN を生成済み。詳細は `tools/blender/README.md` と
+`docs/models/MODELS.md`。
+
+- **RAIJIN**：ブロック構造の重装甲（継ぎ目が琥珀に発光）、胸に**太鼓型動力炉**（鼓胴・鋲・金の縁・発光する鼓面）、
+  兜・山形バイザー・反った金の角、大袖型の肩、頭ほどの拳、背面に8つの雷太鼓リング。青海波の浮き彫りパネル。
+- **FUJIN**：旋盤・ロフトによる**流線型装甲**、紺の装甲を走る**ネットワーク状の発光回路**（青緑）、
+  背面に**半透明の風袋リング**（銀の枠・発光リング・結び目）と刃状の翼2枚、尖った銀の肩フィン、前腕の風刃、
+  尖った足先と踵ブースター、回り込むバイザーと後方へ流れるトサカ。
+- 両機とも記号・文字・ロゴは一切なし（ビットコインの「B」も不使用）。
+- 生成物はたたき台。**会場品質には人間のアーティストによる造形・アニメーションの最終判断が必要。**
 
 ライセンス台帳：`assets/LICENSES.md`。

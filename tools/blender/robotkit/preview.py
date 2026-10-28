@@ -101,8 +101,9 @@ def configure_render(scene, width, height, samples=48):
     scene.render.resolution_x = width
     scene.render.resolution_y = height
     scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.file_format = "JPEG"
     scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.quality = 92
     scene.render.film_transparent = False
     ee = scene.eevee
     if hasattr(ee, "taa_render_samples"):
@@ -118,9 +119,12 @@ def configure_render(scene, width, height, samples=48):
         ee.use_ssr = True
     compat.bloom(scene, True)
     vs = scene.view_settings
-    vs.view_transform = "AgX" if "AgX" in [i.identifier for i in vs.bl_rna.properties["view_transform"].enum_items] else "Filmic"
-    vs.look = "None"
-    vs.exposure = 0.0
+    vs.view_transform = (
+        "AgX" if "AgX" in [i.identifier for i in vs.bl_rna.properties["view_transform"].enum_items] else "Filmic"
+    )
+    looks = [i.identifier for i in vs.bl_rna.properties["look"].enum_items]
+    vs.look = next((lk for lk in ("AgX - Medium High Contrast", "Medium High Contrast") if lk in looks), "None")
+    vs.exposure = -0.6  # keeps the amber armour amber instead of washing out to yellow
 
 
 def frame_distance(bbox_min, bbox_max, lens, sensor, aspect):
@@ -145,7 +149,7 @@ def render_views(out_dir, basename, cam, pivot, bbox, *, width=1080, height=1350
         cam.location = target + Vector((math.sin(a) * math.cos(e), -math.cos(a) * math.cos(e), math.sin(e))) * dist
         _look_at(cam, target)
         pivot.rotation_euler = (0.0, 0.0, a)
-        path = os.path.join(out_dir, f"{basename}_{name}.png")
+        path = os.path.join(out_dir, f"{basename}_{name}.jpg")
         scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
         written.append(path)

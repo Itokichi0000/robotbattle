@@ -49,7 +49,10 @@ export function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): Rob
     if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false;
     const mats = (o as THREE.Mesh).material;
     for (const m of (Array.isArray(mats) ? mats : [mats]) as THREE.MeshStandardMaterial[]) {
-      if (m && 'emissive' in m && m.emissive.getHex() !== 0 && !glow.includes(m)) glow.push(m);
+      if (m && 'emissive' in m && m.emissive.getHex() !== 0 && !glow.includes(m)) {
+        m.userData.swBaseGlow ??= m.emissiveIntensity; // authored intensity, before any animation
+        glow.push(m);
+      }
     }
   });
   const box = new THREE.Box3().setFromObject(scene);
@@ -61,7 +64,7 @@ export function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): Rob
     backUnit,
     backRest: stored.back,
     glowMaterials: glow,
-    baseGlow: glow[0]?.emissiveIntensity ?? 1.5,
+    baseGlow: Math.max(1.5, ...glow.map((m) => m.userData.swBaseGlow as number)),
     height: box.isEmpty() ? 4 : box.max.y - box.min.y,
     dispose() {},
   };

@@ -45,7 +45,9 @@ function GlbRobot({ url, teamId, director, energyRatio }: RobotActorProps & { ur
       action.time = LOOPING_CLIPS.has(cue.clip) ? t % dur : Math.min(t, dur);
       mixer.update(0);
       for (const m of rig?.glowMaterials ?? [])
-        m.emissiveIntensity = (rig?.baseGlow ?? 1.5) * (1 + energyRatio * 0.8);
+        m.emissiveIntensity =
+          ((m.userData.swBaseGlow as number | undefined) ?? rig?.baseGlow ?? 1.5) *
+          (1 + energyRatio * 0.8);
     } else if (rig) {
       for (const a of actions.values()) a.stop();
       current.current = null;

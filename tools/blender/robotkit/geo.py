@@ -136,6 +136,8 @@ def prism(points, depth):
 SQUARE = [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)]
 DIAMOND = [(0.0, -0.5), (0.5, 0.0), (0.0, 0.5), (-0.5, 0.0)]
 BLADE = [(-0.5, 0.0), (0.0, -0.18), (0.5, 0.0), (0.0, 0.18)]
+OCT = [(0.5 * math.cos(a), 0.5 * math.sin(a)) for a in (math.tau * (i + 0.5) / 8 for i in range(8))]
+LENS = [(-0.5, 0.0), (-0.3, -0.32), (0.0, -0.42), (0.3, -0.32), (0.5, 0.0), (0.3, 0.32), (0.0, 0.42), (-0.3, 0.32)]
 
 
 def loft(path, sizes, profile=SQUARE, up=(0.0, 0.0, 1.0)):
@@ -173,7 +175,7 @@ def segments_xz(points, width, depth):
     plane. Returns a list of (verts, faces, matrix) so the caller can place each block.
     """
     out = []
-    for (x0, z0), (x1, z1) in zip(points, points[1:]):
+    for (x0, z0), (x1, z1) in zip(points, points[1:], strict=False):
         dx, dz = x1 - x0, z1 - z0
         length = math.hypot(dx, dz) + width  # overlap the joints
         ang = math.atan2(dx, dz)

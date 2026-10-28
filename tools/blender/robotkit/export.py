@@ -52,9 +52,7 @@ def robot_stats(robot_objs, armature):
         "triangles": sum(per_obj.values()),
         "triangles_per_object": dict(sorted(per_obj.items())),
         "materials": sorted(mats),
-        "images": [
-            {"name": n, "size": list(bpy.data.images[n].size)} for n in images if n in bpy.data.images
-        ],
+        "images": [{"name": n, "size": list(bpy.data.images[n].size)} for n in images if n in bpy.data.images],
         "bbox_min": [round(v, 3) for v in bmin],
         "bbox_max": [round(v, 3) for v in bmax],
         "height": round(bmax.z - bmin.z, 3),
@@ -92,12 +90,26 @@ def export_glb(path, objects, **extra):
         export_extras=True,
         export_texcoords=True,
         export_normals=True,
-        export_tangents=False,
+        export_tangents=True,  # MikkTSpace, same as the normal-map bake (exact in three.js)
         export_cameras=False,
         export_lights=False,
         **extra,
     )
-    op(**kwargs)
+    # glTF wants skinned meshes at the scene root (their node transform is ignored), but in
+    # the .blend the parts stay parented to the rig for easy editing: lift them only while exporting.
+    lifted = []
+    for o in objects:
+        if o.type == "MESH" and o.parent and o.parent.type == "ARMATURE":
+            lifted.append((o, o.parent, o.matrix_parent_inverse.copy(), o.matrix_world.copy()))
+            o.parent = None
+            o.matrix_world = lifted[-1][3]
+    try:
+        op(**kwargs)
+    finally:
+        for o, parent, inv, world in lifted:
+            o.parent = parent
+            o.matrix_parent_inverse = inv
+            o.matrix_world = world
     bpy.ops.object.select_all(action="DESELECT")
     print(f"[export] wrote {path} ({os.path.getsize(path) / 1024:.0f} KB)")
 

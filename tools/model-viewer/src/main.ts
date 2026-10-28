@@ -13,7 +13,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { CLIP_DURATION, CLIP_NAMES, type ClipName } from '../../../packages/three-game/src/director';
+import {
+  CLIP_DURATION,
+  CLIP_NAMES,
+  type ClipName,
+} from '../../../packages/three-game/src/director';
 import { applyClip } from '../../../packages/three-game/src/robots/animate';
 import {
   buildFujin,
@@ -235,7 +239,8 @@ function frame(): void {
   const vfov = THREE.MathUtils.degToRad(camera.fov);
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
   const w = Math.max(size.x, size.z);
-  fitDistance = 1.12 * Math.max(size.y / 2 / Math.tan(vfov / 2), w / 2 / Math.tan(hfov / 2)) + w / 2;
+  fitDistance =
+    1.12 * Math.max(size.y / 2 / Math.tan(vfov / 2), w / 2 / Math.tan(hfov / 2)) + w / 2;
   controls.target.copy(target);
 }
 
@@ -327,6 +332,10 @@ function buildUi(): void {
   panel.querySelector<HTMLSelectElement>('#clip')!.onchange = (e) => {
     clip = (e.target as HTMLSelectElement).value as ClipName;
     clipStart = clock.getElapsedTime();
+    if (frozenT !== null) {
+      pose(clip, frozenT);
+      api.render();
+    }
   };
   panel.querySelector<HTMLInputElement>('#wire')!.onchange = (e) => {
     const on = (e.target as HTMLInputElement).checked;
@@ -336,6 +345,7 @@ function buildUi(): void {
         for (const x of (Array.isArray(m) ? m : m ? [m] : []) as THREE.MeshStandardMaterial[])
           x.wireframe = on;
       });
+    api.render();
   };
 }
 
@@ -377,19 +387,23 @@ async function main(): Promise<void> {
   showStats();
   api.ready = true;
   document.body.dataset.ready = '1';
+  // Frozen time (t=…) renders on demand only: tests and captures call api.render() explicitly,
+  // which keeps software-rendered (SwiftShader) runs fast.
+  if (frozenT !== null) {
+    controls.addEventListener('change', api.render);
+    return;
+  }
   renderer.setAnimationLoop(() => {
-    if (frozenT === null) {
-      const now = clock.getElapsedTime();
-      const t = now - clipStart;
-      if (clip !== 'Idle' && clip !== 'Victory' && t > CLIP_DURATION[clip] + 0.8) clipStart = now;
-      pose(clip, t, now);
-      if (params.get('spin') === '1') {
-        for (const r of robots) r.object.rotation.y = now * 0.4;
-      }
-      controls.update();
+    const now = clock.getElapsedTime();
+    const t = now - clipStart;
+    if (clip !== 'Idle' && clip !== 'Victory' && t > CLIP_DURATION[clip] + 0.8) clipStart = now;
+    pose(clip, t, now);
+    if (params.get('spin') === '1') {
+      for (const r of robots) r.object.rotation.y = now * 0.4;
     }
+    controls.update();
     api.render();
-    if (showUi && Math.round(clock.getElapsedTime() * 2) % 2 === 0) showStats();
+    if (showUi && Math.round(now * 2) % 2 === 0) showStats();
   });
 }
 

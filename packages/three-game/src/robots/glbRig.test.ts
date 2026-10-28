@@ -101,3 +101,23 @@ describe('procedural rigs are unaffected', () => {
     rig.dispose();
   });
 });
+
+describe('glow on GLB materials', () => {
+  it('keeps each material’s authored intensity ratio while animating', () => {
+    const scene = new THREE.Group();
+    const names = [...JOINT_NAMES, 'BackUnit'];
+    for (const n of names) {
+      const o = new THREE.Object3D();
+      o.name = n;
+      scene.add(o);
+    }
+    const body = new THREE.MeshStandardMaterial({ emissive: '#25C8D7', emissiveIntensity: 2.8 });
+    const veil = new THREE.MeshStandardMaterial({ emissive: '#7FE9F2', emissiveIntensity: 0.9 });
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(), body));
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(), veil));
+    const rig = rigFromScene(scene, 'fujin')!;
+    applyClip(rig, 'Special', 1.0, 1.0);
+    expect(body.emissiveIntensity / veil.emissiveIntensity).toBeCloseTo(2.8 / 0.9, 5);
+    expect(body.emissiveIntensity).toBeGreaterThan(2.8); // Special boosts glow
+  });
+});

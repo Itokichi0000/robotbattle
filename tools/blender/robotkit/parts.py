@@ -77,13 +77,23 @@ class Part:
         self.bm = bmesh.new()
         self.materials = []
 
+    def _bevel_layer(self, bm):
+        # Edge bevel weights live in a generic attribute since Blender 4.0.
+        lay = bm.edges.layers.float
+        return lay.get("bevel_weight_edge") or lay.new("bevel_weight_edge")
+
     def _mat_index(self, mat):
         if mat not in self.materials:
             self.materials.append(mat)
         return self.materials.index(mat)
 
-    def add(self, geom, mat, matrix=None, closed=True):
-        """Place (verts, faces) with `matrix` (or xf(...) tuple) and material `mat`."""
+    def add(self, geom, mat, matrix=None, closed=True, bevel=None):
+        """
+        Place (verts, faces) with `matrix` and material `mat`.
+        `bevel`: chamfer this primitive's hard edges (> 40°). Default: blocks and plates
+        (≤ 12 faces, > 12 cm) that are not emissive; round primitives, rivets and glow strips
+        stay unbevelled to save triangles.
+        """
         verts, faces = geom
         m = matrix if matrix is not None else Matrix.Identity(4)
         bvs = [self.bm.verts.new(m @ Vector(v)) for v in verts]
@@ -100,6 +110,17 @@ class Part:
             bmesh.ops.reverse_faces(self.bm, faces=new_faces)
         if closed:
             bmesh.ops.recalc_face_normals(self.bm, faces=new_faces)
+        if bevel is None:
+            pts = [v.co for f in new_faces for v in f.verts]
+            span = max(max(p[i] for p in pts) - min(p[i] for p in pts) for i in range(3)) if pts else 0.0
+            bevel = len(faces) <= 12 and span > 0.12 and not mat.get("sw_glow", False)
+        if bevel and self.bevel > 0:
+            bw = self._bevel_layer(self.bm)
+            limit = math.radians(40)
+            for f in new_faces:
+                for e in f.edges:
+                    if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > limit:
+                        e[bw] = 1.0
         return new_faces
 
     def add_many(self, items, mat, matrix=None):
@@ -113,7 +134,6 @@ class Part:
 
     def build(self, collection, armature_obj):
         me = bpy.data.meshes.new(self.name)
-        bmesh.ops.remove_doubles(self.bm, verts=self.bm.verts, dist=1e-5)
         self.bm.to_mesh(me)
         self.bm.free()
         for mat in self.materials:
@@ -134,14 +154,18 @@ class Part:
             mod = obj.modifiers.new("Bevel", "BEVEL")
             mod.width = self.bevel
             mod.segments = self.bevel_segments
-            mod.limit_method = "ANGLE"
-            mod.angle_limit = math.radians(40)
+            mod.limit_method = "WEIGHT"
             mod.use_clamp_overlap = True
             mod.harden_normals = True
             mod.miter_outer = "MITER_ARC"
         vg = obj.vertex_groups.new(name=self.bone)
         vg.add(list(range(len(me.vertices))), 1.0, "REPLACE")
         obj.parent = armature_obj
+        # N-gons (cylinder caps, plates) → triangles so the exporter can write MikkTSpace tangents.
+        tri = obj.modifiers.new("Triangulate", "TRIANGULATE")
+        tri.min_vertices = 5
+        tri.ngon_method = "BEAUTY"
+        tri.keep_custom_normals = True
         arm = obj.modifiers.new("Armature", "ARMATURE")
         arm.object = armature_obj
         return obj

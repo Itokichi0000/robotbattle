@@ -1,0 +1,220 @@
+{
+  "robot": "fujin",
+  "blender": "4.0.2",
+  "ok": true,
+  "blend": {
+    "stage": "detail",
+    "parts": 29,
+    "triangles": 15624,
+    "groups": {
+      "head": [
+        "FJ_Head"
+      ],
+      "torso": [
+        "FJ_Chest",
+        "FJ_Hips",
+        "FJ_Spine"
+      ],
+      "arms": [
+        "FJ_Forearm_L",
+        "FJ_Forearm_R",
+        "FJ_Hand_L",
+        "FJ_Hand_R",
+        "FJ_Pauldron_L",
+        "FJ_Pauldron_R",
+        "FJ_UpperArm_L",
+        "FJ_UpperArm_R"
+      ],
+      "legs": [
+        "FJ_Foot_L",
+        "FJ_Foot_R",
+        "FJ_Shin_L",
+        "FJ_Shin_R",
+        "FJ_Thigh_L",
+        "FJ_Thigh_R"
+      ],
+      "joints": [
+        "FJ_Elbow_L",
+        "FJ_Elbow_R",
+        "FJ_HipJoint_L",
+        "FJ_HipJoint_R",
+        "FJ_Knee_L",
+        "FJ_Knee_R",
+        "FJ_Neck",
+        "FJ_Shoulder_L",
+        "FJ_Shoulder_R"
+      ],
+      "back": [
+        "FJ_WindRing",
+        "FJ_WindVeil"
+      ]
+    }
+  },
+  "glb": {
+    "triangles": 15624,
+    "materials": [
+      "FJ_Body",
+      "FJ_Veil"
+    ],
+    "height": 5.227,
+    "bytes": 2342864
+  },
+  "checks": [
+    {
+      "check": "collections",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "one armature",
+      "ok": true,
+      "detail": [
+        "FJ_Rig"
+      ]
+    },
+    {
+      "check": "bones match shared skeleton",
+      "ok": true,
+      "detail": "19 bones"
+    },
+    {
+      "check": "joint positions match the in-game rig",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "bone collections",
+      "ok": true,
+      "detail": [
+        "Body",
+        "Arm.L",
+        "Leg.L",
+        "BackUnit",
+        "Arm.R",
+        "Leg.R"
+      ]
+    },
+    {
+      "check": "parts",
+      "ok": true,
+      "detail": 29
+    },
+    {
+      "check": "head/torso/arms/legs/joints/back all present",
+      "ok": true,
+      "detail": {
+        "head": 1,
+        "torso": 3,
+        "arms": 8,
+        "legs": 6,
+        "joints": 9,
+        "back": 2
+      }
+    },
+    {
+      "check": "every part rigidly skinned to one existing bone",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "mesh data valid",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "no NaN vertices",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "no text / logo objects",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "atlas UVs on every atlas part",
+      "ok": true,
+      "detail": "28 parts []"
+    },
+    {
+      "check": "baked images packed",
+      "ok": true,
+      "detail": [
+        "FJ_BaseColor",
+        "FJ_Emission",
+        "FJ_Normal",
+        "FJ_ORM"
+      ]
+    },
+    {
+      "check": "images power-of-two ≤ 2048",
+      "ok": true,
+      "detail": [
+        "FJ_BaseColor 2048",
+        "FJ_Emission 2048",
+        "FJ_Normal 2048",
+        "FJ_ORM 2048"
+      ]
+    },
+    {
+      "check": "parts share the atlas material",
+      "ok": true,
+      "detail": [
+        "FJ_Body",
+        "FJ_Veil"
+      ]
+    },
+    {
+      "check": "source materials kept for re-baking",
+      "ok": true,
+      "detail": [
+        "FJ_Armor",
+        "FJ_Core",
+        "FJ_Dark",
+        "FJ_Glow",
+        "FJ_Silver",
+        "FJ_Veil"
+      ]
+    },
+    {
+      "check": "triangle budget (≤ 60k target, 100k max)",
+      "ok": true,
+      "detail": 15624
+    },
+    {
+      "check": "GLB imports with one armature",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "GLB joints",
+      "ok": true,
+      "detail": []
+    },
+    {
+      "check": "GLB parts",
+      "ok": true,
+      "detail": 29
+    },
+    {
+      "check": "GLB triangles equal the .blend",
+      "ok": true,
+      "detail": "15624 vs 15624"
+    },
+    {
+      "check": "GLB materials / textures",
+      "ok": true,
+      "detail": "['FJ_Body', 'FJ_Veil'] / [(2048, 2048), (2048, 2048), (2048, 2048), (2048, 2048)]"
+    },
+    {
+      "check": "GLB height 4.5–5.5 m, standing on the ground",
+      "ok": true,
+      "detail": "5.227 m, min z 0.003"
+    },
+    {
+      "check": "GLB has no animation clips (procedural clips drive it)",
+      "ok": true,
+      "detail": 0
+    }
+  ]
+}

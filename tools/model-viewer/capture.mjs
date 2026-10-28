@@ -27,7 +27,15 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 720, height: 900 } });
 page.on('console', (m) => m.type() === 'error' && console.error('[page]', m.text()));
 for (const robot of robots) {
-  const q = new URLSearchParams({ robot, source, ui: '0', t: '0', clip: 'Idle', light, view: views[0] });
+  const q = new URLSearchParams({
+    robot,
+    source,
+    ui: '0',
+    t: '0',
+    clip: 'Idle',
+    light,
+    view: views[0],
+  });
   if (dir) q.set('dir', dir);
   await page.goto(`${base}?${q}`);
   await page.waitForFunction(() => document.body.dataset.ready, null, { timeout: 120_000 });
@@ -39,7 +47,7 @@ for (const robot of robots) {
       window.__viewer.render();
     }, v);
     const file = resolve(out, `${robot}_${source}_${v}.png`);
-    await page.screenshot({ path: file });
+    await page.screenshot({ path: file, timeout: 180_000 });
     console.log(file);
   }
 }

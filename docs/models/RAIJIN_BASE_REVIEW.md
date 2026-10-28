@@ -2,6 +2,8 @@
 
 作成：2026-10-28　対象：`tools/blender/build_robot.py --robot raijin --stage base` の出力
 
+> この改善点を反映した詳細化版と FUJIN の結果は [MODELS.md](MODELS.md)。
+
 ## 1. 参考資料について
 
 リポジトリ内に設定画の**画像ファイルは存在しない**（全ブランチを確認済み）。そのため次の2つを「設定画」として扱った。
