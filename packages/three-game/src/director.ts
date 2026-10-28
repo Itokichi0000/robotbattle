@@ -116,6 +116,8 @@ export class ArenaDirector {
   banner: Banner | null = null;
   busyUntil = 0;
   settings: DirectorSettings = { reducedMotion: false, shakeScale: 1, shortSpecials: false };
+  /** Slow-motion factor for rehearsal/preview only (1 = real time). */
+  timeScale = 1;
 
   private queue: Scheduled[] = [];
   private order = 0;
@@ -195,7 +197,7 @@ export class ArenaDirector {
   }
 
   update(dt: number): void {
-    this.time += Math.max(0, Math.min(dt, 0.25));
+    this.time += Math.max(0, Math.min(dt, 0.25)) * this.timeScale;
     this.queue.sort((a, b) => a.at - b.at || a.order - b.order);
     while (this.queue.length && this.queue[0]!.at <= this.time) this.queue.shift()!.run();
     const decay = this.settings.reducedMotion ? 10 : 3.2;

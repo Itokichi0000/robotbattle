@@ -15,6 +15,7 @@ import {
   saveArenaSettings,
   webglAvailable,
 } from './settings';
+import { PREVIEW_HELP, handlePreviewKey } from './preview';
 import { SettingsPanel } from './SettingsPanel';
 
 const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
@@ -69,6 +70,10 @@ export function ArenaApp() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [robotModels, setRobotModels] = useState<Partial<Record<TeamId, string>> | null>(null);
   const [modelError, setModelError] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const previewCounter = useRef({ n: 0 });
+  const previewRef = useRef(false);
+  previewRef.current = preview;
   const gameMsRef = useRef(0);
   const introPlayedFor = useRef<string | null>(null);
 
@@ -76,7 +81,11 @@ export function ArenaApp() {
     setSettings(loadArenaSettings());
     setWebgl(webglAvailable());
     void loadRobotModels().then(setRobotModels);
-  }, []);
+    const q = new URLSearchParams(window.location.search);
+    setPreview(q.get('preview') === '1');
+    const speed = Number(q.get('speed'));
+    if (speed > 0 && speed <= 1) director.timeScale = speed;
+  }, [director]);
   useEffect(() => {
     if (!settings) return;
     saveArenaSettings(settings);
@@ -144,6 +153,7 @@ export function ArenaApp() {
           setBanner(null);
         }
       } else if (
+        !previewRef.current &&
         !director.busy &&
         (director.displayHp.RAIJIN !== hp.RAIJIN || director.displayHp.FUJIN !== hp.FUJIN)
       ) {
@@ -190,10 +200,11 @@ export function ArenaApp() {
           : document.documentElement.requestFullscreen?.());
       if (e.key === 's' || e.key === 'S') setPanelOpen((v) => !v);
       if (e.key === 'm' || e.key === 'M') setSettings((s) => (s ? { ...s, muted: !s.muted } : s));
+      if (preview) handlePreviewKey(e.key, director, previewCounter.current);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [preview, director]);
 
   const enableAudio = async () => {
     setAudioOn(await sfx.unlock());
@@ -245,11 +256,12 @@ export function ArenaApp() {
         stats={settings.showStats ? stats : null}
         renderer={use3d ? 'webgl' : '2d'}
         contextLost={contextLost}
+        preview={preview}
       />
       {!audioOn && !settings.muted && (
         <button
           onClick={enableAudio}
-          className="absolute bottom-[9%] left-1/2 z-30 -translate-x-1/2 rounded-full bg-black/70 px-5 py-2 text-lg font-bold text-off ring-1 ring-white/30"
+          className="absolute left-[1.2vw] top-[24%] z-30 rounded-full bg-black/70 px-4 py-2 text-base font-bold text-off ring-1 ring-white/30"
         >
           🔊 クリックで音声ON / Click to enable sound
         </button>
@@ -261,6 +273,14 @@ export function ArenaApp() {
       >
         ⚙ S
       </button>
+      {preview && (
+        <div
+          className="absolute left-1/2 top-[19%] z-30 -translate-x-1/2 rounded bg-yellow-300/90 px-3 py-1 text-sm font-bold text-navy"
+          data-testid="preview-banner"
+        >
+          {PREVIEW_HELP}（演出のみ・試合に影響なし）
+        </div>
+      )}
       {panelOpen && (
         <SettingsPanel
           settings={settings}

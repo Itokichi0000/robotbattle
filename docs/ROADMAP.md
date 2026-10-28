@@ -29,6 +29,7 @@
 
 ## Phase 3：Blenderと本格3D — 着手 🟡
 
+- ✅ 演出リハーサルモード（`/arena?preview=1&speed=0.25`）で必殺技・KO・勝利のカメラ/VFXを目視確認し、カメラ構図とバナー位置を修正
 - ✅ アートバイブル、共通スケルトン/クリップ名、GLB読込経路（欠けたクリップは procedural）、GLB検査ツール、仮GLB書き出し
 - 🟡 `tools/blender/generate_robots.py`（未実行：Blender未導入）
 - ⬜ 人間アーティストによる造形・リグ・アニメーション仕上げ、`raijin.glb`/`fujin.glb`/`arena.glb`、LOD、圧縮
@@ -51,7 +52,7 @@
 
 1. 実機確認：スマホ2〜3台 + 会場PC（GPU）で `pnpm start`、遅延と FPS を TEST_PLAN に記録。
 2. 人間プレイテスト → BALANCE_REPORT と比較し `GameConfig` 再調整（DECISION_LOG に記録）。
-3. 3D品質：必殺技演出の専用カメラ/エフェクト強化、ブルーム（品質「高」のみ）、勝利画面の演出。
+3. 3D品質：プレビューモードで会場GPU上の見え方を確認し、必殺技VFXの強化、ブルーム（品質「高」のみ）、勝利画面の演出を追加。
 4. Dockerfile + docker-compose（server/web/永続ボリューム）と DEPLOYMENT 手順の検証（公開はしない）。
 5. /play のアクセシビリティ監査、iOS Safari の実機確認。
 6. （承認後）LNbits テストウォレットで実決済の少額テスト。

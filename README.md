@@ -46,7 +46,7 @@ pnpm dev                            # server :4000 + web :3000
 | `pnpm --filter @sats-wars/three-game export-glb` | 仮ロボットをGLB書き出し（GLB読込経路の確認用） |
 
 `/arena` のURLオプション：`?mode=2d`（2D表示）、`?quality=low|medium|high`、`?reduced=1`（点滅・動き抑制）、`?stats=1`（FPS）、`?models=procedural`。
-キー：F フルスクリーン、S 表示設定、M ミュート。
+キー：F フルスクリーン、S 表示設定、M ミュート。演出リハーサル：`/arena?preview=1&speed=0.25`（1〜7キーで激突・必殺・KO等を再生、試合に影響なし）。
 
 ## 構成
 

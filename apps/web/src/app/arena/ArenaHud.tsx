@@ -20,7 +20,10 @@ export function ArenaHud({
   stats,
   renderer,
   contextLost,
+  preview = false,
 }: {
+  /** Rehearsal mode: hide status overlays so cinematics stay visible. */
+  preview?: boolean;
   snap: PublicMatchSnapshot;
   conn: MatchConnection;
   connState: ConnectionState;
@@ -131,8 +134,8 @@ export function ArenaHud({
         ))}
       </div>
 
-      {/* Centre banner */}
-      <div className="flex flex-1 items-center justify-center">
+      {/* Cinematic banner in the lower third, so it never hides the robots */}
+      <div className="flex flex-1 items-end justify-center pb-[2vh]">
         {banner && (
           <div
             key={banner.textJa + banner.until}
@@ -209,7 +212,7 @@ export function ArenaHud({
       </div>
 
       {/* Status overlays */}
-      {lobby && (
+      {!preview && lobby && (
         <Overlay>
           <div className="text-[2.2em] font-black">{J('まもなく開戦', 'BATTLE STARTS SOON')}</div>
           <div className="sw-display text-[9em] font-black leading-none tabular-nums">
@@ -220,7 +223,7 @@ export function ArenaHud({
           </div>
         </Overlay>
       )}
-      {snap.status === 'CREATED' && (
+      {!preview && snap.status === 'CREATED' && (
         <Overlay>
           <Logo size="lg" />
           <div className="mt-6 text-[2em] font-bold">
@@ -228,7 +231,7 @@ export function ArenaHud({
           </div>
         </Overlay>
       )}
-      {snap.status === 'PAUSED' && (
+      {!preview && snap.status === 'PAUSED' && (
         <Overlay>
           <div className="text-[4em] font-black text-yellow-300">{J('一時停止中', 'PAUSED')}</div>
           <div className="mt-2 text-[1.5em]">
@@ -239,7 +242,7 @@ export function ArenaHud({
           </div>
         </Overlay>
       )}
-      {snap.status === 'CANCELLED' && (
+      {!preview && snap.status === 'CANCELLED' && (
         <Overlay>
           <div className="text-[4em] font-black">{J('試合中止', 'MATCH CANCELLED')}</div>
         </Overlay>

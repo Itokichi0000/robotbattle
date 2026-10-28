@@ -42,11 +42,11 @@ export const CAMERA_PRESETS: Record<
   intro: { position: [0, 13, 27], target: [0, 4, -2] },
   overview: { position: [0, 6.0, 18.5], target: [0, 4.0, -2.4] },
   clash: { position: [0, 3.3, 9.2], target: [0, 2.5, 0] },
-  specialRAIJIN: { position: [-0.6, 2.4, 7.4], target: [-3.0, 2.8, 0.4] },
-  specialFUJIN: { position: [0.6, 2.4, 7.4], target: [3.0, 2.8, 0.4] },
-  final: { position: [0, 3.6, 11], target: [0, 2.7, 0] },
-  victoryRAIJIN: { position: [-0.9, 3.0, 7.8], target: [-3.0, 2.9, 0.4] },
-  victoryFUJIN: { position: [0.9, 3.0, 7.8], target: [3.0, 2.9, 0.4] },
+  specialRAIJIN: { position: [-0.8, 3.4, 11], target: [-3.0, 3.2, 0.4] },
+  specialFUJIN: { position: [0.8, 3.8, 12], target: [3.0, 3.8, 0.4] },
+  final: { position: [0, 4.0, 13], target: [0, 3.0, 0] },
+  victoryRAIJIN: { position: [-1.2, 3.4, 10.5], target: [-3.0, 3.2, 0.4] },
+  victoryFUJIN: { position: [1.2, 3.6, 10.5], target: [3.0, 3.4, 0.4] },
 };
 
 export const TEAM_COLORS: Record<TeamId | 'NEUTRAL', string> = {
