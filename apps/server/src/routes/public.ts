@@ -1,146 +1,194 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  actionRequestSchema,
+  boardRequestSchema,
   cheerRequestSchema,
-  joinRequestSchema,
-  nicknameChangeSchema,
-  redeemPassRequestSchema,
-  topupRequestSchema,
+  profilePatchSchema,
+  roleChangeSchema,
+  sponsoredRedeemSchema,
+  taskRequestSchema,
+  taskSubmitSchema,
 } from '@sats-wars/shared';
-import { extractBearer } from '../auth/tokens';
-import type { PlayerRow } from '../db/repo';
+import type { PilotRow } from '../db/repo';
 import { AppError } from '../errors';
 import type { Services } from '../services';
 
 export function registerPublicRoutes(app: FastifyInstance, services: Services): void {
-  const { manager, players, actions, repo, env } = services;
+  const { manager, pilots, passes, actions, repo, env, sessions } = services;
 
-  const requirePlayer = (authorization: string | undefined): PlayerRow => {
-    const p = players.authenticate(extractBearer(authorization));
-    if (!p) throw new AppError('UNAUTHORIZED', 'プレイヤー情報が見つかりません / Unknown player');
-    return p;
+  const requirePilot = (req: FastifyRequest): PilotRow => {
+    const auth = sessions.authenticate(req);
+    if (!auth) throw new AppError('UNAUTHORIZED', 'パイロット認証が必要です / Pilot login required');
+    return auth.pilot;
   };
 
-  app.get('/health', async () => ({ ok: true }));
-
-  app.get('/ready', async (_req, reply) => {
+  const health = async () => ({ ok: true });
+  app.get('/health', health);
+  app.get('/healthz', health);
+  const ready = async (_req: FastifyRequest, reply: import('fastify').FastifyReply) => {
     let dbOk = false;
     try {
       dbOk = repo.ping();
     } catch {
       dbOk = false;
     }
-    return reply.code(dbOk ? 200 : 503).send({
-      ok: dbOk,
-      db: dbOk,
-      matchId: manager.current()?.matchId ?? null,
-      paymentMode: env.PAYMENT_MODE,
-    });
-  });
+    return reply.code(dbOk ? 200 : 503).send({ ok: dbOk, db: dbOk, raidId: manager.current()?.raidId ?? null, paymentMode: env.PAYMENT_MODE });
+  };
+  app.get('/ready', ready);
+  app.get('/readyz', ready);
 
-  app.get('/api/public/current-match', async () => ({ snapshot: manager.snapshot() }));
+  // ---- raids (public read) ---------------------------------------------------------
 
-  app.get('/api/matches', async () => ({
-    matches: repo.listMatches(20).map((m) => ({
-      id: m.id,
-      status: m.status,
-      createdAt: m.created_at,
-      endedAt: m.ended_at,
-      reachedWave: m.reached_wave,
+  app.get('/api/public/current-raid', async () => ({ snapshot: manager.snapshot() }));
+
+  app.get('/api/raids', async () => ({
+    raids: repo.listRaids(20).map((r) => ({
+      id: r.id,
+      eventId: r.event_id,
+      status: r.status,
+      phase: r.phase,
+      outcome: r.outcome,
+      score: r.score_total,
+      createdAt: r.created_at,
+      endedAt: r.ended_at,
     })),
   }));
 
-  app.get('/api/matches/:id/snapshot', async (req) => {
+  app.get('/api/raids/:id/snapshot', async (req) => {
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
-    if (id === manager.current().matchId) return { snapshot: manager.snapshot() };
-    const row = repo.getMatch(id);
-    if (!row?.final_snapshot_json) throw new AppError('NOT_FOUND', 'match not found');
+    if (id === manager.current().raidId) return { snapshot: manager.snapshot() };
+    const row = repo.getRaid(id);
+    if (!row?.final_snapshot_json) throw new AppError('NOT_FOUND', 'raid not found');
     return { snapshot: JSON.parse(row.final_snapshot_json) };
   });
 
-  // ---- players ---------------------------------------------------------------
-
-  app.post('/api/players', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
-    return players.join(joinRequestSchema.parse(req.body ?? {}));
+  app.get('/api/raids/:id/results', async (req) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const row = id === manager.current().raidId ? null : repo.getRaid(id);
+    const result = id === manager.current().raidId ? manager.current().state.result : row?.result_json ? JSON.parse(row.result_json) : null;
+    if (!result) throw new AppError('NOT_FOUND', 'no result yet');
+    return { raidId: id, result };
   });
 
-  app.get('/api/me', async (req) => players.me(requirePlayer(req.headers.authorization)));
-
-  app.post('/api/me/nickname', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    const { nickname } = nicknameChangeSchema.parse(req.body ?? {});
-    return { nickname: players.changeNickname(p, nickname) };
+  /** Same-rules leaderboard: config hash + assist flag; raids with bots excluded. */
+  app.get('/api/leaderboard', async (req) => {
+    const q = z.object({ configHash: z.string().max(16).optional(), assisted: z.enum(['0', '1']).optional() }).parse(req.query);
+    const hash = q.configHash ?? manager.current().state.configHash;
+    return {
+      configHash: hash,
+      assisted: q.assisted === '1',
+      raids: repo.leaderboard(hash, q.assisted === '1', 20).map((r) => ({
+        raidId: r.id,
+        eventId: r.event_id,
+        score: r.score_total,
+        outcome: r.outcome,
+        endedAt: r.ended_at,
+        result: r.result_json ? JSON.parse(r.result_json) : null,
+      })),
+    };
   });
 
-  // ---- credit -------------------------------------------------------------------
+  // ---- pilot ------------------------------------------------------------------------
 
-  app.post('/api/topups', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    const { amountSats } = topupRequestSchema.parse(req.body ?? {});
-    return players.createTopup(p, amountSats);
+  app.get('/api/me', async (req) => {
+    const p = requirePilot(req);
+    return pilots.me(p, passes.pendingInvoice(p));
   });
 
-  app.get('/api/topups/:invoiceId', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    const { invoiceId } = z.object({ invoiceId: z.string().min(1).max(64) }).parse(req.params);
-    // Opportunistically re-verify (covers missing webhooks).
-    const inv = repo.getInvoice(invoiceId);
-    if (inv?.player_id === p.id && inv.status === 'PENDING') await players.checkInvoice(inv.id);
-    return players.topupStatus(p, invoiceId);
+  app.patch('/api/me', async (req) => {
+    const p = requirePilot(req);
+    return { pilot: pilots.patch(p, profilePatchSchema.parse(req.body ?? {})) };
   });
 
-  app.post('/api/codes/redeem', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    const { code } = redeemPassRequestSchema.parse(req.body ?? {});
-    return players.redeemPass(p, code);
+  app.get('/api/me/passport', async (req) => pilots.passport(requirePilot(req)));
+
+  app.post('/api/me/export', async (req) => pilots.export(requirePilot(req)));
+
+  app.delete('/api/me', async (req, reply) => {
+    const p = requirePilot(req);
+    pilots.delete(p);
+    sessions.clearCookie(reply);
+    return { ok: true };
   });
 
-  // ---- battle -------------------------------------------------------------------
+  // ---- raid actions -----------------------------------------------------------------
 
-  app.post('/api/action', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
-    return actions.act(p, actionRequestSchema.parse(req.body ?? {}));
+  app.post('/api/raids/current/board', async (req) => {
+    const p = requirePilot(req);
+    const { role, robot } = boardRequestSchema.parse(req.body ?? {});
+    const r = actions.board(p, role, robot);
+    return { pilot: r.pilot, entitlementSource: r.source };
+  });
+
+  app.post('/api/raids/current/change-role', async (req) => {
+    const p = requirePilot(req);
+    const { role, robot } = roleChangeSchema.parse(req.body ?? {});
+    return actions.changeRole(p, role, robot);
+  });
+
+  app.post('/api/raids/current/tasks', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePilot(req);
+    return actions.requestTask(p, taskRequestSchema.parse(req.body ?? {}));
+  });
+
+  app.post('/api/raids/current/tasks/submit', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePilot(req);
+    return actions.submitTask(p, taskSubmitSchema.parse(req.body ?? {}));
   });
 
   app.post('/api/cheer', async (req) => {
-    const p = requirePlayer(req.headers.authorization);
+    const p = requirePilot(req);
     const { emoji } = cheerRequestSchema.parse(req.body ?? {});
     actions.cheer(p, emoji);
     return { ok: true };
   });
 
-  // ---- payments -------------------------------------------------------------------
+  // ---- passes ---------------------------------------------------------------------------
+
+  app.post('/api/raids/current/pass/invoice', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+    return passes.createInvoice(requirePilot(req));
+  });
+
+  app.get('/api/invoices/:id/status', async (req) => {
+    const p = requirePilot(req);
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    // Opportunistic re-verification (covers missing webhooks).
+    const inv = repo.getInvoice(id);
+    if (inv?.pilot_id === p.id && inv.status === 'PENDING') await passes.checkInvoice(inv.id);
+    return passes.status(p, id);
+  });
+
+  app.post('/api/raids/current/pass/sponsored', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePilot(req);
+    const { code } = sponsoredRedeemSchema.parse(req.body ?? {});
+    return passes.redeemSponsored(p, code);
+  });
 
   if (env.PAYMENT_MODE === 'mock') {
     // Test-only virtual payment. Not registered at all in lnbits mode.
     app.post('/api/dev/mock-pay', async (req) => {
-      const p = requirePlayer(req.headers.authorization);
+      const p = requirePilot(req);
       const { invoiceId } = z.object({ invoiceId: z.string().min(1).max(64) }).parse(req.body ?? {});
-      const status = await players.mockPay(p, invoiceId);
-      return { status, creditSats: repo.getPlayer(p.id)!.credit_sats };
+      const status = await passes.mockPay(p, invoiceId);
+      return passes.status(p, invoiceId) ?? { status };
     });
   }
 
   /**
    * LNbits webhook. The body is only a hint: we look up our own invoice by
-   * payment_hash and re-query LNbits before crediting anything. Always 200 so
+   * payment_hash and re-query LNbits before granting anything. Always 200 so
    * the endpoint does not leak which hashes exist.
    */
-  app.post(
-    '/api/webhooks/lnbits/:secret',
-    { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } },
-    async (req, reply) => {
-      const { secret } = z.object({ secret: z.string().max(256) }).parse(req.params);
-      if (!env.LNBITS_WEBHOOK_SECRET || secret !== env.LNBITS_WEBHOOK_SECRET) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
-      }
-      const body = z
-        .object({ payment_hash: z.string().regex(/^[0-9a-fA-F]{64}$/) })
-        .passthrough()
-        .safeParse(req.body);
-      if (body.success) await players.handleWebhook(body.data.payment_hash.toLowerCase());
-      return { ok: true };
-    },
-  );
+  app.post('/api/webhooks/lnbits/:secret', { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const { secret } = z.object({ secret: z.string().max(256) }).parse(req.params);
+    if (!env.LNBITS_WEBHOOK_SECRET || secret !== env.LNBITS_WEBHOOK_SECRET) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'not found' });
+    }
+    const body = z
+      .object({ payment_hash: z.string().regex(/^[0-9a-fA-F]{64}$/) })
+      .passthrough()
+      .safeParse(req.body);
+    if (body.success) await passes.handleWebhook(body.data.payment_hash.toLowerCase());
+    return { ok: true };
+  });
 }

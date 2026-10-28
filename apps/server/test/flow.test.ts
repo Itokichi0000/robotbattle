@@ -1,18 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { GameEvent, RegionId } from '@sats-wars/shared';
-import { REGION_IDS } from '@sats-wars/shared';
-import {
-  type TestServer,
-  act,
-  admin,
-  auth,
-  fundedPlayer,
-  join,
-  makeServer,
-  mockPay,
-  tempDbPath,
-  topup,
-} from './helpers';
+import type { Task } from '@sats-wars/shared';
+import { mulberry32, solveTask } from '@sats-wars/game-engine';
+import { FakeClock } from '../src/clock';
+import { type PilotHandle, type TestServer, admin, auth, board, guest, makeServer, requestTask, startRaid, submitTask, tempDbPath } from './helpers';
 
 let s: TestServer | null = null;
 afterEach(async () => {
@@ -20,266 +10,269 @@ afterEach(async () => {
   s = null;
 });
 
-const credit = (srv: TestServer, playerId: string) => srv.services.repo.getPlayer(playerId)!.credit_sats;
-const state = (srv: TestServer) => srv.services.manager.current().state;
-const emptyRegion = (srv: TestServer): RegionId =>
-  REGION_IDS.find((id) => !state(srv).enemies.some((e) => e.regionId === id) && !state(srv).regions[id].fallen)!;
+const DEMO = { DEMO_MODE: 'true' };
+const PAID = { PASS_MODE: 'PAID' };
 
-describe('EARTH DEFENSE server flow', () => {
-  it('starts a campaign by itself with aliens on the map; joining is free and team-less', async () => {
-    s = await makeServer();
-    const snap = s.services.manager.snapshot();
-    expect(snap.status).toBe('LIVE');
-    expect(snap.wave).toBe(1);
-    expect(snap.enemies.length).toBeGreaterThan(0);
-    expect(snap.regions).toHaveLength(8);
-    const p = await join(s);
-    expect(p).toMatchObject({ creditSats: 0 });
-    expect(p.nickname).toMatch(/^隊員/);
-    const me = (await s.inject({ url: '/api/me', headers: auth(p.token) })).json();
-    expect(me).toMatchObject({ creditSats: 0, actionsThisCampaign: 0, kills: 0 });
-    expect(s.services.manager.snapshot().playersOnline).toBe(1);
+/** Request a mission, solve it perfectly, wait the play time, submit. */
+async function playOnce(srv: TestServer, p: PilotHandle, choice: Record<string, unknown> = {}) {
+  const r = await requestTask(srv, p, choice);
+  expect(r.statusCode).toBe(200);
+  const body = r.json() as { code: string; task: Task | null };
+  if (body.code !== 'OK' || !body.task) return { code: body.code, result: null };
+  const input = solveTask(body.task.params, 1, mulberry32(1), 700);
+  const wait = 'stopAtMs' in input ? input.stopAtMs : 'releaseAtMs' in input ? input.releaseAtMs : 1500;
+  await srv.advance(wait + 100);
+  const sub = await submitTask(srv, p, body.task.taskId, input);
+  expect(sub.statusCode).toBe(200);
+  return { code: 'OK', result: sub.json().result, task: body.task, input };
+}
+
+describe('server basics', () => {
+  it('health and the public raid snapshot (lobby open, demo labelled)', async () => {
+    s = await makeServer({ env: DEMO });
+    expect((await s.inject({ url: '/healthz' })).json()).toEqual({ ok: true });
+    expect((await s.inject({ url: '/readyz' })).statusCode).toBe(200);
+    const snap = (await s.inject({ url: '/api/public/current-raid' })).json().snapshot;
+    expect(snap).toMatchObject({ status: 'LOBBY_OPEN', phase: 'LOBBY', joinOpen: true, passMode: 'FREE', demoMode: true, ticketPriceSats: 21 });
+    expect(snap.crew).toEqual([]);
   });
 
-  it('nothing moves while nobody acts: time alone never advances the aliens', async () => {
-    s = await makeServer();
-    const before = s.services.manager.snapshot();
-    await s.advance(5 * 60_000);
-    const after = s.services.manager.snapshot();
-    expect(after.lastSeq).toBe(before.lastSeq);
-    expect(after.regions).toEqual(before.regions);
+  it('guest pilots: cookie session (HttpOnly), device reuse, sanitised callsign, consent-based names', async () => {
+    s = await makeServer({ env: DEMO });
+    const res = await s.inject({ method: 'POST', url: '/api/auth/guest', payload: { callsign: '<b>たろう</b>', deviceId: 'device-123456' } });
+    const cookie = String(res.headers['set-cookie']);
+    expect(cookie).toMatch(/sw_session=[A-Za-z0-9_-]+; Path=\/; HttpOnly; SameSite=Lax/);
+    const pilot = res.json().pilot;
+    expect(pilot.callsign).toBe('bたろう/b');
+    expect(pilot.authType).toBe('GUEST');
+    const again = await guest(s, { deviceId: 'device-123456' });
+    expect(again.pilotId).toBe(pilot.pilotId);
+    // Cookie works for reads; a cookie-authenticated POST needs an allowed Origin (CSRF guard).
+    const sessionCookie = cookie.split(';')[0]!;
+    expect((await s.inject({ url: '/api/me', headers: { cookie: sessionCookie } })).statusCode).toBe(200);
+    expect((await s.inject({ method: 'PATCH', url: '/api/me', headers: { cookie: sessionCookie }, payload: { avatar: 'aero' } })).statusCode).toBe(403);
+    const ok = await s.inject({ method: 'PATCH', url: '/api/me', headers: { cookie: sessionCookie, origin: 'http://localhost:3000' }, payload: { avatar: 'aero' } });
+    expect(ok.json().pilot.avatar).toBe('aero');
+    // Names on the venue screen: pseudonym unless the pilot opts in.
+    const p = { pilotId: pilot.pilotId, token: again.token, callsign: pilot.callsign };
+    await board(s, p, 'GUNNER');
+    const crew = (await s.inject({ url: '/api/public/current-raid' })).json().snapshot.crew;
+    expect(crew[0].callsign).toMatch(/^PILOT-\d{5}$/);
+    await s.inject({ method: 'PATCH', url: '/api/me', headers: auth(p.token), payload: { showNameOnArena: true } });
+    expect(s.services.manager.snapshot().crew[0]!.callsign).toBe('bたろう/b');
   });
+});
 
-  it('an action without credit is refused and changes nothing', async () => {
-    s = await makeServer();
-    const p = await join(s);
-    const before = s.services.manager.snapshot().lastSeq;
-    const res = await act(s, p.token);
-    expect(res.statusCode).toBe(402);
-    expect(res.json().error).toBe('INSUFFICIENT_CREDIT');
-    expect(s.services.manager.snapshot().lastSeq).toBe(before);
-  });
-
-  it('top-up: only the offered amounts, credited once after verification', async () => {
-    s = await makeServer();
-    const p = await join(s);
-    expect((await topup(s, p.token, 100)).statusCode).toBe(400);
-    const inv = (await topup(s, p.token, 210)).json();
-    expect(inv).toMatchObject({ amountSats: 210, actions: 10, status: 'PENDING', paymentMode: 'mock' });
-    expect(inv.bolt11).toContain('NOT-A-REAL-INVOICE');
-    expect((await topup(s, p.token, 210)).json().invoiceId).toBe(inv.invoiceId);
-    expect((await mockPay(s, p.token, inv.invoiceId)).json()).toMatchObject({ status: 'PAID', creditSats: 210 });
-    expect((await mockPay(s, p.token, inv.invoiceId)).json()).toMatchObject({ status: 'PAID', creditSats: 210 });
-    expect(credit(s, p.playerId)).toBe(210);
-    const other = await join(s, { deviceId: 'other-device-0001' });
-    expect((await s.inject({ url: `/api/topups/${inv.invoiceId}`, headers: auth(other.token) })).statusCode).toBe(404);
-  });
-
-  it('おすすめ action costs 21 sats, hits an alien and shows the name; retries and refusals are free', async () => {
-    s = await makeServer();
-    const p = await fundedPlayer(s, 210, 'たろう');
-    const res = await act(s, p.token, { clientActionId: 'tap-00000001' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body).toMatchObject({ duplicate: false, creditSats: 189 });
-    expect(body.result).toMatchObject({ ok: true, code: 'OK' });
-    expect(body.result.damage).toBeGreaterThan(0);
-    const snap = s.services.manager.snapshot();
-    const ev = snap.recentEvents.find((e) => e.type === 'PLAYER_ACTION') as Extract<GameEvent, { type: 'PLAYER_ACTION' }>;
-    expect(ev.data).toMatchObject({ nickname: 'たろう', auto: true });
-    expect(snap.actionsThisTurn).toBe(1);
-    // Same clientActionId again: answered from storage, not charged.
-    s.clock.advance(500);
-    expect((await act(s, p.token, { clientActionId: 'tap-00000001' })).json()).toMatchObject({ duplicate: true, creditSats: 189 });
-    // Tapping faster than the cooldown is refused (and free).
-    s.clock.advance(500);
-    await act(s, p.token);
-    expect((await act(s, p.token)).statusCode).toBe(429);
-    // Hitting an empty region is a free no-op, and not written to the command log.
-    s.clock.advance(500);
-    const logBefore = s.services.repo.loadCommands(state(s).matchId).length;
-    const miss = (await act(s, p.token, { action: 'RAIJIN', regionId: emptyRegion(s) })).json();
-    expect(miss).toMatchObject({ result: { ok: false, code: 'NO_TARGET' }, creditSats: 168 });
-    expect(s.services.repo.loadCommands(state(s).matchId)).toHaveLength(logBefore);
-  });
-
-  it('every N actions (from any players) the aliens take their turn', async () => {
-    s = await makeServer({ env: { ACTIONS_PER_TURN: '3' } });
-    const a = await fundedPlayer(s, 210, 'a');
-    const b = await fundedPlayer(s, 210, 'b');
-    const quiet = emptyRegion(s);
-    // Barriers in a quiet region keep the aliens' numbers predictable.
-    await act(s, a.token, { action: 'SHIELD', regionId: quiet });
-    s.clock.advance(500);
-    await act(s, b.token, { action: 'AUTO' });
-    expect(state(s).stats.alienTurns).toBe(0);
-    s.clock.advance(500);
-    const third = (await act(s, a.token, { action: 'AUTO' })).json();
-    expect(third.result.triggeredAlienTurn).toBe(true);
-    expect(state(s).stats.alienTurns).toBe(1);
-    expect(state(s).actionsThisTurn).toBe(0);
-    expect(s.services.manager.snapshot().recentEvents.some((e) => e.type === 'ALIEN_TURN')).toBe(true);
-  });
-
-  it('a full campaign with demo defenders ends with Japan falling, keeps a record and loops into a new one', async () => {
-    s = await makeServer();
-    const token = await s.adminToken();
-    await admin(s, token, { command: 'SET_DEMO_BOTS', count: 12 });
-    const first = state(s).matchId;
-    let waited = 0;
-    while (state(s).status !== 'FINISHED') {
-      await s.advance(2000);
-      waited += 2000;
-      expect(waited).toBeLessThan(60 * 60_000);
+describe('raid flow (free event)', () => {
+  it('board → missions → idempotent submit → SYNC; 4 seats on two robots', async () => {
+    s = await makeServer({ env: DEMO });
+    const pilots: PilotHandle[] = [];
+    for (const [i, role] of ['GUNNER', 'GUARDIAN', 'ROUTER', 'ENGINEER'].entries()) {
+      const p = await guest(s, { deviceId: `dev-${i}-xxxxxxxx` });
+      const b = await board(s, p, role);
+      expect(b.statusCode).toBe(200);
+      expect(b.json().entitlementSource).toBe('FREE');
+      pilots.push(p);
     }
-    const done = s.services.manager.snapshot();
-    expect(done.result).toMatchObject({ reason: 'JAPAN_FALLEN' });
-    expect(done.regions.filter((r) => r.fallen).length).toBeGreaterThanOrEqual(done.config.fallLimit);
-    expect(s.services.repo.invoiceSummary()).toEqual({});
-    const saved = (await s.inject({ url: `/api/matches/${first}/snapshot` })).json();
-    expect(saved.snapshot.status).toBe('FINISHED');
-    await admin(s, token, { command: 'SET_DEMO_BOTS', count: 0 });
-    await s.advance(done.config.nextCampaignDelayMs + 500);
-    const next = s.services.manager.snapshot();
-    expect(next.matchId).not.toBe(first);
-    expect(next.status).toBe('LIVE');
-    expect(next.wave).toBe(1);
-    expect(next.bestWave).toBe(done.wave);
-  }, 60_000);
-
-  it('credit carries over between campaigns and survives a lost browser tab (same device)', async () => {
-    s = await makeServer();
-    const token = await s.adminToken();
-    const p = await join(s, { deviceId: 'device-abc-123' });
-    const inv = (await topup(s, p.token, 105)).json();
-    await mockPay(s, p.token, inv.invoiceId);
-    await admin(s, token, { command: 'CANCEL' });
-    await admin(s, token, { command: 'NEXT_MATCH' });
-    const again = await join(s, { deviceId: 'device-abc-123' });
-    expect(again).toMatchObject({ playerId: p.playerId, creditSats: 105 });
-    expect(again.token).not.toBe(p.token);
-    expect((await s.inject({ url: '/api/me', headers: auth(p.token) })).statusCode).toBe(401);
-  });
-
-  it('late payment (paid at the edge, seen after expiry) still becomes credit', async () => {
-    s = await makeServer();
-    const p = await join(s);
-    const inv = (await topup(s, p.token, 105)).json();
-    const row = s.services.repo.getInvoice(inv.invoiceId)!;
-    const adapter = s.services.adapter as import('../src/payments/mock').MockPaymentAdapter;
-    s.clock.advance(row.expires_at - s.clock.now() + 1000);
-    adapter.markPaid(row.lnbits_checking_id, { ignoreExpiry: true });
-    await s.services.players.pollPending();
-    expect(s.services.repo.getInvoice(inv.invoiceId)!.status).toBe('PAID');
-    expect(credit(s, p.playerId)).toBe(105);
-  });
-
-  it('unpaid invoices expire without side effects; provider outages retry', async () => {
-    s = await makeServer();
-    const p = await join(s);
-    const inv = (await topup(s, p.token, 105)).json();
-    s.clock.advance(30 * 60_000);
-    await s.services.players.pollPending();
-    expect(s.services.repo.getInvoice(inv.invoiceId)!.status).toBe('EXPIRED');
-    const inv2 = (await topup(s, p.token, 210)).json();
-    const adapter = s.services.adapter as import('../src/payments/mock').MockPaymentAdapter;
-    adapter.markPaid(s.services.repo.getInvoice(inv2.invoiceId)!.lnbits_checking_id);
-    adapter.failChecks = true;
-    await s.services.players.pollPending();
-    expect(s.services.repo.getInvoice(inv2.invoiceId)).toMatchObject({ status: 'PENDING', check_failures: 1 });
-    adapter.failChecks = false;
-    await s.services.players.pollPending();
-    expect(credit(s, p.playerId)).toBe(210);
-  });
-
-  it('credit codes add credit once, even while Lightning top-ups are paused', async () => {
-    s = await makeServer();
-    const token = await s.adminToken();
-    const issued = await s.inject({ method: 'POST', url: '/api/admin/passes', headers: auth(token), payload: { count: 2, amountSats: 105 } });
-    const { codes } = issued.json() as { codes: string[] };
-    await admin(s, token, { command: 'SET_PAYMENTS_ENABLED', enabled: false });
-    const p = await join(s);
-    expect((await topup(s, p.token, 105)).statusCode).toBe(503);
-    const redeem = (code: string) => s!.inject({ method: 'POST', url: '/api/codes/redeem', headers: auth(p.token), payload: { code } });
-    expect((await redeem(codes[0]!.toLowerCase())).json()).toEqual({ addedSats: 105, creditSats: 105 });
-    expect((await redeem(codes[0]!)).statusCode).toBe(400);
-    expect(credit(s, p.playerId)).toBe(105);
-  });
-
-  it('free cheers are rate limited and never touch credit', async () => {
-    s = await makeServer();
-    const p = await join(s);
-    const cheer = () => s!.inject({ method: 'POST', url: '/api/cheer', headers: auth(p.token), payload: { emoji: '🔥' } });
-    expect((await cheer()).statusCode).toBe(200);
-    expect((await cheer()).statusCode).toBe(429);
-    s.clock.advance(1000);
-    expect((await cheer()).statusCode).toBe(200);
-    expect(credit(s, p.playerId)).toBe(0);
-  });
-
-  it('hidden nicknames are masked on public screens', async () => {
-    s = await makeServer();
-    const token = await s.adminToken();
-    const p = await fundedPlayer(s, 105, 'NGネーム');
-    await s.inject({
+    const st0 = s.services.manager.current().state;
+    expect(st0.pilots[pilots[0]!.pilotId]!.robot).toBe('RAIJIN');
+    expect(st0.pilots[pilots[1]!.pilotId]!.robot).toBe('FUJIN');
+    // Missions before the raid starts are refused (nothing to do yet).
+    expect((await requestTask(s, pilots[0]!)).json().code).toBe('NOT_LIVE');
+    await startRaid(s);
+    await s.advance(8000);
+    const g = await playOnce(s, pilots[0]!);
+    expect(g.result).toMatchObject({ ok: true, success: 1, effect: { kind: 'DAMAGE' } });
+    // Same clientSubmissionId again → stored result, no second effect.
+    const r2 = await requestTask(s, pilots[1]!);
+    const t2 = r2.json().task as Task;
+    const in2 = solveTask(t2.params, 1, mulberry32(2), 700);
+    await s.advance(('releaseAtMs' in in2 ? in2.releaseAtMs : 1000) + 100);
+    const first = await submitTask(s, pilots[1]!, t2.taskId, in2, 'dup-submission-1');
+    const second = await submitTask(s, pilots[1]!, t2.taskId, in2, 'dup-submission-1');
+    expect(first.json().duplicate).toBe(false);
+    expect(second.json()).toEqual({ result: first.json().result, duplicate: true });
+    expect(s.services.manager.current().state.sync).toBeGreaterThan(0);
+    // The client never sends damage: malformed input is rejected by the schema.
+    const r3 = await requestTask(s, pilots[2]!);
+    const bad = await s.inject({
       method: 'POST',
-      url: `/api/admin/players/${p.playerId}/nickname-visibility`,
-      headers: auth(token),
-      payload: { hidden: true },
+      url: '/api/raids/current/tasks/submit',
+      headers: auth(pilots[2]!.token),
+      payload: { taskId: r3.json().task.taskId, clientSubmissionId: 'bad-input-1', input: { role: 'ROUTER', path: 'all' } },
     });
-    await act(s, p.token);
-    expect(JSON.stringify(s.services.manager.snapshot())).not.toContain('NGネーム');
+    expect(bad.statusCode).toBe(400);
   });
 
-  it('admin API needs a session and checks Origin; emergency stop halts everything', async () => {
-    s = await makeServer({ env: { ALLOWED_ORIGINS: 'http://localhost:3000' } });
-    expect((await s.inject({ url: '/api/admin/overview' })).statusCode).toBe(401);
-    const bad = await s.inject({ method: 'POST', url: '/api/admin/login', headers: { origin: 'https://evil.example' }, payload: { password: 'x' } });
-    expect(bad.statusCode).toBe(403);
+  it('seat change cooldown; boarding closes at 4:00; raid ends and pilots get passports; next lobby opens', async () => {
+    s = await makeServer({ env: DEMO });
+    const a = await guest(s, { deviceId: 'dev-a-xxxxxxxx' });
+    await board(s, a, 'GUNNER');
+    await startRaid(s);
+    await s.advance(8000);
+    await playOnce(s, a);
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/change-role', headers: auth(a.token), payload: { role: 'ROUTER' } })).statusCode).toBe(200);
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/change-role', headers: auth(a.token), payload: { role: 'GUNNER' } })).statusCode).toBe(429);
+    await s.advance(235_000);
+    const late = await guest(s, { deviceId: 'dev-late-xxxxxx' });
+    const lb = await board(s, late, 'GUNNER');
+    expect(lb.json().error).toBe('JOIN_CLOSED');
     const token = await s.adminToken();
-    const p = await fundedPlayer(s, 105);
+    if (s.services.manager.current().state.status === 'LIVE') await admin(s, token, { command: 'END', reason: 'test' });
+    const st = s.services.manager.current().state;
+    expect(st.status).toBe('ENDED');
+    expect(st.result!.outcome).toBe('FAILED');
+    const passport = (await s.inject({ url: '/api/me/passport', headers: auth(a.token) })).json();
+    expect(passport.pilot.sorties).toBe(1);
+    expect(passport.history[0]).toMatchObject({ raidId: st.raidId, outcome: 'FAILED' });
+    expect(passport.pilot.titles).toContain('FIRST_SORTIE');
+    const results = (await s.inject({ url: `/api/raids/${st.raidId}/results` })).json();
+    expect(results.result.score.total).toBeGreaterThanOrEqual(0);
+    await s.advance(31_000);
+    expect(s.services.manager.current().raidId).not.toBe(st.raidId);
+    expect(s.services.manager.current().state.status).toBe('LOBBY_OPEN');
+  });
+
+  it('the lobby starts by itself once someone boarded and the lobby time passed', async () => {
+    s = await makeServer({ env: DEMO });
+    await s.advance(70_000);
+    expect(s.services.manager.current().state.status).toBe('LOBBY_OPEN');
+    const a = await guest(s);
+    await board(s, a, 'GUARDIAN');
+    await s.advance(200);
+    expect(s.services.manager.snapshot().lobbyEndsAt).not.toBeNull();
+    await s.advance(21_000);
+    expect(s.services.manager.current().state.status).toBe('LIVE');
+  });
+});
+
+describe('raid passes (21 sats)', () => {
+  it('no pass → 402; Lightning pass after verified payment; the payment never changes the pilot', async () => {
+    s = await makeServer({ env: PAID });
+    const a = await guest(s);
+    const b0 = await board(s, a, 'GUNNER');
+    expect(b0.statusCode).toBe(402);
+    expect(b0.json().error).toBe('PASS_REQUIRED');
+    const inv = await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(a.token) });
+    expect(inv.json()).toMatchObject({ amountSats: 21, status: 'PENDING', paymentMode: 'mock' });
+    expect(inv.json().bolt11).toContain('NOT-A-REAL-INVOICE');
+    // Until the payment is verified nothing is granted.
+    expect((await board(s, a, 'GUNNER')).statusCode).toBe(402);
+    const paid = await s.inject({ method: 'POST', url: '/api/dev/mock-pay', headers: auth(a.token), payload: { invoiceId: inv.json().invoiceId } });
+    expect(paid.json()).toMatchObject({ status: 'PAID', entitled: true });
+    expect((await board(s, a, 'GUNNER')).json().entitlementSource).toBe('LIGHTNING');
+    // Sponsored pilot: same seat, identical engine pilot (no payment info inside the game).
+    const token = await s.adminToken();
+    const codes = (await s.inject({ method: 'POST', url: '/api/admin/sponsored-passes', headers: auth(token), payload: { count: 2 } })).json().codes;
+    const b = await guest(s);
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/pass/sponsored', headers: auth(b.token), payload: { code: codes[0] } })).statusCode).toBe(200);
+    expect((await board(s, b, 'GUNNER')).json().entitlementSource).toBe('SPONSORED');
+    const st = s.services.manager.current().state;
+    const strip = (x: object) => JSON.parse(JSON.stringify(x, (k, v) => (['pilotId', 'callsign'].includes(k) ? undefined : v)));
+    expect(strip(st.pilots[a.pilotId]!)).toEqual(strip(st.pilots[b.pilotId]!));
+    // A used code fails; a second pass for the same raid is refused without consuming the code.
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/pass/sponsored', headers: auth(b.token), payload: { code: codes[0] } })).json().error).toBe('INVALID_PASS');
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/pass/sponsored', headers: auth(a.token), payload: { code: codes[1] } })).json().error).toBe('ALREADY_ENTITLED');
+  });
+
+  it('late payment becomes a pass credit for the next raid (never forfeited)', async () => {
+    s = await makeServer({ env: PAID });
+    const a = await guest(s);
+    const inv = (await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(a.token) })).json();
+    const token = await s.adminToken();
+    await admin(s, token, { command: 'NEXT_RAID' });
+    // The wallet pays after the raid it was for is gone.
+    await s.inject({ method: 'POST', url: '/api/dev/mock-pay', headers: auth(a.token), payload: { invoiceId: inv.invoiceId } });
+    const me = (await s.inject({ url: '/api/me', headers: auth(a.token) })).json();
+    expect(me.passCredits).toBe(1);
+    expect(me.seat.entitled).toBe(false);
+    expect((await board(s, a, 'ROUTER')).json().entitlementSource).toBe('CREDIT');
+    expect((await s.inject({ url: '/api/me', headers: auth(a.token) })).json().passCredits).toBe(0);
+  });
+
+  it('no invoice close to the boarding cutoff; operators can stop paid invoices and boarding', async () => {
+    s = await makeServer({ env: PAID });
+    const token = await startRaid(s);
+    await s.advance(200_000);
+    const a = await guest(s);
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(a.token) })).json().error).toBe('JOIN_CLOSED');
+    if (s.services.manager.current().state.status === 'LIVE') await admin(s, token, { command: 'END' });
+    await admin(s, token, { command: 'NEXT_RAID' });
+    await admin(s, token, { command: 'SET_PAYMENTS_ENABLED', enabled: false });
+    expect((await s.inject({ method: 'POST', url: '/api/raids/current/pass/invoice', headers: auth(a.token) })).json().error).toBe('PAYMENTS_DISABLED');
+    await admin(s, token, { command: 'SET_PASS_MODE', mode: 'FREE' });
+    await admin(s, token, { command: 'SET_JOIN_STOPPED', stopped: true });
+    expect((await board(s, a, 'GUNNER')).json().error).toBe('JOIN_CLOSED');
+    await admin(s, token, { command: 'SET_JOIN_STOPPED', stopped: false });
+    expect((await board(s, a, 'GUNNER')).statusCode).toBe(200);
+  });
+});
+
+describe('operations', () => {
+  it('admin: auth required, names hidden, broadcast, emergency stop, audit; time scale only in demo', async () => {
+    s = await makeServer({ env: DEMO });
+    expect((await s.inject({ method: 'POST', url: '/api/admin/command', payload: { command: 'START' } })).statusCode).toBe(401);
+    const token = await s.adminToken();
+    const a = await guest(s, { callsign: 'たろう' });
+    await s.inject({ method: 'PATCH', url: '/api/me', headers: auth(a.token), payload: { showNameOnArena: true } });
+    await board(s, a, 'GUNNER');
+    expect(s.services.manager.snapshot().crew[0]!.callsign).toBe('たろう');
+    await admin(s, token, { command: 'SET_NAMES_HIDDEN', hidden: true });
+    expect(s.services.manager.snapshot().crew[0]!.callsign).toMatch(/^PILOT-/);
+    await admin(s, token, { command: 'BROADCAST', template: 'NEXT_RAID_SOON', seconds: 30 });
+    expect(s.services.manager.snapshot().broadcast?.messageJa).toContain('次の作戦');
+    await admin(s, token, { command: 'BROADCAST', template: 'CUSTOM', ja: '<script>x</script>休憩', seconds: 10 });
+    expect(s.services.manager.snapshot().broadcast?.messageJa).toBe('scriptx/script休憩');
+    await admin(s, token, { command: 'SET_TIME_SCALE', speed: 10 });
+    await startRaid(s);
     await admin(s, token, { command: 'EMERGENCY_STOP' });
-    const ov = (await s.inject({ url: '/api/admin/overview', headers: auth(token) })).json();
-    expect(ov).toMatchObject({ paymentsEnabled: false, autoLoop: false, snapshot: { status: 'PAUSED' } });
-    expect((await act(s, p.token)).json()).toMatchObject({ result: { ok: false, code: 'PAUSED' }, creditSats: 105 });
+    const st = s.services.manager.snapshot();
+    expect(st.status).toBe('PAUSED');
+    expect(st.joinOpen).toBe(false);
+    expect(st.paymentsEnabled).toBe(false);
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json().entries.map((e: { action: string }) => e.action);
+    expect(audit).toEqual(expect.arrayContaining(['EMERGENCY_STOP', 'SET_NAMES_HIDDEN', 'BROADCAST', 'SET_TIME_SCALE', 'START']));
+
+    const prod = await makeServer({ env: PAID });
+    const t2 = await prod.adminToken();
+    const r = await prod.inject({ method: 'POST', url: '/api/admin/command', headers: auth(t2), payload: { command: 'SET_TIME_SCALE', speed: 10 } });
+    expect(r.statusCode).toBe(403);
+    await prod.close();
   });
 
-  it('staff credit adjustments are audited and cannot go negative', async () => {
-    s = await makeServer();
-    const token = await s.adminToken();
-    const p = await join(s);
-    const add = await s.inject({ method: 'POST', url: `/api/admin/players/${p.playerId}/credit`, headers: auth(token), payload: { deltaSats: 105, note: 'LNbitsで入金確認済み' } });
-    expect(add.json()).toEqual({ creditSats: 105 });
-    const neg = await s.inject({ method: 'POST', url: `/api/admin/players/${p.playerId}/credit`, headers: auth(token), payload: { deltaSats: -500, note: 'oops' } });
-    expect(neg.statusCode).toBe(400);
-    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json();
-    expect(audit.entries[0]).toMatchObject({ action: 'ADJUST_CREDIT', target_id: p.playerId });
-  });
-
-  it('restart: the campaign comes back paused with the same board, then auto-resumes', async () => {
+  it('restart: the raid is rebuilt from the command log, paused, then resumed by itself', async () => {
     const dbPath = tempDbPath();
-    s = await makeServer({ dbPath });
-    const p = await fundedPlayer(s, 210);
-    await act(s, p.token);
-    const before = s.services.manager.snapshot();
-    const clock = s.clock;
+    const clock = new FakeClock();
+    s = await makeServer({ env: DEMO, dbPath, clock });
+    const a = await guest(s);
+    await board(s, a, 'GUNNER');
+    await startRaid(s);
+    await s.advance(8000);
+    await playOnce(s, a);
+    await s.advance(5000);
+    const before = s.services.manager.current().state;
     await s.close();
-    clock.advance(5000);
-    s = await makeServer({ dbPath, clock });
-    const after = s.services.manager.snapshot();
-    expect(after.matchId).toBe(before.matchId);
+    s = await makeServer({ env: DEMO, dbPath, clock });
+    const after = s.services.manager.current().state;
+    expect(after.raidId).toBe(before.raidId);
     expect(after.status).toBe('PAUSED');
-    expect(after.enemies).toEqual(before.enemies);
-    expect(after.regions).toEqual(before.regions);
-    expect((await s.inject({ url: '/api/me', headers: auth(p.token) })).json().creditSats).toBe(189);
+    expect(after.pauseReason).toBe('SERVER_RESTART');
+    expect(after.pilots[a.pilotId]!.stats).toEqual(before.pilots[a.pilotId]!.stats);
+    expect(after.enemies.map((e) => e.hp)).toEqual(before.enemies.map((e) => e.hp));
     await s.advance(10_500);
-    expect(s.services.manager.snapshot().status).toBe('LIVE');
+    expect(s.services.manager.current().state.status).toBe('LIVE');
   });
 
-  it('health and ready respond; the webhook hides unknown secrets', async () => {
-    s = await makeServer();
-    expect((await s.inject({ url: '/health' })).json()).toEqual({ ok: true });
-    expect((await s.inject({ url: '/ready' })).json()).toMatchObject({ ok: true, paymentMode: 'mock' });
-    expect((await s.inject({ method: 'POST', url: '/api/webhooks/lnbits/wrong', payload: {} })).statusCode).toBe(404);
+  it('demo bots board, play and keep their raid off the leaderboard', async () => {
+    s = await makeServer({ env: { ...DEMO, DEMO_BOTS: '6' } });
+    await s.advance(500);
+    const st = s.services.manager.current().state;
+    expect(Object.values(st.pilots).filter((p) => p.isBot)).toHaveLength(6);
+    await startRaid(s);
+    await s.advance(60_000);
+    expect(s.services.manager.current().state.stats.tasks).toBeGreaterThan(5);
+    const token = await s.adminToken();
+    await admin(s, token, { command: 'END' });
+    expect((await s.inject({ url: '/api/leaderboard' })).json().raids).toHaveLength(0);
   });
 });

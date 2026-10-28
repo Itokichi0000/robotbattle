@@ -1,19 +1,25 @@
 import type { AdminAuth } from './auth/admin';
+import type { LnurlAuthService } from './auth/lnurl';
+import type { SessionService } from './auth/sessions';
 import type { MonoClock, WallClock } from './clock';
 import type { Repo } from './db/repo';
 import type { DemoBots } from './demo/bots';
 import type { Env } from './env';
-import type { ActionService } from './match/actions';
-import type { MatchManager } from './match/manager';
 import type { PaymentAdapter } from './payments/adapter';
-import type { PlayerService } from './payments/players';
+import type { PassService } from './payments/passes';
+import type { PilotService } from './pilots/service';
+import type { RaidManager } from './raid/manager';
+import type { PilotActionService } from './raid/pilotActions';
 
 export interface Services {
   env: Env;
   repo: Repo;
-  manager: MatchManager;
-  players: PlayerService;
-  actions: ActionService;
+  manager: RaidManager;
+  sessions: SessionService;
+  pilots: PilotService;
+  passes: PassService;
+  actions: PilotActionService;
+  lnurl: LnurlAuthService;
   bots: DemoBots;
   adminAuth: AdminAuth;
   adapter: PaymentAdapter;

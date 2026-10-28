@@ -124,3 +124,24 @@ export const UI_STRINGS = {
 } as const satisfies Record<Locale, Record<string, string>>;
 
 export type UiStringKey = keyof (typeof UI_STRINGS)['ja'];
+
+/** Titles earned in raids (cosmetic only: never affect gameplay). */
+export const TITLE_LABELS: Record<string, L> = {
+  FIRST_SORTIE: { ja: '初出撃', en: 'First sortie' },
+  EARTH_DEFENDER: { ja: '地球防衛者', en: 'Earth defender' },
+  SHINRAI_FUJIN: { ja: '神雷風陣の担い手', en: 'Shinrai Fujin pilot' },
+  MVP_GUNNER: { ja: '最優秀砲撃手', en: 'Top gunner' },
+  MVP_GUARDIAN: { ja: '最優秀守護者', en: 'Top guardian' },
+  MVP_ROUTER: { ja: '最優秀接続手', en: 'Top router' },
+  MVP_ENGINEER: { ja: '最優秀整備士', en: 'Top engineer' },
+  MVP_SYNC: { ja: '連携の要', en: 'Heart of the team' },
+  ALL_ROUNDER: { ja: '万能パイロット', en: 'All-rounder' },
+  VETERAN: { ja: '歴戦の勇士', en: 'Veteran' },
+};
+
+export function rankFor(points: number): { index: number; ja: string; en: string; nextAt: number | null } {
+  let index = 0;
+  for (let i = 0; i < RANKS.length; i++) if (points >= RANKS[i]!.minPoints) index = i;
+  const r = RANKS[index]!;
+  return { index, ja: r.ja, en: r.en, nextAt: RANKS[index + 1]?.minPoints ?? null };
+}

@@ -82,37 +82,38 @@ export async function admin(s: TestServer, token: string, body: Record<string, u
   return res.json();
 }
 
-/** Join the defence (free, instant). */
-export async function join(s: TestServer, extra: { nickname?: string; deviceId?: string } = {}) {
-  const res = await s.inject({ method: 'POST', url: '/api/players', payload: extra });
-  if (res.statusCode !== 200) throw new Error(`join failed ${res.statusCode} ${res.body}`);
-  return res.json() as { playerId: string; token: string; nickname: string; creditSats: number };
+export interface PilotHandle {
+  pilotId: string;
+  token: string;
+  callsign: string;
 }
 
-export async function topup(s: TestServer, token: string, amountSats = 210) {
-  return s.inject({ method: 'POST', url: '/api/topups', headers: auth(token), payload: { amountSats } });
+/** Guest pilot (no wallet). */
+export async function guest(s: TestServer, extra: { callsign?: string; deviceId?: string } = {}): Promise<PilotHandle> {
+  const res = await s.inject({ method: 'POST', url: '/api/auth/guest', payload: extra });
+  if (res.statusCode !== 200) throw new Error(`guest failed ${res.statusCode} ${res.body}`);
+  const j = res.json();
+  return { pilotId: j.pilot.pilotId, token: j.token, callsign: j.pilot.callsign };
 }
 
-export async function mockPay(s: TestServer, token: string, invoiceId: string) {
-  return s.inject({ method: 'POST', url: '/api/dev/mock-pay', headers: auth(token), payload: { invoiceId } });
+export async function board(s: TestServer, p: PilotHandle, role = 'GUNNER', robot?: string) {
+  return s.inject({ method: 'POST', url: '/api/raids/current/board', headers: auth(p.token), payload: { role, ...(robot ? { robot } : {}) } });
 }
 
-/** Join, top up and mock-pay in one go. */
-export async function fundedPlayer(s: TestServer, amountSats = 525, nickname?: string) {
-  const p = await join(s, nickname ? { nickname } : {});
-  const inv = await topup(s, p.token, amountSats);
-  if (inv.statusCode !== 200) throw new Error(`topup failed ${inv.body}`);
-  const pay = await mockPay(s, p.token, inv.json().invoiceId);
-  if (pay.statusCode !== 200) throw new Error(`pay failed ${pay.body}`);
-  return { ...p, invoiceId: inv.json().invoiceId as string, creditSats: pay.json().creditSats as number };
+export async function requestTask(s: TestServer, p: PilotHandle, choice: Record<string, unknown> = {}) {
+  return s.inject({ method: 'POST', url: '/api/raids/current/tasks', headers: auth(p.token), payload: choice });
 }
 
-let actionCounter = 0;
-export function act(
-  s: TestServer,
-  token: string,
-  body: { action?: string; regionId?: string; enemyId?: number; clientActionId?: string } = {},
-) {
-  const payload = { action: 'AUTO', clientActionId: `cid-${++actionCounter}-${Date.now()}`, ...body };
-  return s.inject({ method: 'POST', url: '/api/action', headers: auth(token), payload });
+let submitCounter = 0;
+export async function submitTask(s: TestServer, p: PilotHandle, taskId: string, input: unknown, clientSubmissionId = `sub-${++submitCounter}-${Date.now()}`) {
+  return s.inject({ method: 'POST', url: '/api/raids/current/tasks/submit', headers: auth(p.token), payload: { taskId, clientSubmissionId, input } });
+}
+
+/** Lobby → start the raid now (admin). */
+export async function startRaid(s: TestServer) {
+  const token = await s.adminToken();
+  const st = s.services.manager.current().state.status;
+  if (st === 'CREATED') await admin(s, token, { command: 'OPEN_LOBBY' });
+  await admin(s, token, { command: 'START' });
+  return token;
 }

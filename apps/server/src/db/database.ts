@@ -4,82 +4,155 @@ import { DatabaseSync } from 'node:sqlite';
 
 /**
  * Schema migrations. Append only; never edit an applied migration.
- * Times: *_at columns are UTC epoch ms; *_game_ms / t columns are match clock ms.
+ * Times: *_at columns are UTC epoch ms; *_game_ms / t columns are raid clock ms.
  * Amounts are integer sats.
  */
 const MIGRATIONS: string[] = [
   `
-  -- One row per campaign ("match"). Engine state is rebuilt from match_commands.
-  CREATE TABLE matches (
+  -- One row per raid. Engine state is rebuilt from raid_commands (event sourcing).
+  CREATE TABLE raids (
     id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
     config_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
     config_json TEXT NOT NULL,
     seed INTEGER NOT NULL,
     status TEXT NOT NULL,
+    phase TEXT NOT NULL,
     clock_ms INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER,
     ended_at INTEGER,
-    reached_wave INTEGER,
+    outcome TEXT,
+    score_total INTEGER,
+    assisted INTEGER,
+    bots INTEGER NOT NULL DEFAULT 0,
     result_json TEXT,
     final_snapshot_json TEXT,
     revision INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
+  CREATE INDEX raids_rank ON raids(config_hash, assisted, score_total);
 
-  CREATE TABLE match_commands (
-    match_id TEXT NOT NULL REFERENCES matches(id),
+  CREATE TABLE raid_commands (
+    raid_id TEXT NOT NULL REFERENCES raids(id),
     idx INTEGER NOT NULL,
     t INTEGER NOT NULL,
     command_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    PRIMARY KEY (match_id, idx)
+    PRIMARY KEY (raid_id, idx)
   );
 
-  CREATE TABLE game_events (
-    match_id TEXT NOT NULL REFERENCES matches(id),
+  CREATE TABLE raid_events (
+    raid_id TEXT NOT NULL REFERENCES raids(id),
     seq INTEGER NOT NULL,
     t INTEGER NOT NULL,
     game_ms INTEGER NOT NULL,
     type TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     state_revision INTEGER NOT NULL,
-    PRIMARY KEY (match_id, seq)
+    PRIMARY KEY (raid_id, seq)
   );
 
-  -- Players live across campaigns: credit (prepaid sats) carries over all day.
-  -- Everyone defends Japan together, so a player has no team.
-  CREATE TABLE players (
+  -- Pilots live across raids and events. pilot ids are random (no sequence leaks).
+  CREATE TABLE pilots (
     id TEXT PRIMARY KEY,
-    session_id_hash TEXT NOT NULL UNIQUE,
+    code TEXT NOT NULL UNIQUE,
+    callsign TEXT NOT NULL,
+    callsign_hidden INTEGER NOT NULL DEFAULT 0,
+    avatar TEXT NOT NULL DEFAULT 'standard',
+    locale TEXT NOT NULL DEFAULT 'ja',
+    show_name INTEGER NOT NULL DEFAULT 0,
+    reduced_motion INTEGER NOT NULL DEFAULT 0,
+    assist_mode INTEGER NOT NULL DEFAULT 0,
+    auth_type TEXT NOT NULL,
     device_hash TEXT,
-    nickname TEXT NOT NULL,
-    nickname_hidden INTEGER NOT NULL DEFAULT 0,
-    credit_sats INTEGER NOT NULL DEFAULT 0 CHECK (credit_sats >= 0),
-    actions_total INTEGER NOT NULL DEFAULT 0,
-    kills INTEGER NOT NULL DEFAULT 0,
+    sorties INTEGER NOT NULL DEFAULT 0,
+    victories INTEGER NOT NULL DEFAULT 0,
+    rank_points INTEGER NOT NULL DEFAULT 0,
+    roles_done TEXT NOT NULL DEFAULT '',
+    titles_json TEXT NOT NULL DEFAULT '[]',
+    pass_credits INTEGER NOT NULL DEFAULT 0 CHECK (pass_credits >= 0),
+    merged_into TEXT,
     created_at INTEGER NOT NULL,
-    last_seen_at INTEGER NOT NULL
+    last_seen_at INTEGER NOT NULL,
+    deleted_at INTEGER
   );
-  CREATE INDEX players_device ON players(device_hash);
-  CREATE INDEX players_seen ON players(last_seen_at);
+  CREATE INDEX pilots_device ON pilots(device_hash);
+  CREATE INDEX pilots_seen ON pilots(last_seen_at);
 
-  -- Every change to a credit balance, for accounting and support.
-  CREATE TABLE credit_ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id TEXT NOT NULL REFERENCES players(id),
-    delta_sats INTEGER NOT NULL,
-    balance_after INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    ref_id TEXT,
+  CREATE TABLE sessions (
+    id_hash TEXT PRIMARY KEY,
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    kind TEXT NOT NULL,
+    issued_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );
+  CREATE INDEX sessions_pilot ON sessions(pilot_id);
+
+  -- LNURL-auth linking keys (domain-specific public keys). Fingerprint = sha256(key).
+  CREATE TABLE pilot_auth_keys (
+    id TEXT PRIMARY KEY,
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    provider TEXT NOT NULL,
+    key_fingerprint TEXT NOT NULL UNIQUE,
+    linked_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  );
+  CREATE INDEX pilot_auth_keys_pilot ON pilot_auth_keys(pilot_id);
+
+  CREATE TABLE auth_challenges (
+    id TEXT PRIMARY KEY,
+    k1_hash TEXT NOT NULL UNIQUE,
+    session_binding_hash TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    pilot_id TEXT,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    result_pilot_id TEXT,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER,
     created_at INTEGER NOT NULL
   );
-  CREATE INDEX credit_ledger_player ON credit_ledger(player_id, id);
+
+  -- Right to fly in one raid. One per (raid, pilot), whatever the source.
+  CREATE TABLE entitlements (
+    id TEXT PRIMARY KEY,
+    raid_id TEXT NOT NULL REFERENCES raids(id),
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    source TEXT NOT NULL,
+    source_id TEXT,
+    granted_at INTEGER NOT NULL,
+    revoked_at INTEGER,
+    UNIQUE (raid_id, pilot_id)
+  );
+
+  CREATE TABLE pilot_raids (
+    raid_id TEXT NOT NULL REFERENCES raids(id),
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    role TEXT NOT NULL,
+    robot TEXT NOT NULL,
+    joined_at INTEGER NOT NULL,
+    PRIMARY KEY (raid_id, pilot_id)
+  );
+
+  -- Idempotent minigame submissions: a retried request returns the stored result.
+  CREATE TABLE submissions (
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    client_submission_id TEXT NOT NULL,
+    raid_id TEXT NOT NULL REFERENCES raids(id),
+    task_id TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (pilot_id, client_submission_id)
+  );
 
   CREATE TABLE invoices (
     id TEXT PRIMARY KEY,
-    player_id TEXT NOT NULL REFERENCES players(id),
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    raid_id TEXT NOT NULL REFERENCES raids(id),
     provider TEXT NOT NULL,
-    lnbits_checking_id TEXT NOT NULL,
+    checking_id TEXT NOT NULL,
     payment_hash TEXT NOT NULL,
     amount_sats INTEGER NOT NULL,
     bolt11 TEXT,
@@ -88,42 +161,40 @@ const MIGRATIONS: string[] = [
     status TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     verified_at INTEGER,
-    credited_at INTEGER,
+    entitlement_granted_at INTEGER,
+    late_policy TEXT,
     last_checked_at INTEGER,
     check_failures INTEGER NOT NULL DEFAULT 0
   );
   CREATE UNIQUE INDEX invoices_payment_hash ON invoices(payment_hash);
   CREATE INDEX invoices_status ON invoices(status);
-  CREATE INDEX invoices_player ON invoices(player_id, created_at);
-
-  -- Accepted (charged) actions only; the unique key makes client retries idempotent.
-  CREATE TABLE actions (
-    id TEXT PRIMARY KEY,
-    player_id TEXT NOT NULL REFERENCES players(id),
-    match_id TEXT NOT NULL REFERENCES matches(id),
-    client_action_id TEXT NOT NULL,
-    action TEXT NOT NULL,
-    region_id TEXT,
-    damage INTEGER NOT NULL,
-    kills INTEGER NOT NULL,
-    liberated INTEGER NOT NULL,
-    cost_sats INTEGER NOT NULL,
-    at_game_ms INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    UNIQUE (player_id, client_action_id)
-  );
-  CREATE INDEX actions_match_player ON actions(match_id, player_id);
+  CREATE INDEX invoices_pilot ON invoices(pilot_id, created_at);
 
   CREATE TABLE sponsored_passes (
     id_hash TEXT PRIMARY KEY,
     label TEXT NOT NULL,
-    amount_sats INTEGER NOT NULL,
+    raid_id TEXT,
     issued_by TEXT NOT NULL,
     issued_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
+    redeemed_by TEXT,
     redeemed_at INTEGER,
-    redeemed_by_player_id TEXT,
+    redeemed_raid_id TEXT,
     status TEXT NOT NULL
+  );
+
+  CREATE TABLE passport_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    event_id TEXT NOT NULL,
+    raid_id TEXT NOT NULL REFERENCES raids(id),
+    role TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    contribution_json TEXT NOT NULL,
+    titles_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (pilot_id, raid_id)
   );
 
   CREATE TABLE admin_audit_log (
@@ -157,13 +228,13 @@ export function openDatabase(path: string): Db {
 }
 
 function migrate(db: Db): void {
-  // Databases from earlier prototypes (land-grab, ZAP BATTLE) used a different schema.
+  // Databases from earlier prototypes (team battle, turn-based co-op) used a different schema.
   const legacy = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('participants', 'zaps', 'rounds')")
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('participants', 'zaps', 'rounds', 'matches', 'players')")
     .get();
   if (legacy) {
     throw new Error(
-      'This database uses the old prototype schema. Point DATABASE_PATH to a new file (default ./data/sats-wars-v3.db).',
+      'This database uses an old prototype schema. Point DATABASE_PATH to a new file (default ./data/sats-wars-raid.db).',
     );
   }
   db.exec(
@@ -186,8 +257,8 @@ function migrate(db: Db): void {
 
 /**
  * Run fn inside a write transaction. node:sqlite is synchronous, and the game
- * server runs one match on one event loop, so a transaction plus synchronous
- * engine calls give us atomic "check credit -> apply -> persist" sequences.
+ * server runs one raid on one event loop, so a transaction plus synchronous
+ * engine calls give us atomic "check pass -> apply -> persist" sequences.
  */
 const txDepth = new WeakMap<Db, number>();
 
