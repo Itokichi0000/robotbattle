@@ -49,14 +49,15 @@ sudo bash /opt/sats-wars/repo/deploy/deploy.sh v1.2.0     # タグやコミッ�
 
 - 新しいリリースは今のサイトを動かしたまま `/opt/sats-wars/releases/<日時>-<コミット>` にビルドする。
 - 切り替える前に DB をバックアップ → `current` を差し替え → 再起動 → ヘルスチェックとスモークテスト。
-  **新しい版が正常に起動しなければ自動で前の版に戻す。**
+  **新しい版が正常に起動しなければ自動で前の版に戻す。** ビルドや起動に失敗した版は消すので、戻し先に残らない。
+- デプロイの手順そのもの（`deploy.sh`・`rollback.sh`）も、出すコミットの版が使われる（`/opt/sats-wars/repo` をそのコミットに合わせてから実行し直す）。
 - **作戦（レイド）中は止まる**（作戦の合間に実行する）。どうしても今なら `FORCE=1`（作戦は一時停止→自動再開）。
 - 直近3つのリリースを残す。
 
 ## 3. 戻す
 
 ```bash
-sudo bash /opt/sats-wars/repo/deploy/rollback.sh                       # 1つ前の版へ
+sudo bash /opt/sats-wars/repo/deploy/rollback.sh                       # 1つ前の版へ（もう一度でさらに前へ）
 sudo bash /opt/sats-wars/repo/deploy/rollback.sh 20261029T040000Z-abc1234
 ```
 
@@ -98,9 +99,20 @@ ls /var/lib/sats-wars/backups                # DB バックアップ（レイド
 
 ## この環境で確かめたこと・確かめていないこと
 
-確かめた（開発コンテナ）：本物の `deploy.sh` と `rollback.sh` を、https のプロキシ（Caddyfile と同じ振り分け）と
-`satswars` ユーザーで動く2つのサービスに対して実行（初回デプロイ、更新、手動ロールバック、壊れた版の自動切り戻し）。
-同じドメイン越しにゲスト搭乗・ミッション・WebSocket・CSP・スモークテストを Playwright で確認。systemd の設定は `systemd-analyze verify` で検査。
+開発コンテナの中に VPS と同じ置き場所（`/opt/sats-wars`・`/etc/sats-wars`・`/var/lib/sats-wars`）と `satswars` ユーザーを作り、
+本物の `deploy.sh`・`rollback.sh` を実行した。Caddy の代わりに同じ振り分けをする https プロキシ（自己署名証明書）、
+systemctl の代わりにユニットと同じコマンドを `satswars` で起動する小さなスクリプトを使った。
+
+| 確かめたこと                         | 結果                                                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 初回デプロイと更新2回                | 毎回 DB バックアップ → 切り替え → スモークテスト 11/11                                                                             |
+| ビルドに失敗する版                   | サイトは前の版のまま。失敗した版は消える                                                                                           |
+| 起動しない版（作戦中）               | `FORCE` なしは拒否。`FORCE=1` は自動で前の版に戻り、壊れた版は消える。作戦は一時停止 → 自動再開して第1波へ続行                     |
+| 手動ロールバック                     | 1つ前 → さらに1つ前 → 名前指定で最新へ。どれも正常に起動                                                                           |
+| プロキシ越しのブラウザ（Playwright） | ゲスト搭乗、Cookie（HttpOnly・Secure・Lax）、WebSocket、ミッション採点、会場画面、有料パスの拒否、管理画面、8ページで CSP 違反なし |
+| systemd ユニット                     | `systemd-analyze verify` で検査                                                                                                    |
+| ビルド時のメモリ                     | node の合計で最大 約1.6GB（2GB 推奨の根拠。1GB ならスワップを使う）                                                                |
 
 確かめていない：本物の Caddy（このコンテナでは外部バイナリを実行できなかった。VPS では `setup-vps.sh` が
-`caddy validate` してから読み込む）、本物の systemd での起動とサンドボックス設定、Let's Encrypt の証明書取得、実際の VPS とネットワーク。
+`caddy validate` してから読み込む）、本物の systemd での起動とサンドボックス設定、Let's Encrypt の証明書取得、
+`setup-vps.sh` そのもの（パッケージ導入・ファイアウォール）、実際の VPS とネットワーク。初回は VPS で一度通して確認する。
