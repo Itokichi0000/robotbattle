@@ -54,4 +54,6 @@ writeFileSync(
   '../web/public/demo/solo.html',
   `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">${html.replace('<div id="root"></div>', '</head><body style="margin:0"><div id="root"></div>')}</body></html>`,
 );
-console.log(`dist/sats-wars-solo.html  ${(html.length / 1024).toFixed(0)} KB (+ apps/web/public/demo/solo.html)`);
+console.log(
+  `dist/sats-wars-solo.html  ${(html.length / 1024).toFixed(0)} KB (+ apps/web/public/demo/solo.html)`,
+);
