@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { RaidResult } from '@sats-wars/shared';
-import { ArenaDirector, type Cue, type DirectorEffect } from './director';
-import { buildFujin, buildRaijin, JOINT_NAMES } from './robots/build';
+import {
+  ArenaDirector,
+  CLIP_DURATION,
+  type Cue,
+  type DirectorEffect,
+  REQUIRED_CLIPS,
+  resolveClip,
+} from './director';
+import {
+  buildFujin,
+  buildRaijin,
+  damageStageFor,
+  JOINT_NAMES,
+  setDamageStage,
+} from './robots/build';
 import { applyClip } from './robots/animate';
 import { CLIP_NAMES } from './director';
 import { BOSS_POSITION, resolveFxTarget } from './layout';
@@ -115,7 +128,7 @@ describe('ArenaDirector', () => {
     expect(fx.find((e) => e.kind === 'shield')!.to).toEqual({ kind: 'city', id: 'kanto' });
     expect(fx.find((e) => e.kind === 'energy')!.to).toEqual({ kind: 'reserve' });
     expect(fx.find((e) => e.kind === 'repair')!.to).toEqual({ kind: 'city', id: 'kinki' });
-    expect(d.robots.FUJIN.clip).toBe('Guard');
+    expect(d.robots.FUJIN.clip).toBe('ShieldDeploy');
     // A failed minigame shows nothing on the big screen.
     const n = fx.length;
     d.play({
@@ -167,7 +180,8 @@ describe('ArenaDirector', () => {
     expect(
       fx.some((e) => e.kind === 'shield' && e.to?.kind === 'city' && e.to.id === 'kyushu'),
     ).toBe(true);
-    expect(d.robots.RAIJIN.clip).toBe('HitReact');
+    // NULL CORE's beam is a heavy blow; escorts only jolt.
+    expect(d.robots.RAIJIN.clip).toBe('HitHeavy');
   });
 
   it('NULL CORE enters with its own camera; the special has success, partial and failure cuts', () => {
@@ -378,5 +392,60 @@ describe('cheers', () => {
     expect(d.cheerIntensity()).toBeGreaterThan(lone + 0.4);
     run(d, 30);
     expect(d.cheerIntensity()).toBeLessThan(0.35);
+  });
+});
+
+describe('spec animations (D1/D2)', () => {
+  it('every required clip of each robot resolves to a procedural clip with a duration', () => {
+    for (const team of ['RAIJIN', 'FUJIN'] as const)
+      for (const name of REQUIRED_CLIPS[team]) {
+        const clip = resolveClip(name);
+        expect(clip, `${team} ${name}`).not.toBeNull();
+        expect(CLIP_DURATION[clip!]).toBeGreaterThan(0);
+      }
+    expect(resolveClip('Punch')).toBe('AttackLight');
+    expect(resolveClip('nope')).toBeNull();
+  });
+
+  it('gunner charge, boarding and the special charge-up use their own motions', () => {
+    const d = new ArenaDirector();
+    run(d, 1);
+    d.play({
+      kind: 'task',
+      role: 'GUNNER',
+      robot: 'RAIJIN',
+      success: 1,
+      callsign: 'A',
+      assist: false,
+      effect: { kind: 'ENERGY', sink: 'RAIJIN', amount: 12 },
+    });
+    expect(d.robots.RAIJIN.clip).toBe('Charge');
+    run(d, 3);
+    d.play({ kind: 'boarded', callsign: 'B', robot: 'FUJIN', pilotId: 'b' });
+    expect(d.robots.FUJIN.clip).toBe('Boarding');
+    const s = new ArenaDirector();
+    s.play({ kind: 'specialOpen' });
+    run(s, 0.1);
+    expect(s.robots.RAIJIN.clip).toBe('Charge');
+    expect(s.robots.FUJIN.clip).toBe('Hover');
+  });
+});
+
+describe('robot damage stages (spec D1: cracks and opened plates, not red paint)', () => {
+  it('maps hull to stages and shows the parts cumulatively', () => {
+    expect([100, 70, 69, 40, 39, 0].map(damageStageFor)).toEqual([0, 0, 1, 1, 2, 2]);
+    for (const build of [buildRaijin, buildFujin]) {
+      const rig = build();
+      expect(rig.damage[1].length).toBeGreaterThan(0);
+      expect(rig.damage[2].length).toBeGreaterThan(0);
+      const visible = () => [rig.damage[1], rig.damage[2]].map((g) => g.every((o) => o.visible));
+      setDamageStage(rig, 0);
+      expect([rig.damage[1], rig.damage[2]].flat().some((o) => o.visible)).toBe(false);
+      setDamageStage(rig, 1);
+      expect(visible()).toEqual([true, false]);
+      setDamageStage(rig, 2);
+      expect(visible()).toEqual([true, true]);
+      rig.dispose();
+    }
   });
 });

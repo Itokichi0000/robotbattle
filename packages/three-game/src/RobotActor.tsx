@@ -5,13 +5,15 @@ import type { TeamId } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
 import { applyClip } from './robots/animate';
-import { buildFujin, buildRaijin } from './robots/build';
+import { buildFujin, buildRaijin, damageStageFor, setDamageStage } from './robots/build';
 
 export interface RobotActorProps {
   teamId: TeamId;
   director: ArenaDirector;
   /** 0..1 energy ratio, drives emissive glow. */
   energyRatio: number;
+  /** Hull 0..100 (server state): cracks and opened plates below 70 / 40. */
+  health?: number;
 }
 
 /**
@@ -19,7 +21,7 @@ export interface RobotActorProps {
  * team; the actor never changes game state. Uses the procedural rig today; a
  * GLB with the same joint/clip names can replace it (see docs/ART_PIPELINE.md).
  */
-export function RobotActor({ teamId, director, energyRatio }: RobotActorProps) {
+export function RobotActor({ teamId, director, energyRatio, health = 100 }: RobotActorProps) {
   const rig = useMemo(() => (teamId === 'RAIJIN' ? buildRaijin() : buildFujin()), [teamId]);
   useEffect(() => () => rig.dispose(), [rig]);
   const outer = useRef<THREE.Group>(null);
@@ -27,6 +29,8 @@ export function RobotActor({ teamId, director, energyRatio }: RobotActorProps) {
   const energy = useRef(energyRatio);
   energy.current = energyRatio;
   const home = ROBOT_HOME[teamId];
+  const stage = damageStageFor(health);
+  useEffect(() => setDamageStage(rig, stage), [rig, stage]);
 
   useFrame((_, dt) => {
     const cue = director.robots[teamId];

@@ -202,6 +202,121 @@ const CLIPS: Record<ClipName, ClipFn> = {
     p.glow = 1.8 + 0.6 * pump;
   },
 
+  // Two steps in place (repositioning); Fujin glides, so its legs swing lighter.
+  Walk: (p, rig, _t, u, total) => {
+    idle(p, rig, total, 0.4);
+    const k = rig.kind === 'raijin' ? 1 : 0.55;
+    const phase = Math.sin(u * Math.PI * 4);
+    addRot(p, 'Thigh_L', -0.55 * phase * k);
+    addRot(p, 'Thigh_R', 0.55 * phase * k);
+    addRot(p, 'Shin_L', 0.5 * Math.max(0, phase) * k);
+    addRot(p, 'Shin_R', 0.5 * Math.max(0, -phase) * k);
+    addRot(p, 'UpperArm_L', 0.35 * phase * k);
+    addRot(p, 'UpperArm_R', -0.35 * phase * k);
+    addPos(p, 'Hips', 0, 0.06 * Math.abs(phase), 0);
+    addRot(p, 'Chest', 0, 0.08 * phase, 0);
+  },
+
+  // A short burst forward (+Z is the robot's front) and back.
+  Dash: (p, rig, _t, u, total) => {
+    idle(p, rig, total, 0.2);
+    const go = bump(u, 0, 1);
+    addPos(p, 'Root', 0, rig.kind === 'fujin' ? 0.3 * go : 0, 1.1 * go);
+    addRot(p, 'Chest', 0.45 * go);
+    addRot(p, 'Head', -0.25 * go);
+    addRot(p, 'UpperArm_L', 0.7 * go, 0, 0.15 * go);
+    addRot(p, 'UpperArm_R', 0.7 * go, 0, -0.15 * go);
+    addRot(p, 'Thigh_L', -0.6 * go);
+    addRot(p, 'Shin_L', 0.4 * go);
+    addRot(p, 'Thigh_R', 0.45 * go);
+    p.backSpin += 3 * go;
+    p.glow = 1 + 1.4 * go;
+  },
+
+  // Fujin lifts on its wind ring; Raijin can only manage a short hop.
+  Hover: (p, rig, t, u, total) => {
+    idle(p, rig, total, 0.5);
+    const lift = easeInOut(ramp(u, 0, 0.3)) * (1 - easeInOut(ramp(u, 0.75, 1)));
+    const h = rig.kind === 'fujin' ? 1.4 : 0.35;
+    addPos(p, 'Root', 0, h * lift + 0.08 * Math.sin(t * 4) * lift, 0);
+    for (const [s, side] of [
+      ['L', 1],
+      ['R', -1],
+    ] as const) {
+      addRot(p, `Thigh_${s}`, -0.25 * lift);
+      addRot(p, `Shin_${s}`, 0.6 * lift);
+      addRot(p, `UpperArm_${s}`, 0, 0, 0.45 * side * lift);
+    }
+    p.backSpin += t * 6 * lift;
+    p.glow = 1 + 1.2 * lift;
+  },
+
+  // Fujin opens its arms and the wind ring unfurls into the city barrier.
+  ShieldDeploy: (p, rig, t, u, total) => {
+    idle(p, rig, total, 0.3);
+    const open = easeOut(ramp(u, 0, 0.35)) * (1 - ramp(u, 0.8, 1));
+    for (const [s, side] of [
+      ['L', 1],
+      ['R', -1],
+    ] as const) {
+      addRot(p, `UpperArm_${s}`, -0.35 * open, 0, 1.35 * side * open);
+      addRot(p, `Forearm_${s}`, 0.4 * open);
+    }
+    addRot(p, 'Chest', -0.2 * open);
+    addRot(p, 'Head', -0.15 * open);
+    p.backSpin += t * 12 * open;
+    p.glow = 1 + 2.2 * open;
+  },
+
+  // Gathering power: crouch, arms in, drums/ring spin up, glow rises.
+  Charge: (p, rig, t, u, total) => {
+    idle(p, rig, total, 0.2);
+    const k = easeInOut(ramp(u, 0, 0.6)) * (1 - ramp(u, 0.9, 1));
+    addPos(p, 'Hips', 0, -0.28 * k, 0);
+    for (const s of ['L', 'R'] as const) {
+      addRot(p, `Thigh_${s}`, -0.45 * k);
+      addRot(p, `Shin_${s}`, 0.75 * k);
+      addRot(p, `UpperArm_${s}`, -0.65 * k);
+      addRot(p, `Forearm_${s}`, -1.35 * k);
+    }
+    addRot(p, 'Chest', 0.18 * k);
+    p.backSpin += t * (4 + 14 * k);
+    p.glow = 1 + 3 * k;
+  },
+
+  // A pilot boards: kneel, the chest hatch tilts open with a light, rise again.
+  Boarding: (p, rig, _t, u, total) => {
+    idle(p, rig, total, 0.3);
+    const kneel = easeInOut(ramp(u, 0, 0.3)) * (1 - easeInOut(ramp(u, 0.75, 1)));
+    const hatch = bump(u, 0.3, 0.75);
+    addPos(p, 'Hips', 0, -0.7 * kneel, 0);
+    addRot(p, 'Thigh_L', -1.2 * kneel);
+    addRot(p, 'Shin_L', 1.6 * kneel);
+    addRot(p, 'Thigh_R', -0.35 * kneel);
+    addRot(p, 'Shin_R', 1.2 * kneel);
+    addRot(p, 'Chest', 0.35 * kneel - 0.3 * hatch);
+    addRot(p, 'Head', 0.25 * kneel);
+    addRot(p, 'UpperArm_L', -0.3 * kneel, 0, 0.25 * hatch);
+    addRot(p, 'UpperArm_R', -0.3 * kneel, 0, -0.25 * hatch);
+    p.glow = 1 + 2 * hatch;
+  },
+
+  // A heavy blow: knocked back, one knee buckles, then recovers (one flash, no strobe).
+  HitHeavy: (p, rig, _t, u, total) => {
+    idle(p, rig, total, 0.2);
+    const jolt = bump(u, 0, 0.5);
+    const k = 1 - easeOut(u);
+    addPos(p, 'Root', 0, 0, -1.0 * jolt);
+    addPos(p, 'Hips', 0, -0.25 * jolt, 0);
+    addRot(p, 'Chest', -0.75 * k, 0.25 * jolt, 0.15 * jolt);
+    addRot(p, 'Head', -0.45 * k);
+    addRot(p, 'Thigh_R', -0.5 * jolt);
+    addRot(p, 'Shin_R', 0.9 * jolt);
+    addRot(p, 'UpperArm_L', 0.5 * k, 0, 0.6 * k);
+    addRot(p, 'UpperArm_R', 0.5 * k, 0, -0.6 * k);
+    p.glow = 1 + 2.5 * bump(u, 0, 0.3);
+  },
+
   Defeat: (p, rig, _t, u) => {
     const k = easeInOut(ramp(u, 0, 0.8));
     idle(p, rig, 0, 1 - k);

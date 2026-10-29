@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs tool without types
-import { inspect, parseGlb, REQUIRED_CLIPS, REQUIRED_JOINTS } from '../inspect_glb.mjs';
+import {
+  ARENA_NODES,
+  inspect,
+  parseGlb,
+  REQUIRED_CLIPS,
+  REQUIRED_JOINTS,
+} from '../inspect_glb.mjs';
 
 function makeGlb(json: object): Uint8Array {
   let text = JSON.stringify(json);
@@ -32,6 +38,15 @@ describe('inspect_glb', () => {
     };
     const r = inspect(parseGlb(makeGlb(json)));
     expect(r).toMatchObject({ ok: true, triangles: 200, missingJoints: [], missingClips: [] });
+  });
+  it('checks arena nodes without clips', () => {
+    const json = {
+      asset: { version: '2.0' },
+      nodes: (ARENA_NODES as string[]).map((name) => ({ name })),
+    };
+    expect(inspect(parseGlb(makeGlb(json)), 'arena')).toMatchObject({ ok: true, missingClips: [] });
+    const partial = { asset: { version: '2.0' }, nodes: [{ name: 'stage' }] };
+    expect(inspect(parseGlb(makeGlb(partial)), 'arena').missingJoints).toContain('base_kanto');
   });
   it('reports missing joints and rejects non-GLB input', () => {
     const r = inspect(parseGlb(makeGlb({ asset: { version: '2.0' }, nodes: [{ name: 'Root' }] })));

@@ -90,7 +90,8 @@ export function LightingRig({ shadows }: { shadows: boolean }) {
 }
 
 /** Futuristic arena floor with team-coloured halves and a starfield. */
-export function ArenaStage({ stars }: { stars: number }) {
+/** `floor: false` keeps only the star field (an arena GLB brings its own stage). */
+export function ArenaStage({ stars, floor = true }: { stars: number; floor?: boolean }) {
   const starGeometry = useMemo(() => {
     const g = new THREE.BufferGeometry();
     const arr = new Float32Array(stars * 3);
@@ -109,6 +110,13 @@ export function ArenaStage({ stars }: { stars: number }) {
   useFrame((_, dt) => {
     if (ringRef.current) ringRef.current.rotation.z += dt * 0.05;
   });
+
+  const starField = stars > 0 && (
+    <points geometry={starGeometry}>
+      <pointsMaterial size={0.18} color="#C8D8FF" transparent opacity={0.8} sizeAttenuation />
+    </points>
+  );
+  if (!floor) return <group name="arena-stars">{starField}</group>;
 
   return (
     <group name="arena-stage">
@@ -157,9 +165,7 @@ export function ArenaStage({ stars }: { stars: number }) {
           </group>
         );
       })}
-      <points geometry={starGeometry}>
-        <pointsMaterial size={0.18} color="#C8D8FF" transparent opacity={0.8} sizeAttenuation />
-      </points>
+      {starField}
     </group>
   );
 }

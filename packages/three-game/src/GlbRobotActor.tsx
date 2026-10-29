@@ -7,7 +7,7 @@ import { type ClipName, LOOPING_CLIPS } from './director';
 import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
 import { RobotActor, type RobotActorProps } from './RobotActor';
 import { applyClip } from './robots/animate';
-import { JOINT_NAMES, type RobotRig } from './robots/build';
+import { JOINT_NAMES, type RobotRig, damageStageFor, setDamageStage } from './robots/build';
 
 /** Rig view over a loaded GLB, so procedural clips can drive it when a clip is missing. */
 function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): RobotRig | null {
@@ -37,14 +37,34 @@ function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): RobotRig |
     glowMaterials: glow,
     baseGlow: glow[0]?.emissiveIntensity ?? 1.5,
     height: 4,
+    // Blender exports damage parts as nodes named damage1_* / damage2_*.
+    damage: { 1: nodesNamed(scene, 'damage1_'), 2: nodesNamed(scene, 'damage2_') },
     dispose() {},
   };
 }
 
-function GlbRobot({ url, teamId, director, energyRatio }: RobotActorProps & { url: string }) {
+function nodesNamed(scene: THREE.Object3D, prefix: string): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  scene.traverse((o) => {
+    if (o.name.startsWith(prefix)) out.push(o);
+  });
+  return out;
+}
+
+function GlbRobot({
+  url,
+  teamId,
+  director,
+  energyRatio,
+  health = 100,
+}: RobotActorProps & { url: string }) {
   const gltf = useGLTF(url);
   const kind = teamId === 'RAIJIN' ? 'raijin' : 'fujin';
   const rig = useMemo(() => rigFromScene(gltf.scene, kind), [gltf.scene, kind]);
+  const stage = damageStageFor(health);
+  useEffect(() => {
+    if (rig) setDamageStage(rig, stage);
+  }, [rig, stage]);
   const mixer = useMemo(() => new THREE.AnimationMixer(gltf.scene), [gltf.scene]);
   const actions = useMemo(() => {
     const map = new Map<string, THREE.AnimationAction>();
@@ -124,7 +144,12 @@ export function ModelRobotActor(
   props: RobotActorProps & { url?: string | null; onModelError?: (e: unknown) => void },
 ) {
   const procedural = (
-    <RobotActor teamId={props.teamId} director={props.director} energyRatio={props.energyRatio} />
+    <RobotActor
+      teamId={props.teamId}
+      director={props.director}
+      energyRatio={props.energyRatio}
+      health={props.health}
+    />
   );
   if (!props.url) return procedural;
   return (

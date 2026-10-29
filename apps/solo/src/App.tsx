@@ -268,6 +268,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
               FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
             }}
             reserve={snap.reserveEnergy / 100}
+            health={{ RAIJIN: snap.robots[0]!.health, FUJIN: snap.robots[1]!.health }}
             bossBarrier={view.bossBarrier}
             crew={snap.crew}
             quality="medium"

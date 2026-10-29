@@ -21,8 +21,62 @@ export const CLIP_NAMES = [
   'Special',
   'Victory',
   'Defeat',
+  'Walk',
+  'Dash',
+  'Hover',
+  'ShieldDeploy',
+  'Charge',
+  'Boarding',
+  'HitHeavy',
 ] as const;
 export type ClipName = (typeof CLIP_NAMES)[number];
+
+/** Spec D1/D2 names that are the same motion as one of ours (GLBs carry both names). */
+export const SPEC_CLIP_ALIASES = {
+  Punch: 'AttackLight',
+  HeavyAttack: 'AttackHeavy',
+  HitLight: 'HitReact',
+} as const satisfies Record<string, ClipName>;
+
+/** Required animations per robot (spec D1 RAIJIN / D2 FUJIN). */
+export const REQUIRED_CLIPS = {
+  RAIJIN: [
+    'Idle',
+    'Walk',
+    'Dash',
+    'Punch',
+    'HeavyAttack',
+    'Guard',
+    'HitLight',
+    'HitHeavy',
+    'Charge',
+    'Special',
+    'Victory',
+    'Defeat',
+    'Boarding',
+  ],
+  FUJIN: [
+    'Idle',
+    'Walk',
+    'Dash',
+    'Hover',
+    'Guard',
+    'ShieldDeploy',
+    'HitLight',
+    'HitHeavy',
+    'Charge',
+    'Special',
+    'Victory',
+    'Defeat',
+    'Boarding',
+  ],
+} as const;
+
+/** Our clip for a spec name (aliases resolved). */
+export function resolveClip(name: string): ClipName | null {
+  if ((CLIP_NAMES as readonly string[]).includes(name)) return name as ClipName;
+  return (SPEC_CLIP_ALIASES as Record<string, ClipName>)[name] ?? null;
+}
 
 /** Seconds; looping clips ignore duration. Attacks are short because many pilots act at once. */
 export const CLIP_DURATION: Record<ClipName, number> = {
@@ -35,6 +89,13 @@ export const CLIP_DURATION: Record<ClipName, number> = {
   Special: 1.6,
   Victory: 2.0,
   Defeat: 1.4,
+  Walk: 1.2,
+  Dash: 0.6,
+  Hover: 1.6,
+  ShieldDeploy: 0.9,
+  Charge: 1.2,
+  Boarding: 2.4,
+  HitHeavy: 0.9,
 };
 export const LOOPING_CLIPS: ReadonlySet<ClipName> = new Set(['Idle', 'Victory']);
 
@@ -250,6 +311,13 @@ export class ArenaDirector {
         if (cue.pilotId) this.boardedAt.set(cue.pilotId, this.time);
         if (this.throttle('boarded', 0.6))
           this.emitEffect('chargeAura', cue.robot, null, { kind: 'robot', id: cue.robot }, 0.4);
+        // The robot kneels to take its new pilot aboard (not more than every 8 s).
+        if (
+          !this.busy &&
+          this.robots[cue.robot].clip === 'Idle' &&
+          this.throttle(`board-${cue.robot}`, 8)
+        )
+          this.setClip(cue.robot, 'Boarding', 0);
         // New pilots light their seats: a short look inside, at most every 25 s.
         if (this.throttle('cockpit-board', 25)) this.beat('cockpit', 2.4);
         return;
@@ -394,6 +462,8 @@ export class ArenaDirector {
       this.addShake(0.4);
     });
     this.at(s + (short ? 1 : 2.6), () => this.setCamera('overview'));
+    // Step up to the line after landing.
+    if (!short) this.at(s + 2.25, () => GODS.forEach((t) => this.setClip(t, 'Walk', 0)));
     this.busyUntil = s + (short ? 1 : 2.6);
   }
 
@@ -475,7 +545,7 @@ export class ArenaDirector {
         if (this.throttle('sig-FUJIN', 0.3))
           this.emitEffect('wind', 'FUJIN', { kind: 'robot', id: 'FUJIN' }, to, 0.9);
         if (this.throttle('sfx-shield', 0.15)) this.sound('shield', 'FUJIN');
-        if (free('FUJIN')) this.setClip('FUJIN', 'Guard', 0);
+        if (free('FUJIN')) this.setClip('FUJIN', 'ShieldDeploy', 0);
         return;
       }
       case 'ENERGY': {
@@ -491,6 +561,11 @@ export class ArenaDirector {
           );
           this.sound('charge', null);
         }
+        // A gunner with nothing to shoot charges Raijin's drums; big transfers charge the receiver.
+        const charged: TeamId | null =
+          cue.role === 'GUNNER' ? 'RAIJIN' : e.sink !== 'RESERVE' && e.amount >= 15 ? e.sink : null;
+        if (charged && free(charged) && this.throttle(`charge-${charged}`, 3))
+          this.setClip(charged, 'Charge', 0);
         if (e.sink === 'RESERVE' && e.amount >= 10) this.beat('routerPulse', 1.8);
         return;
       }
@@ -518,7 +593,15 @@ export class ArenaDirector {
       if (h.damage > 0)
         this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
     }
-    if (cue.robotHit && !this.busy) this.setClip(cue.robotHit, 'HitReact', 0);
+    if (cue.robotHit && !this.busy)
+      this.setClip(cue.robotHit, cue.enemyKind === 'BOSS' ? 'HitHeavy' : 'HitReact', 0);
+    // Fujin braces when its barrier soaks a blow.
+    else if (
+      !this.busy &&
+      cue.hits.some((h) => h.absorbed > 0) &&
+      this.robots.FUJIN.clip === 'Idle'
+    )
+      this.setClip('FUJIN', 'Guard', 0);
     // A barrier that soaked a real hit: show the defended city.
     if (cue.hits.some((h) => h.absorbed >= 20)) this.beat('cityDefense', 2);
     if (cue.hits.some((h) => h.damage > 0) && this.throttle('attack-shake', 0.4)) {
@@ -563,6 +646,8 @@ export class ArenaDirector {
     }
     this.at(s, () => {
       for (const t of GODS) this.emitEffect('chargeAura', t, null, { kind: 'robot', id: t }, 1);
+      this.setClip('RAIJIN', 'Charge', 0);
+      this.setClip('FUJIN', 'Hover', 0);
       this.sound('charge', null);
       this.setBanner({
         kind: 'special',

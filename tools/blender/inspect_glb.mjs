@@ -39,12 +39,34 @@ export const REQUIRED_CLIPS = [
   'Special',
   'Victory',
   'Defeat',
+  'Walk',
+  'Dash',
+  'Hover',
+  'ShieldDeploy',
+  'Charge',
+  'Boarding',
+  'HitHeavy',
+  // spec D1/D2 names (aliases of AttackLight / AttackHeavy / HitReact)
+  'Punch',
+  'HeavyAttack',
+  'HitLight',
 ];
 export const TRI_BUDGET = 100_000;
 
 /** NULL CORE: weak points are separate parts so hits can light them up. */
 export const BOSS_JOINTS = ['Root', 'Core', 'Ring', 'WP_CORE', 'WP_ARM', 'WP_LEG'];
 export const BOSS_CLIPS = ['Idle', 'Telegraph', 'Attack', 'HitReact', 'Defeat'];
+
+/** Arena: stage, both spawn pads, the map pedestal and the 8 defence bases. */
+export const ARENA_NODES = [
+  'stage',
+  'spawn_RAIJIN',
+  'spawn_FUJIN',
+  'map_pedestal',
+  ...['hokkaido', 'tohoku', 'kanto', 'chubu', 'kinki', 'chugoku', 'shikoku', 'kyushu'].map(
+    (r) => `base_${r}`,
+  ),
+];
 
 export function parseGlb(buf) {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -58,8 +80,9 @@ export function parseGlb(buf) {
 }
 
 export function inspect(json, kind = 'robot') {
-  const requiredJoints = kind === 'boss' ? BOSS_JOINTS : REQUIRED_JOINTS;
-  const requiredClips = kind === 'boss' ? BOSS_CLIPS : REQUIRED_CLIPS;
+  const requiredJoints =
+    kind === 'boss' ? BOSS_JOINTS : kind === 'arena' ? ARENA_NODES : REQUIRED_JOINTS;
+  const requiredClips = kind === 'boss' ? BOSS_CLIPS : kind === 'arena' ? [] : REQUIRED_CLIPS;
   const nodeNames = new Set((json.nodes ?? []).map((n) => n.name).filter(Boolean));
   const clips = (json.animations ?? []).map((a) => a.name ?? '');
   let triangles = 0;
@@ -93,12 +116,12 @@ export function inspect(json, kind = 'robot') {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const file = process.argv[2];
   if (!file) {
-    console.error('usage: inspect_glb.mjs <file.glb> [--json]');
+    console.error('usage: inspect_glb.mjs <file.glb> [--boss|--arena] [--json]');
     process.exit(2);
   }
   const report = inspect(
     parseGlb(readFileSync(file)),
-    process.argv.includes('--boss') ? 'boss' : 'robot',
+    process.argv.includes('--boss') ? 'boss' : process.argv.includes('--arena') ? 'arena' : 'robot',
   );
   if (process.argv.includes('--json')) console.log(JSON.stringify(report, null, 2));
   else {

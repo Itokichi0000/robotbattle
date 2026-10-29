@@ -163,6 +163,7 @@ export function Replay3D({
           FUJIN: 0.15 + 0.85 * ((board.robots[1]?.energy ?? 0) / 100),
         }}
         reserve={board.reserveEnergy / 100}
+        health={{ RAIJIN: board.robots[0]?.health ?? 100, FUJIN: board.robots[1]?.health ?? 100 }}
         quality="medium"
         reducedMotion={false}
         locale={locale}

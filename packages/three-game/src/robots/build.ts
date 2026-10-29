@@ -38,7 +38,77 @@ export interface RobotRig {
   glowMaterials: THREE.MeshStandardMaterial[];
   baseGlow: number;
   height: number;
+  /**
+   * Damage stages (spec D1: cracks that show the inner light, plates that
+   * open — never red paint). Hidden until the robot's hull drops.
+   */
+  damage: { 1: THREE.Object3D[]; 2: THREE.Object3D[] };
   dispose(): void;
+}
+
+/** 0 above 70% hull, 1 above 40%, 2 below. */
+export function damageStageFor(health: number): 0 | 1 | 2 {
+  return health < 40 ? 2 : health < 70 ? 1 : 0;
+}
+
+export function setDamageStage(rig: RobotRig, stage: 0 | 1 | 2): void {
+  for (const o of rig.damage[1]) o.visible = stage >= 1;
+  for (const o of rig.damage[2]) o.visible = stage >= 2;
+}
+
+/**
+ * Crack lines on the chest (stage 1), then a lifted chest plate with light
+ * leaking out and cracks on the upper arms (stage 2). Built from thin boxes in
+ * the robot's own energy colour.
+ */
+function addDamage(
+  b: Builder,
+  joints: Record<JointName, THREE.Object3D>,
+  o: { chestY: number; frontZ: number; halfWidth: number; color: string },
+): RobotRig['damage'] {
+  const light = b.glowMat(o.color, 2.6);
+  // Not part of the energy glow: damage light does not pulse with attacks.
+  b.glow.splice(b.glow.indexOf(light), 1);
+  const plate = b.mat('#1A1D24', 0.6, 0.7);
+  const crack = (parent: THREE.Object3D, x: number, y: number, z: number, angle: number) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.rotation.z = angle;
+    parent.add(g);
+    // a jagged line: three short segments
+    b.mesh(g, new THREE.BoxGeometry(0.04, 0.22, 0.03), light, [0, 0.1, 0], [0, 0, 0.5]);
+    b.mesh(g, new THREE.BoxGeometry(0.04, 0.2, 0.03), light, [0.05, -0.08, 0], [0, 0, -0.4]);
+    b.mesh(g, new THREE.BoxGeometry(0.035, 0.14, 0.03), light, [0.02, -0.24, 0], [0, 0, 0.35]);
+    g.visible = false;
+    return g;
+  };
+  const w = o.halfWidth;
+  const stage1 = [
+    crack(joints.Chest, -w * 0.45, o.chestY + 0.15, o.frontZ, 0.3),
+    crack(joints.Chest, w * 0.5, o.chestY - 0.1, o.frontZ, -0.5),
+  ];
+  const lifted = new THREE.Group();
+  lifted.visible = false;
+  joints.Chest.add(lifted);
+  b.mesh(
+    lifted,
+    new THREE.BoxGeometry(w * 0.7, 0.28, 0.05),
+    plate,
+    [w * 0.25, o.chestY + 0.35, o.frontZ + 0.1],
+    [-0.45, 0, 0.12],
+  );
+  b.mesh(lifted, new THREE.BoxGeometry(w * 0.66, 0.08, 0.02), light, [
+    w * 0.25,
+    o.chestY + 0.27,
+    o.frontZ + 0.02,
+  ]);
+  const stage2 = [
+    lifted,
+    crack(joints.Chest, 0, o.chestY - 0.3, o.frontZ, 0.1),
+    crack(joints.UpperArm_L, 0.05, -0.2, 0.28, 0.4),
+    crack(joints.UpperArm_R, -0.05, -0.2, 0.28, -0.4),
+  ];
+  return { 1: stage1, 2: stage2 };
 }
 
 interface Palette {
@@ -127,6 +197,7 @@ function finish(
   backUnit: THREE.Object3D,
   height: number,
   baseGlow: number,
+  damage: RobotRig['damage'],
 ): RobotRig {
   const rest = {} as RobotRig['rest'];
   for (const name of JOINT_NAMES) {
@@ -142,6 +213,7 @@ function finish(
     glowMaterials: b.glow,
     baseGlow,
     height,
+    damage,
     dispose() {
       for (const g of b.geometries) g.dispose();
       for (const m of b.materials) m.dispose();
@@ -311,7 +383,8 @@ export function buildRaijin(): RobotRig {
     b.mesh(ft, new THREE.BoxGeometry(0.7, 0.08, 0.3), gold, [0, -0.02, 0.55]);
   }
 
-  return finish(b, 'raijin', J, back, 4.1, 1.8);
+  const damage = addDamage(b, J, { chestY: 0.5, frontZ: 0.6, halfWidth: 0.95, color: '#FFC46B' });
+  return finish(b, 'raijin', J, back, 4.1, 1.8, damage);
 }
 
 /** FUJIN: slim, streamlined, wind-bag arc and blade wings, booster feet. */
@@ -456,5 +529,6 @@ export function buildFujin(): RobotRig {
     b.mesh(ft, new THREE.CircleGeometry(0.09, 12), glow, [0, -0.08, -0.29], [0, Math.PI, 0]);
   }
 
-  return finish(b, 'fujin', J, back, 4.3, 1.9);
+  const damage = addDamage(b, J, { chestY: 0.5, frontZ: 0.43, halfWidth: 0.6, color: '#8BEAF2' });
+  return finish(b, 'fujin', J, back, 4.3, 1.9, damage);
 }

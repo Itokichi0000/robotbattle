@@ -2,5 +2,7 @@
   "RAIJIN": "raijin.glb",
   "FUJIN": "fujin.glb",
   "BOSS": "null_core.glb",
+  "ARENA": "arena.glb",
+  "EFFECTS": "effects.glb",
   "source": "tools/blender/generate_assets.py"
 }

@@ -77,7 +77,7 @@ export function webglAvailable(): boolean {
   }
 }
 
-export type ModelUrls = Partial<Record<'RAIJIN' | 'FUJIN' | 'BOSS', string>>;
+export type ModelUrls = Partial<Record<'RAIJIN' | 'FUJIN' | 'BOSS' | 'ARENA', string>>;
 
 /**
  * Model URLs for the chosen source. `auto` looks for committed artist art and
@@ -96,7 +96,8 @@ export async function loadModels(mode: ArenaSettings['models']): Promise<ModelUr
       if (!r.ok) continue;
       const m = (await r.json()) as Record<string, string | undefined>;
       const out: ModelUrls = {};
-      for (const k of ['RAIJIN', 'FUJIN', 'BOSS'] as const) if (m[k]) out[k] = `${dir}/${m[k]}`;
+      for (const k of ['RAIJIN', 'FUJIN', 'BOSS', 'ARENA'] as const)
+        if (m[k]) out[k] = `${dir}/${m[k]}`;
       return out;
     } catch {
       // try next

@@ -9,6 +9,7 @@ import { Enemies } from './Enemies';
 import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS, RESERVE_POSITION } from './layout';
 import { type CityThreat, MapOverlay } from './MapOverlay';
 import { ModelRobotActor } from './GlbRobotActor';
+import { ArenaModel } from './ArenaModel';
 import {
   ArenaStage,
   CameraRig,
@@ -28,6 +29,8 @@ export interface ArenaSceneProps {
   cityMaxHp: number;
   /** 0..1 per robot: extra glow (robot energy). */
   glow: Record<TeamId, number>;
+  /** Hull 0..100 per robot: damage stages (cracks, opened plates). */
+  health?: Record<TeamId, number>;
   /** 0..1 shared reserve energy (final special). */
   reserve: number;
   quality: Quality;
@@ -40,6 +43,8 @@ export interface ArenaSceneProps {
   robotModels?: Partial<Record<TeamId, string>>;
   /** Optional NULL CORE GLB; the procedural boss otherwise. */
   bossModel?: string;
+  /** Optional arena GLB (stage, bases, skyline); the procedural stage otherwise. */
+  arenaModel?: string;
   /** NULL CORE's core barrier holds (shown as a shell). */
   bossBarrier?: boolean;
   /** Pilots aboard (public, consent-moderated) for the cockpit bay. */
@@ -88,7 +93,18 @@ export function ArenaScene(props: ArenaSceneProps) {
       <DirectorClock director={director} />
       <CameraRig director={director} reducedMotion={reducedMotion} />
       <LightingRig shadows={q.shadows} />
-      <ArenaStage stars={q.stars} />
+      {props.arenaModel ? (
+        <>
+          <ArenaStage stars={q.stars} floor={false} />
+          <ArenaModel
+            url={props.arenaModel}
+            fallback={<ArenaStage stars={0} />}
+            onError={props.onModelError}
+          />
+        </>
+      ) : (
+        <ArenaStage stars={q.stars} />
+      )}
       <MapOverlay
         cities={props.cities}
         threats={props.threats}
@@ -117,6 +133,7 @@ export function ArenaScene(props: ArenaSceneProps) {
         url={props.robotModels?.RAIJIN}
         director={director}
         energyRatio={glow.RAIJIN}
+        health={props.health?.RAIJIN}
         onModelError={props.onModelError}
       />
       <ModelRobotActor
@@ -124,6 +141,7 @@ export function ArenaScene(props: ArenaSceneProps) {
         url={props.robotModels?.FUJIN}
         director={director}
         energyRatio={glow.FUJIN}
+        health={props.health?.FUJIN}
         onModelError={props.onModelError}
       />
       <Effects

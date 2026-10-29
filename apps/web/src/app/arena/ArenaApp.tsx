@@ -247,6 +247,7 @@ export function ArenaApp() {
           threats={threats}
           cityMaxHp={snap.config.cityMaxHp}
           glow={glow}
+          health={{ RAIJIN: snap.robots[0]!.health, FUJIN: snap.robots[1]!.health }}
           reserve={snap.reserveEnergy / 100}
           quality={quality}
           reducedMotion={settings.reducedMotion}
@@ -262,6 +263,7 @@ export function ArenaApp() {
               : undefined
           }
           bossModel={!modelError ? models?.BOSS : undefined}
+          arenaModel={!modelError ? models?.ARENA : undefined}
           bossBarrier={view.bossBarrier}
           crew={snap.crew}
           onModelError={() => setModelError(true)}
