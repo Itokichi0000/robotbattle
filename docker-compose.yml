@@ -1,0 +1,21 @@
+# Optional (D-037: SQLite needs no database container). UNVERIFIED in the dev
+# container (no Docker daemon). Secrets come from .env (never committed).
+services:
+  sats-wars:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_GAME_SERVER_URL: ${NEXT_PUBLIC_GAME_SERVER_URL:-}
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/sats-wars.db
+      BACKUP_DIR: /app/data/backups
+    ports:
+      - '3000:3000'
+      - '4000:4000'
+    volumes:
+      - sats-wars-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  sats-wars-data:

@@ -1,0 +1,44 @@
+# SECURITY — セキュリティとプライバシー
+
+仕様書 G3 のチェックリストに対する**実装状況**。「未」「部分」は `docs/OPEN_ISSUES.md` にも載せる。
+
+| #   | 項目              | 状況 | 実装 / 根拠                                                                                                                                                                                                                                                                |
+| --- | ----------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | LNURL-auth LUD-04 | 済   | k1 32B乱数・1回限り・120秒・試行5回、DER署名＋圧縮secp256k1鍵、署名対象は k1 の生バイト（事前ハッシュなし）。LUD-01 テストベクトル合格（`apps/server/test/lnurl.test.ts`）。**実ウォレット（WoS等）での試験は未**                                                          |
+| 1   | ブラウザ結び付け  | 済   | `sw_lnurl_bind` HttpOnly Cookie を持つブラウザだけが VERIFIED を受け取れる。別ブラウザは 404                                                                                                                                                                               |
+| 1   | セッション        | 済   | HttpOnly・SameSite=Lax・本番 Secure。DBは SHA-256 のみ。ゲスト3日・Lightning30日。全端末ログアウト                                                                                                                                                                         |
+| 1   | アカウントリンク  | 済   | 連携（LINK）はログイン中のセッション＋ウォレット署名の両方が必要。ゲスト統合は本人が確認した1回限りのトークンで実行、監査ログ                                                                                                                                              |
+| 2   | APIキー           | 済   | LNbits Invoice/read key はサーバー環境変数のみ。送金API・Admin key は使用しない                                                                                                                                                                                            |
+| 2   | 入金確認          | 済   | Webhook 本文は使わず、自分の請求書を payment_hash で探して LNbits に再照会。PAID 以外は付与しない。(raid,pilot) 一意・請求書ごとに1回                                                                                                                                      |
+| 2   | 実決済の安全装置  | 済   | `PAYMENT_MODE=lnbits` は `ALLOW_REAL_PAYMENTS=true` がないと起動拒否、本番は https の `SERVER_PUBLIC_URL` 必須。`/api/dev/mock-pay` は mock のときだけ存在                                                                                                                 |
+| 3   | ゲーム操作        | 済   | クライアントは席・対象・生入力のみ。ダメージ・HP・勝敗・スコア・クールダウン・期限はサーバー。入力時刻はサーバー経過＋2.5秒まで、他人のタスクは提出不可、`clientSubmissionId` で冪等                                                                                       |
+| 4   | Rate limit        | 済   | 既定600/分を**セッション単位**（共有Wi-Fiでも他人を巻き込まない）、なければIP。ゲスト作成は `GUEST_SIGNUPS_PER_MINUTE`（既定300/分/IP、会場NAT対策）。応援1秒1回、ミッション120/分                                                                                         |
+| 4   | ソケット          | 済   | `raid:subscribe` をZod検証。pilot はセッション、admin はトークン必須。会場状態報告は arena ロールのみ。最大メッセージ16KB。Origin 検査                                                                                                                                     |
+| 5   | 取得しない情報    | 済   | ウォレット残高・ノード公開鍵は取得しない。保存するのは LNURL の linking key（そのサービス専用の鍵）のみ                                                                                                                                                                    |
+| 5   | 保持期間          | 部分 | 期限切れチャレンジは24時間、支払い後の BOLT11 は24時間で消去、期限切れセッションは `RETENTION_DAYS`（既定30日）後に削除。**アクセスログ・IP の保持期間はホスティング側で設定**                                                                                             |
+| 5   | CSRF / CORS       | 済   | Cookie 認証の変更系は許可 Origin のみ。CORS は許可リスト（本番は `ALLOWED_ORIGINS` 必須）                                                                                                                                                                                  |
+| 5   | CSP               | 済   | web は静的 CSP（`default-src 'self'`、script/style の inline のみ許可、`'wasm-unsafe-eval'` は GLB デコーダ用、本番は eval 不可、`frame-ancestors 'self'`（/demo の iframe 用）、`object-src 'none'`）。API は `default-src 'none'`。E2E で主要ページの CSP 違反0（D-059） |
+| 6   | パイロット名      | 済   | NFKC正規化、制御文字・双方向制御・`<>&"'\`` を除去、20文字、絵文字3個まで、URL・禁止語は `PILOT-xxxxx`に置換。React の自動エスケープ。公開画面は本人の許可がないと`PILOT-xxxxx`                                                                                            |
+| 7   | 未成年配慮        | 部分 | 実名・写真・連絡先を求めない。ゲスト・スポンサーパス・無料モードあり。「本人確認」「生体認証」と表示しない。**利用規約・保護者同伴の運用判断は運営（トップの雛形のみ）**                                                                                                   |
+| 8   | 会場画面          | 済   | 鍵・BOLT11・payment hash・内部IDを表示しない。管理画面の請求書もハッシュ先頭12文字のみ                                                                                                                                                                                     |
+| 9   | 賞品・法令        | 方針 | 賭け・換金・抽選型景品なし。ランキングは記録のみ。法令・景品表示の確認は運営（`docs/EVENT_RUNBOOK.md`）                                                                                                                                                                    |
+| 10  | 失敗時            | 済   | 決済停止スイッチと決済連携スイッチが別々。停止中もスポンサーパス・既存パイロットで継続。緊急停止＝一時停止＋搭乗停止＋決済停止＋自動ループ停止                                                                                                                             |
+| 11  | 運用              | 済   | 監査ログ（管理操作・パス調整・統合・削除）。CI で秘密情報スキャン（`pnpm security:secrets`）と `pnpm audit`、dependabot。DB バックアップは自動（レイド終了ごと・一定間隔、`VACUUM INTO`、世代管理）、`pnpm db:backup` / `db:restore`（D-061）                              |
+| 12  | コンテンツ        | 済   | ロボ・ボス・地図・効果音はすべて自作（`assets/LICENSES.md`）。₿ロゴなし。外部AI生成素材は未使用                                                                                                                                                                            |
+
+## 脅威と対策のメモ
+
+- **支払っていないのに出撃**：付与は `passes.settle()` だけ。そこに来るのは「プロバイダ再照会で PAID」「スポンサーコード」「FREE/DEMO モード」「パス残高」のみ。
+  統合テストで Webhook 偽装・重複通知・期限後入金・同時使用を確認（`apps/server/test/flow.test.ts`, `lnbits.test.ts`）。
+- **払った額で強くなる**：エンジンはパスの種類を知らない（搭乗できるかだけ）。払った回数・金額を受け取るコードパスがない。
+- **ミニゲームの不正**：パラメータはサーバー生成・本人のみに返す。入力は時刻と選択だけで、採点はサーバーの `evaluateTask`。
+  機械的な連打は1回ごとのクールダウン（10秒）と群衆の公平配分で効果が頭打ちになる。
+- **他人になりすまして結果を受け取る**：LNURL の結果はチャレンジを開始したブラウザの結び付けCookieでしか受け取れない。
+- **管理画面**：個別アカウント（`ADMIN_USERS`、scrypt、役割 viewer/operator/owner、任意で TOTP）。共有 `ADMIN_PASSWORD` は本番で12文字以上が必須・無効化可（`ADMIN_SHARED_LOGIN=false`）。トークンは12時間、DB には SHA-256 のみ。全操作に監査ログ（D-060）。
+
+## 本番前に必要なこと（Phase 7 / 承認事項）
+
+- HTTPS（TLS終端）、`ALLOWED_ORIGINS`、`AUTH_MODE=lnurl`、`ADMIN_USERS`（TOTP 推奨）、ログ保持期間の設定（`docs/PRODUCTION_GUIDE.md`）。
+- 実ウォレットでの LNURL-auth 互換性試験、LNbits テスト環境での入金試験（**オーナー承認後**）。
+- バックアップ/復元のリハーサル（`pnpm db:backup` → `pnpm db:restore`）、公開後の `pnpm smoke`。
+- 合否は `docs/RELEASE_GATE.md`。

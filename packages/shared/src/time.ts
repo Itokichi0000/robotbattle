@@ -1,7 +1,7 @@
-import type { MatchStatus } from './state';
+import type { RaidStatus } from './state';
 
-export function isClockRunning(status: MatchStatus): boolean {
-  return status === 'LOBBY' || status === 'LIVE' || status === 'FINALIZING';
+export function isClockRunning(status: RaidStatus): boolean {
+  return status === 'LIVE';
 }
 
 /** mm:ss for non-negative ms (rounds up so "0:01" is shown until the last ms). */
@@ -21,7 +21,10 @@ export interface ClockAnchor {
 }
 
 /** Estimate current clock values from an anchor and the client's estimate of server time. */
-export function estimateClock(anchor: ClockAnchor, serverNow: number): { clockMs: number; gameMs: number } {
+export function estimateClock(
+  anchor: ClockAnchor,
+  serverNow: number,
+): { clockMs: number; gameMs: number } {
   if (!anchor.running) return { clockMs: anchor.clockMs, gameMs: anchor.gameMs };
   const elapsed = Math.max(0, serverNow - anchor.serverTime);
   return { clockMs: anchor.clockMs + elapsed, gameMs: anchor.gameMs + elapsed };

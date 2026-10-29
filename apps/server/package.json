@@ -1,0 +1,33 @@
+{
+  "name": "@sats-wars/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "start": "node --disable-warning=ExperimentalWarning dist/index.js",
+    "build": "tsc --noEmit && node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@noble/curves": "2.0.1",
+    "@noble/hashes": "2.0.1",
+    "@sats-wars/game-engine": "workspace:*",
+    "@sats-wars/shared": "workspace:*",
+    "fastify": "^5.6.1",
+    "socket.io": "^4.8.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "esbuild": "^0.25.11",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

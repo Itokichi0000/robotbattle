@@ -1,0 +1,27 @@
+{
+  "name": "@sats-wars/simulations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "simulate": "tsx src/run.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "demo:seed": "tsx src/cli/demoSeed.ts",
+    "demo:raid": "tsx src/cli/demoRaid.ts",
+    "sim:balance": "tsx src/cli/simBalance.ts",
+    "load:matrix": "tsx src/cli/loadMatrix.ts",
+    "loadtest": "tsx src/loadtest.ts"
+  },
+  "dependencies": {
+    "@sats-wars/game-engine": "workspace:*",
+    "@sats-wars/shared": "workspace:*",
+    "socket.io-client": "^4.8.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

@@ -1,0 +1,157 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-navy: #070d1a;
+  --color-navy-2: #0e1830;
+  --color-navy-3: #17233f;
+  --color-line: #2a3a5e;
+  --color-amber: #f7931a;
+  --color-amber-light: #ffc46b;
+  --color-teal: #25c8d7;
+  --color-teal-light: #8beaf2;
+  --color-off: #eff5ff;
+  --color-muted: #9aa8c7;
+  --color-danger: #ff5d6c;
+  --color-ok: #39d98a;
+  --font-sans:
+    'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo',
+    system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Arial Black', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-navy);
+  color: var(--color-off);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.sw-large-text {
+  font-size: 118%;
+}
+
+.sw-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+.sw-panel {
+  background: linear-gradient(180deg, rgba(23, 35, 63, 0.92), rgba(14, 24, 48, 0.92));
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.sw-btn {
+  min-height: 48px;
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  transition:
+    transform 0.08s ease,
+    filter 0.15s ease,
+    opacity 0.15s;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
+}
+.sw-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+.sw-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sw-btn:focus-visible,
+.sw-focus:focus-visible {
+  outline: 3px solid var(--color-off);
+  outline-offset: 2px;
+}
+
+@keyframes sw-banner-in {
+  0% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.sw-banner-in {
+  animation: sw-banner-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes sw-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.sw-pulse {
+  animation: sw-pulse 1.2s ease-in-out infinite;
+}
+
+/* Name pop-up for each punch on the venue screen. */
+@keyframes sw-pop-in {
+  0% {
+    transform: translateY(8px) scale(0.9);
+    opacity: 0;
+  }
+  15% {
+    transform: none;
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.sw-pop-in {
+  animation: sw-pop-in 2.2s ease-out both;
+}
+
+/* Free cheers float upwards. */
+@keyframes sw-cheer-up {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-260%);
+    opacity: 0;
+  }
+}
+.sw-cheer-up {
+  animation: sw-cheer-up 3s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-banner-in,
+  .sw-pulse,
+  .sw-pop-in,
+  .sw-cheer-up {
+    animation: none;
+  }
+}
+.sw-reduced-motion .sw-banner-in,
+.sw-reduced-motion .sw-pulse,
+.sw-reduced-motion .sw-pop-in,
+.sw-reduced-motion .sw-cheer-up {
+  animation: none;
+}

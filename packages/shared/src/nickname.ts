@@ -1,4 +1,4 @@
-import { NICKNAME_MAX_LENGTH } from './protocol';
+import { CALLSIGN_MAX_LENGTH } from './protocol';
 
 /**
  * Minimal blocklist for the venue screen. Moderation is best-effort: admins can
@@ -25,8 +25,10 @@ const BLOCKED_SUBSTRINGS = [
 
 // Control chars, zero-width chars, bidi overrides.
 // eslint-disable-next-line no-control-regex
-const STRIP_RE = /[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁠-⁯﻿]/g;
+const STRIP_RE = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
 const URL_LIKE_RE = /(https?:|www\.|\.com|\.jp|\.io|lnbc|lnurl|@)/i;
+
+const MAX_EMOJI = 3;
 
 export interface NicknameResult {
   nickname: string;
@@ -34,14 +36,23 @@ export interface NicknameResult {
   replaced: boolean;
 }
 
-export function sanitizeNickname(raw: string | undefined | null, fallbackSuffix: string): NicknameResult {
-  const fallback = `Player-${fallbackSuffix.slice(0, 4).toUpperCase()}`;
+export function sanitizeNickname(
+  raw: string | undefined | null,
+  fallbackSuffix: string,
+): NicknameResult {
+  const fallback = `PILOT-${fallbackSuffix.slice(0, 5).toUpperCase()}`;
   if (!raw) return { nickname: fallback, replaced: true };
-  let s = raw.normalize('NFKC').replace(STRIP_RE, '').replace(/[<>&"'`\\]/g, '');
+  let s = raw
+    .normalize('NFKC')
+    .replace(STRIP_RE, '')
+    .replace(/[<>&"'`\\]/g, '');
   s = s.replace(/\s+/g, ' ').trim();
+  // A few emoji are fine; walls of emoji/symbols break the venue layout.
+  let pictos = 0;
+  s = s.replace(/\p{Extended_Pictographic}\uFE0F?/gu, (m) => (++pictos <= MAX_EMOJI ? m : ''));
   // Count by code points so emoji/surrogates are not split.
   const chars = Array.from(s);
-  if (chars.length > NICKNAME_MAX_LENGTH) s = chars.slice(0, NICKNAME_MAX_LENGTH).join('');
+  if (chars.length > CALLSIGN_MAX_LENGTH) s = chars.slice(0, CALLSIGN_MAX_LENGTH).join('');
   if (!s) return { nickname: fallback, replaced: true };
   const lower = s.toLowerCase();
   if (BLOCKED_SUBSTRINGS.some((w) => lower.includes(w)) || URL_LIKE_RE.test(s)) {

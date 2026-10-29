@@ -1,186 +1,293 @@
 import type {
-  ClashTeamOutcome,
-  ClashTeamSnapshot,
-  Contribution,
+  CityState,
+  Enemy,
+  EnergySink,
+  Facility,
   GameConfig,
-  MatchResult,
-  MatchState,
-  ParticipantState,
-  RegionKind,
-  ResultReason,
-  TeamId,
+  RaidPhase,
+  RaidState,
+  RegionId,
+  RepairTarget,
+  RobotId,
+  RobotState,
+  Role,
+  Telegraph,
+  Weakpoint,
 } from '@sats-wars/shared';
-import { TEAM_IDS, otherTeam } from '@sats-wars/shared';
+import { CITY_INFO, REGION_IDS } from '@sats-wars/shared';
 
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+/** Read-only view the helpers need (also buildable from a public snapshot). */
+export type Board = Pick<
+  RaidState,
+  | 'config'
+  | 'cities'
+  | 'robots'
+  | 'enemies'
+  | 'telegraphs'
+  | 'bossId'
+  | 'reserveEnergy'
+  | 'jammedUntil'
+  | 'gameMs'
+  | 'phase'
+>;
+
+export const ms = (seconds: number) => seconds * 1000;
+
+export function standingCities(cities: Record<RegionId, CityState>): RegionId[] {
+  return REGION_IDS.filter((id) => !cities[id].destroyed);
 }
 
-/** A region counts toward bonuses only while owned and NOT contested. */
-export function countActiveRegions(state: MatchState, teamId: TeamId, kind: RegionKind): number {
-  let n = 0;
-  for (const id of state.regionOrder) {
-    const r = state.regions[id];
-    if (r.ownerTeamId === teamId && r.contestedByTeamId === null && r.kind === kind) n++;
-  }
-  return n;
+/** A facility works while its city stands. */
+export function facilityActive(b: Pick<Board, 'cities'>, f: Facility): boolean {
+  const id = REGION_IDS.find((r) => CITY_INFO[r].facility === f)!;
+  return !b.cities[id].destroyed;
 }
 
-/** Owned regions including contested ones (ownership is kept while contested). */
-export function countOwnedRegions(state: MatchState, teamId: TeamId): number {
-  let n = 0;
-  for (const id of state.regionOrder) if (state.regions[id].ownerTeamId === teamId) n++;
-  return n;
+/** Phase for a game time (combat only). */
+export function phaseAt(c: GameConfig, gameMs: number): RaidPhase {
+  const p = c.phaseStartsSeconds;
+  if (gameMs >= ms(p.FINAL_WAVE)) return 'FINAL_WAVE';
+  if (gameMs >= ms(p.WAVE_3)) return 'WAVE_3';
+  if (gameMs >= ms(p.WAVE_2)) return 'WAVE_2';
+  if (gameMs >= ms(p.WAVE_1)) return 'WAVE_1';
+  return 'INTRO_TRAINING';
 }
 
-export function snapshotTeamForClash(state: MatchState, teamId: TeamId): ClashTeamSnapshot {
-  const team = state.teams[teamId];
-  return {
-    teamId,
-    hpBefore: team.hp,
-    energyBefore: team.energy,
-    activeAttackRegions: countActiveRegions(state, teamId, 'ATTACK'),
-    activeDefenseRegions: countActiveRegions(state, teamId, 'DEFENSE'),
-    activeEnergyRegions: countActiveRegions(state, teamId, 'ENERGY'),
-  };
+/** Pilots seen (boarded, asked for or finished a task) within the active window. */
+export function activePilotIds(s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>): string[] {
+  const since = s.gameMs - ms(s.config.activeWindowSeconds);
+  return Object.values(s.pilots)
+    .filter((p) => p.lastActiveAt >= since)
+    .map((p) => p.pilotId);
 }
 
-export interface DamageBreakdown {
-  damage: number;
-  special: boolean;
-  energyBonus: number;
-  raw: number;
+/** Enemy HP multiplier from the (smoothed) number of active pilots. */
+export function difficultyScale(c: GameConfig, activePilots: number): number {
+  const ratio = activePilots / c.difficultyReferencePilots;
+  const curved = ratio < 1 ? ratio ** c.difficultySmallCrewExponent : ratio;
+  return Math.min(c.difficultyMaxScale, Math.max(c.difficultyMinScale, curved));
 }
 
 /**
- * damage = clamp(base + atkBonus*attackRegions + energyBonus + specialBonus
- *                - defReduction*opponentDefenseRegions, min, max)
- * Pure function of the clash-start snapshot; identical for both teams.
+ * Crowd normalisation per seat: a seat runs at full strength with up to
+ * `roleFairShare` of the active crew in it (at least one pilot). More pilots
+ * succeeding in the same seat recently share that strength, so spreading over
+ * all four seats is always stronger than piling onto one.
  */
-export function computeDamage(
-  attacker: ClashTeamSnapshot,
-  defender: ClashTeamSnapshot,
-  config: GameConfig,
-): DamageBreakdown {
-  const special = attacker.energyBefore >= config.specialThreshold;
-  const energyBonus = special
-    ? 0
-    : Math.min(
-        config.energyBonusMax,
-        Math.floor(attacker.energyBefore / 10) * config.energyBonusPer10,
-      );
-  const raw =
-    config.baseDamage +
-    config.attackRegionBonus * attacker.activeAttackRegions +
-    energyBonus +
-    (special ? config.specialBonus : 0) -
-    config.defenseRegionReduction * defender.activeDefenseRegions;
-  return {
-    damage: clamp(raw, config.damageMin, config.damageMax),
-    special,
-    energyBonus,
-    raw,
-  };
+export function roleScale(
+  s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>,
+  role: Role,
+  includePilotId?: string,
+): number {
+  const since = s.gameMs - ms(s.config.activeWindowSeconds);
+  const ids = new Set(
+    Object.values(s.pilots)
+      .filter((p) => (p.lastSuccessAt[role] ?? -Infinity) >= since)
+      .map((p) => p.pilotId),
+  );
+  if (includePilotId) ids.add(includePilotId);
+  const fair = Math.max(1, activePilotIds(s).length * s.config.roleFairShare);
+  return Math.min(1, fair / Math.max(1, ids.size));
 }
 
-/** Resolve both sides from the same snapshot and apply damage simultaneously. */
-export function resolveClashOutcome(
-  snapshot: Record<TeamId, ClashTeamSnapshot>,
-  config: GameConfig,
-): Record<TeamId, ClashTeamOutcome> {
-  const breakdown = {
-    RAIJIN: computeDamage(snapshot.RAIJIN, snapshot.FUJIN, config),
-    FUJIN: computeDamage(snapshot.FUJIN, snapshot.RAIJIN, config),
-  } satisfies Record<TeamId, DamageBreakdown>;
-  const outcome = {} as Record<TeamId, ClashTeamOutcome>;
-  for (const teamId of TEAM_IDS) {
-    const self = snapshot[teamId];
-    const mine = breakdown[teamId];
-    const received = breakdown[otherTeam(teamId)].damage;
-    const energyAfterSpecial = self.energyBefore - (mine.special ? config.specialCost : 0);
-    outcome[teamId] = {
-      teamId,
-      damageDealt: mine.damage,
-      special: mine.special,
-      energyBonus: mine.energyBonus,
-      hpAfter: Math.max(0, self.hpBefore - received),
-      energyAfter: clamp(
-        energyAfterSpecial + self.activeEnergyRegions * config.energyRegionGain,
-        0,
-        config.energyMax,
-      ),
+/** Seat effect multiplier of a robot: health, damaged component and stored energy. */
+export function robotPower(c: GameConfig, r: RobotState): number {
+  const health = 0.6 + (0.4 * r.health) / 100;
+  const component = r.componentDamaged ? c.damagedComponentFactor : 1;
+  return health * component * (1 + (c.energyBoostMax * r.energy) / 100);
+}
+
+export const ROBOT_FOR_ROLE: Partial<Record<Role, RobotId>> = {
+  GUNNER: 'RAIJIN',
+  GUARDIAN: 'FUJIN',
+};
+
+export function liveEnemies(b: Pick<Board, 'enemies'>): Enemy[] {
+  return b.enemies.filter((e) => e.hp > 0);
+}
+
+/** Threats in the order they will land. */
+export function upcomingTelegraphs(b: Pick<Board, 'telegraphs'>): Telegraph[] {
+  return [...b.telegraphs].sort((a, z) => a.resolvesAt - z.resolvesAt || a.id - z.id);
+}
+
+/**
+ * Work other pilots have already promised with their open missions (server
+ * side only: tasks are private). The seat recommendations subtract it, so a
+ * crowd spreads over the threats instead of herding onto the first one.
+ * Expected values (×0.7), not guarantees: a miss leaves the threat open.
+ */
+export interface Claims {
+  shield: Partial<Record<RegionId, number>>;
+  damage: Partial<Record<number, number>>;
+}
+
+const CLAIM_SUCCESS = 0.7;
+
+export function claimsOf(
+  s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>,
+  exceptPilotId?: string,
+): Claims {
+  const out: Claims = { shield: {}, damage: {} };
+  for (const p of Object.values(s.pilots)) {
+    const t = p.task;
+    if (!t || t.deadline < s.gameMs || p.pilotId === exceptPilotId) continue;
+    if (t.target.kind === 'TELEGRAPH' || t.target.kind === 'CITY_STANDBY') {
+      const id = t.target.cityId;
+      out.shield[id] = (out.shield[id] ?? 0) + s.config.guardian.shield * CLAIM_SUCCESS;
+    }
+    if (t.target.kind === 'ENEMY') {
+      const id = t.target.enemyId;
+      out.damage[id] =
+        (out.damage[id] ?? 0) + s.config.gunner.damage[t.target.weakpoint] * CLAIM_SUCCESS;
+    }
+  }
+  return out;
+}
+
+/** Damage each city would take from the pending telegraphs (after current and claimed shields). */
+export function pendingCityDamage(
+  b: Pick<Board, 'telegraphs' | 'cities' | 'enemies'>,
+  claims?: Claims,
+): Partial<Record<RegionId, number>> {
+  const raw: Partial<Record<RegionId, number>> = {};
+  for (const t of b.telegraphs) {
+    const e = b.enemies.find((x) => x.id === t.enemyId);
+    const dmg = Math.round(t.damage * (1 - (e?.weaken ?? 0)));
+    for (const id of t.targets) raw[id] = (raw[id] ?? 0) + dmg;
+  }
+  const out: Partial<Record<RegionId, number>> = {};
+  for (const id of REGION_IDS) {
+    const d = (raw[id] ?? 0) - b.cities[id].shield - (claims?.shield[id] ?? 0);
+    if (d > 0 && !b.cities[id].destroyed) out[id] = d;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Recommendations ("今の緊急ミッション") — also the default target of a seat
+// ---------------------------------------------------------------------------
+
+/**
+ * HP the boss cannot fall below right now: its core barrier holds until
+ * FINAL_WAVE (D-053), so the finale and 神雷風陣 always happen. 0 = no floor.
+ */
+export function bossBarrierFloor(b: Pick<Board, 'config' | 'phase' | 'bossId'>, e: Enemy): number {
+  const ratio = b.config.boss.barrierFloorRatio;
+  if (e.id !== b.bossId || ratio <= 0 || b.phase === 'FINAL_WAVE') return 0;
+  return Math.ceil(e.hpMax * ratio);
+}
+
+/** True when the boss's barrier is up and its core takes no more damage. */
+export function bossBarrierUp(b: Pick<Board, 'config' | 'phase' | 'bossId' | 'enemies'>): boolean {
+  const boss = b.enemies.find((e) => e.id === b.bossId);
+  if (!boss) return false;
+  const floor = bossBarrierFloor(b, boss);
+  return floor > 0 && boss.hp <= floor;
+}
+
+export function recommendGunnerTarget(
+  b: Board,
+  claims?: Claims,
+): { enemyId: number; weakpoint: Weakpoint } | null {
+  const enemies = liveEnemies(b);
+  if (!enemies.length) return null;
+  const boss = enemies.find((e) => e.id === b.bossId);
+  const pending = pendingCityDamage(b, claims);
+  const lethal = (t: Telegraph) => t.targets.some((id) => (pending[id] ?? 0) >= b.cities[id].hp);
+  // An escort other gunners are already about to finish needs no more shots.
+  const open = (id: number) => enemies.some((e) => e.id === id && e.hp > (claims?.damage[id] ?? 0));
+  // Stop an escort whose attack would destroy a city; otherwise the boss is the job.
+  const urgent = upcomingTelegraphs(b).find(
+    (t) => t.enemyId !== b.bossId && lethal(t) && open(t.enemyId),
+  );
+  if (urgent) return { enemyId: urgent.enemyId, weakpoint: 'CORE' };
+  if (boss) {
+    // Behind the barrier the core is pointless: weaken the arms, then slow the legs.
+    if (bossBarrierUp(b)) {
+      const tg = b.telegraphs.find((t) => t.enemyId === boss.id);
+      return {
+        enemyId: boss.id,
+        weakpoint:
+          boss.weaken < b.config.gunner.armWeakenMax ? 'ARM' : tg && !tg.delayed ? 'LEG' : 'ARM',
+      };
+    }
+    return {
+      enemyId: boss.id,
+      weakpoint:
+        boss.weaken < b.config.gunner.armWeakenMax && boss.partHits.ARM < 2 ? 'ARM' : 'CORE',
     };
   }
-  return outcome;
-}
-
-export function contributionScore(c: Contribution): number {
-  return c.captures * 3 + c.contests + c.breaks * 2 + c.shields + c.shieldBreaks + c.charges;
-}
-
-export function emptyContribution(): Contribution {
-  return { captures: 0, contests: 0, breaks: 0, shields: 0, shieldBreaks: 0, charges: 0 };
-}
-
-/** Deterministic ordering: score desc, then earlier join, then id. */
-export function rankParticipants(participants: ParticipantState[]): ParticipantState[] {
-  return [...participants].sort((a, b) => {
-    const d = contributionScore(b.contribution) - contributionScore(a.contribution);
-    if (d !== 0) return d;
-    if (a.joinedAtGameMs !== b.joinedAtGameMs) return a.joinedAtGameMs - b.joinedAtGameMs;
-    return a.participantId < b.participantId ? -1 : a.participantId > b.participantId ? 1 : 0;
-  });
-}
-
-export function pickMvp(state: MatchState, teamId: TeamId): MatchResult['mvp'][TeamId] {
-  const members = Object.values(state.participants).filter((p) => p.teamId === teamId);
-  const top = rankParticipants(members)[0];
-  if (!top || contributionScore(top.contribution) === 0) return null;
+  const next =
+    upcomingTelegraphs(b).find((t) => open(t.enemyId)) ??
+    upcomingTelegraphs(b).find((t) => enemies.some((e) => e.id === t.enemyId));
+  if (next) return { enemyId: next.enemyId, weakpoint: 'CORE' };
   return {
-    participantId: top.participantId,
-    nickname: top.nickname,
-    score: contributionScore(top.contribution),
+    enemyId: [...enemies].sort((a, z) => a.hp - z.hp || a.id - z.id)[0]!.id,
+    weakpoint: 'CORE',
   };
 }
 
-/**
- * Decide the winner. Applied after all damage of the same tick is applied.
- * KO: the side above 0 wins. Both 0 (double KO) or time up: HP, then owned
- * regions, then draw.
- */
-export function decideResult(state: MatchState, ko: boolean): MatchResult {
-  const finalHp = { RAIJIN: state.teams.RAIJIN.hp, FUJIN: state.teams.FUJIN.hp };
-  const regionCounts = {
-    RAIJIN: countOwnedRegions(state, 'RAIJIN'),
-    FUJIN: countOwnedRegions(state, 'FUJIN'),
-  };
-  let winnerTeamId: TeamId | null = null;
-  let reason: ResultReason;
-  const byRegions = (): TeamId | null =>
-    regionCounts.RAIJIN === regionCounts.FUJIN
-      ? null
-      : regionCounts.RAIJIN > regionCounts.FUJIN
-        ? 'RAIJIN'
-        : 'FUJIN';
-  if (ko && finalHp.RAIJIN === 0 && finalHp.FUJIN === 0) {
-    winnerTeamId = byRegions();
-    reason = winnerTeamId ? 'DOUBLE_KO' : 'DRAW';
-  } else if (ko) {
-    winnerTeamId = finalHp.RAIJIN === 0 ? 'FUJIN' : 'RAIJIN';
-    reason = 'KO';
-  } else if (finalHp.RAIJIN !== finalHp.FUJIN) {
-    winnerTeamId = finalHp.RAIJIN > finalHp.FUJIN ? 'RAIJIN' : 'FUJIN';
-    reason = 'TIME_HP';
-  } else {
-    winnerTeamId = byRegions();
-    reason = winnerTeamId ? 'TIME_REGIONS' : 'DRAW';
+/** The threat a GUARDIAN should cover: soonest one that would really hurt. */
+export function recommendGuardianTarget(
+  b: Board,
+  claims?: Claims,
+): { telegraphId: number; cityId: RegionId } | { cityId: RegionId } {
+  const pending = pendingCityDamage(b, claims);
+  for (const t of upcomingTelegraphs(b)) {
+    const city = t.targets.find((id) => (pending[id] ?? 0) > 0);
+    if (city) return { telegraphId: t.id, cityId: city };
   }
+  const first = upcomingTelegraphs(b)[0];
+  if (first) return { telegraphId: first.id, cityId: first.targets[0]! };
+  // No threat: pre-shield the weakest standing city.
+  const cover = (id: RegionId) => b.cities[id].hp + b.cities[id].shield + (claims?.shield[id] ?? 0);
+  const standing = standingCities(b.cities).sort((a, z) => cover(a) - cover(z));
+  return { cityId: standing[0] ?? 'kanto' };
+}
+
+export function recommendSink(b: Board): EnergySink {
+  const late = b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE';
+  if (late && b.reserveEnergy < b.config.special.energyMinimum) return 'RESERVE';
+  return b.robots.RAIJIN.energy <= b.robots.FUJIN.energy ? 'RAIJIN' : 'FUJIN';
+}
+
+export function recommendRepair(b: Board): RepairTarget {
+  if (b.jammedUntil > b.gameMs) return { type: 'UNJAM' };
+  const robots = (['RAIJIN', 'FUJIN'] as const).filter((r) => b.robots[r].componentDamaged);
+  if (robots.length)
+    return {
+      type: 'ROBOT',
+      robot: robots.sort((a, z) => b.robots[a].health - b.robots[z].health)[0]!,
+    };
+  const rebuild = REGION_IDS.find(
+    (id) => b.cities[id].destroyed && b.cities[id].rebuildReadyAt <= b.gameMs,
+  );
+  if (rebuild) return { type: 'CITY', cityId: rebuild };
+  const hurt = standingCities(b.cities)
+    .filter((id) => b.cities[id].hp < b.config.cityMaxHp)
+    .sort((a, z) => b.cities[a].hp - b.cities[z].hp);
+  if (hurt[0]) return { type: 'CITY', cityId: hurt[0] };
   return {
-    winnerTeamId,
-    reason,
-    decidedAtGameMs: state.gameMs,
-    finalHp,
-    regionCounts,
-    mvp: { RAIJIN: pickMvp(state, 'RAIJIN'), FUJIN: pickMvp(state, 'FUJIN') },
+    type: 'ROBOT',
+    robot: b.robots.RAIJIN.health <= b.robots.FUJIN.health ? 'RAIJIN' : 'FUJIN',
   };
+}
+
+/** Which seat the raid needs most right now (shown as "必要な役割"). */
+export function neededRole(b: Board): Role {
+  const pending = pendingCityDamage(b);
+  if (Object.keys(pending).length) return 'GUARDIAN';
+  if (
+    b.jammedUntil > b.gameMs ||
+    b.robots.RAIJIN.componentDamaged ||
+    b.robots.FUJIN.componentDamaged
+  )
+    return 'ENGINEER';
+  if (
+    (b.phase === 'WAVE_3' || b.phase === 'FINAL_WAVE') &&
+    b.reserveEnergy < b.config.special.energyMinimum
+  )
+    return 'ROUTER';
+  return 'GUNNER';
 }

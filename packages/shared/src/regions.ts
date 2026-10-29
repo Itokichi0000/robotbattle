@@ -10,9 +10,6 @@ export const REGION_IDS = [
 ] as const;
 export type RegionId = (typeof REGION_IDS)[number];
 
-export const REGION_KINDS = ['ATTACK', 'DEFENSE', 'ENERGY'] as const;
-export type RegionKind = (typeof REGION_KINDS)[number];
-
 export function isRegionId(value: unknown): value is RegionId {
   return typeof value === 'string' && (REGION_IDS as readonly string[]).includes(value);
 }
@@ -41,41 +38,113 @@ export const REGION_INFO: Record<RegionId, RegionInfo> = {
   },
 };
 
-export const REGION_KIND_META: Record<
-  RegionKind,
-  { labelJa: string; labelEn: string; icon: string; descJa: string; descEn: string }
-> = {
-  ATTACK: {
-    labelJa: '攻撃拠点',
-    labelEn: 'Attack base',
-    icon: '⚔',
-    descJa: '1つにつき激突時の与ダメージ+3',
-    descEn: '+3 clash damage each',
+/**
+ * Defence nodes: one city per region with an abstract facility (fictional
+ * game setting, not a claim about real infrastructure). While a city stands,
+ * its facility helps the whole raid; a destroyed city loses it.
+ */
+export const FACILITIES = [
+  'RADAR',
+  'DOCK',
+  'COMMAND',
+  'HUB',
+  'BASTION',
+  'JAMMER',
+  'SENSOR',
+  'RESERVE_PLANT',
+] as const;
+export type Facility = (typeof FACILITIES)[number];
+
+export interface CityInfo {
+  cityId: RegionId;
+  cityJa: string;
+  cityEn: string;
+  facility: Facility;
+  facilityJa: string;
+  facilityEn: string;
+  effectJa: string;
+  effectEn: string;
+}
+
+export const CITY_INFO: Record<RegionId, CityInfo> = {
+  hokkaido: {
+    cityId: 'hokkaido',
+    cityJa: '札幌',
+    cityEn: 'Sapporo',
+    facility: 'RADAR',
+    facilityJa: '監視レーダー',
+    facilityEn: 'Radar',
+    effectJa: '敵の予兆が1秒早く出る',
+    effectEn: 'Threats show 1 s earlier',
   },
-  DEFENSE: {
-    labelJa: '防御拠点',
-    labelEn: 'Defense base',
-    icon: '🛡',
-    descJa: '1つにつき激突時の被ダメージ-2',
-    descEn: '-2 damage taken each',
+  tohoku: {
+    cityId: 'tohoku',
+    cityJa: '仙台',
+    cityEn: 'Sendai',
+    facility: 'DOCK',
+    facilityJa: '修復ドック',
+    facilityEn: 'Repair dock',
+    effectJa: '整備の回復量+25%',
+    effectEn: 'Repairs +25%',
   },
-  ENERGY: {
-    labelJa: 'エネルギー拠点',
-    labelEn: 'Energy base',
-    icon: '◆',
-    descJa: '1つにつき激突後エネルギー+5',
-    descEn: '+5 energy after each clash',
+  kanto: {
+    cityId: 'kanto',
+    cityJa: '東京',
+    cityEn: 'Tokyo',
+    facility: 'COMMAND',
+    facilityJa: '中央指令所',
+    facilityEn: 'Command HQ',
+    effectJa: 'シンクロ率が減りにくい',
+    effectEn: 'SYNC decays slower',
+  },
+  chubu: {
+    cityId: 'chubu',
+    cityJa: '名古屋',
+    cityEn: 'Nagoya',
+    facility: 'HUB',
+    facilityJa: '供給ハブ',
+    facilityEn: 'Supply hub',
+    effectJa: '電力接続のエネルギー+20%',
+    effectEn: 'Routed energy +20%',
+  },
+  kinki: {
+    cityId: 'kinki',
+    cityJa: '大阪',
+    cityEn: 'Osaka',
+    facility: 'BASTION',
+    facilityJa: '防衛中枢',
+    facilityEn: 'Defence core',
+    effectJa: 'シールド+20%',
+    effectEn: 'Shields +20%',
+  },
+  chugoku: {
+    cityId: 'chugoku',
+    cityJa: '広島',
+    cityEn: 'Hiroshima',
+    facility: 'JAMMER',
+    facilityJa: '妨害装置',
+    facilityEn: 'Jammer',
+    effectJa: '敵の予兆が1秒長くなる',
+    effectEn: 'Threats last 1 s longer',
+  },
+  shikoku: {
+    cityId: 'shikoku',
+    cityJa: '高松',
+    cityEn: 'Takamatsu',
+    facility: 'SENSOR',
+    facilityJa: 'センサー網',
+    facilityEn: 'Sensor net',
+    effectJa: '砲撃の照準リングが広い',
+    effectEn: 'Wider aiming ring',
+  },
+  kyushu: {
+    cityId: 'kyushu',
+    cityJa: '福岡',
+    cityEn: 'Fukuoka',
+    facility: 'RESERVE_PLANT',
+    facilityJa: '予備電源',
+    facilityEn: 'Reserve plant',
+    effectJa: '最終決戦エネルギー+20%',
+    effectEn: 'Reserve energy +20%',
   },
 };
-
-/** Default layout: 3 ATTACK, 3 DEFENSE, 2 ENERGY spread across the archipelago. */
-export const DEFAULT_REGION_LAYOUT: ReadonlyArray<{ regionId: RegionId; kind: RegionKind }> = [
-  { regionId: 'hokkaido', kind: 'DEFENSE' },
-  { regionId: 'tohoku', kind: 'ATTACK' },
-  { regionId: 'kanto', kind: 'ENERGY' },
-  { regionId: 'chubu', kind: 'DEFENSE' },
-  { regionId: 'kinki', kind: 'ATTACK' },
-  { regionId: 'chugoku', kind: 'ENERGY' },
-  { regionId: 'shikoku', kind: 'DEFENSE' },
-  { regionId: 'kyushu', kind: 'ATTACK' },
-];
