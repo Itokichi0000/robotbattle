@@ -87,19 +87,20 @@ export function TargetDesignator({
     let size: number;
     if (escort) {
       escort.getWorldPosition(pos);
-      size = 1.15;
+      // Outside the escort's ring (radius up to ~1.05) even when closed on LOCK.
+      size = 1.8;
     } else if (bossGlb) {
       // An artist's model has its own weak point layout: box the whole machine.
       bossGlb.getWorldPosition(pos);
-      size = 2.8;
+      size = 4.6;
     } else if (boss) {
       const off = WEAK_OFFSET[d.weakpoint ?? 'CORE'];
       pos.set(...off);
       boss.localToWorld(pos);
-      size = d.weakpoint && d.weakpoint !== 'CORE' ? 1.9 : 2.6;
+      size = d.weakpoint && d.weakpoint !== 'CORE' ? 2.4 : 3.2;
     } else {
       pos.copy(BOSS_POSITION);
-      size = 2.6;
+      size = 4.4;
     }
     g.visible = true;
     g.position.copy(pos);

@@ -219,12 +219,13 @@ function Registration({
 
 /**
  * `?speed=4` runs the raid clock faster for rehearsals and screenshots (the
- * whole 8-minute raid in 2). Not offered in the UI; 1 otherwise.
+ * whole 8-minute raid in 2); `?speed=0.25` slows it (a long lobby for hangar
+ * shots). Not offered in the UI; 1 otherwise.
  */
 function rehearsalSpeed(): number {
   try {
     const v = Number(new URLSearchParams(window.location.search).get('speed'));
-    return Number.isFinite(v) && v >= 1 && v <= 8 ? v : 1;
+    return Number.isFinite(v) && v >= 0.1 && v <= 8 ? v : 1;
   } catch {
     return 1;
   }

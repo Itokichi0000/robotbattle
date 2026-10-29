@@ -5,10 +5,10 @@
 //   pnpm ui:capture --sizes 1440x900 --scenes battle # one size, battle states only
 //   pnpm ui:capture --file path/to/sats-wars-solo.standalone.html --out before/
 //
-// Scenes: hangar (registration, station selected), battle (normal, gunner sight, verdict,
+// Scenes: hangar (registration, station selected, READY), battle (normal, gunner sight, verdict,
 // attack warning, final wave, debrief), roles (guardian / router / engineer: hangar, idle, live).
-// The raid runs at ?speed=3 so a full raid fits in a few minutes (the hangar at real time, so the
-// lobby is still open); the game logic is unchanged.
+// The raid runs at ?speed=3 so a full raid fits in a few minutes (the hangar at ?speed=0.25, so
+// the lobby stays open); the game logic is unchanged.
 // Runs one browser at a time (software WebGL is slow; parallel pages time out).
 import { chromium } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
@@ -85,9 +85,12 @@ for (const [w, h] of sizes) {
         await page.getByTestId('seat-GUNNER').click();
         await page.waitForTimeout(1200);
         await shot('station');
-        // Real-time pace: the 15 s lobby must still be open for READY.
+        await page.getByTestId('board-confirm').click();
+        await page.getByTestId('cockpit-wait').waitFor({ timeout: 20_000 });
+        await shot('ready');
+        // Slow pace: the 15 s lobby (60 s here) is still open on a slow renderer.
       },
-      '1',
+      '0.25',
     );
   if (scenes.includes('battle'))
     await run('battle', w, h, async (page, shot) => {
