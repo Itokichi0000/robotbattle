@@ -103,7 +103,18 @@ export const CAMERA_PRESETS: Record<
   mapFocus: { position: [0, 11.5, 6.5], target: [0, 6.2, -8.5] },
   special: { position: [0, 3.2, 10], target: [0, 6, -10] },
   final: { position: [0, 4.0, 13], target: [0, 3.0, 0] },
+  // Short beats (2 s) on what just happened.
+  cityDefense: { position: [6.5, 8.5, 2.5], target: [0, 6.2, -8.5] },
+  gunnerImpact: { position: [-8.5, 4.2, 6], target: [2, 9, -12] },
+  routerPulse: { position: [0, 3.2, 8.5], target: [0, 1.2, 2.4] },
+  repairRecovery: { position: [0, 3.6, 9.5], target: [0, 2.8, 0.6] },
+  specialCharge: { position: [0, 2.6, 7.5], target: [0, 3.4, 0.6] },
+  // Inside the machine: the pilots' seat bay (COCKPIT_POSITION), out of the arena's view.
+  cockpit: { position: [0, -25.4, 10.5], target: [0, -29.6, 0] },
 };
+
+/** The virtual cockpit bay sits under the stage (hidden by the floor from the arena cameras). */
+export const COCKPIT_POSITION = new THREE.Vector3(0, -30, 0);
 
 /** The Corruptors' colour: ink black / violet / red, outside the brand palette so "enemy" reads instantly. */
 export const ALIEN_COLOR = '#B65CFF';

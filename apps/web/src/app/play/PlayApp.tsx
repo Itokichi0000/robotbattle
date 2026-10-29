@@ -234,11 +234,14 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
   const [callsign, setCallsign] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modes, setModes] = useState<{ mock: boolean; lightning: boolean; demo: boolean } | null>(
-    null,
-  );
+  const [modes, setModes] = useState<{
+    mock: boolean;
+    lightning: boolean;
+    demo: boolean;
+    guest?: boolean;
+  } | null>(null);
   useEffect(() => {
-    api<{ mock: boolean; lightning: boolean; demo: boolean }>('/api/auth/modes')
+    api<{ mock: boolean; lightning: boolean; demo: boolean; guest?: boolean }>('/api/auth/modes')
       .then(setModes)
       .catch(() => setModes(null));
   }, []);
@@ -299,7 +302,7 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
             'No real names or contacts. Your name shows on screen only if you allow it.',
           )}
         </p>
-        {(modes?.mock ?? true) && (
+        {(modes?.guest ?? true) && (
           <button
             type="submit"
             className="sw-btn bg-amber px-4 text-lg text-navy"

@@ -1,9 +1,10 @@
 import { Canvas } from '@react-three/fiber';
 import { useRef } from 'react';
 import * as THREE from 'three';
-import type { CityState, Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
+import type { CityState, CrewMember, Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import { Effects } from './Effects';
+import { CockpitBay } from './CockpitBay';
 import { Enemies } from './Enemies';
 import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS, RESERVE_POSITION } from './layout';
 import { type CityThreat, MapOverlay } from './MapOverlay';
@@ -41,6 +42,10 @@ export interface ArenaSceneProps {
   bossModel?: string;
   /** NULL CORE's core barrier holds (shown as a shell). */
   bossBarrier?: boolean;
+  /** Pilots aboard (public, consent-moderated) for the cockpit bay. */
+  crew?: CrewMember[];
+  /** Keep the drawing buffer (replay recording). */
+  preserveDrawingBuffer?: boolean;
   onModelError?: (e: unknown) => void;
 }
 
@@ -64,7 +69,8 @@ export function ArenaScene(props: ArenaSceneProps) {
       gl={{
         antialias: q.antialias,
         powerPreference: 'high-performance',
-        preserveDrawingBuffer: false,
+        // Replays keep the frame so the browser recorder can copy it.
+        preserveDrawingBuffer: !!props.preserveDrawingBuffer,
       }}
       camera={{ fov: 42, near: 0.1, far: 200, position: CAMERA_PRESETS.intro.position }}
       onCreated={({ gl }) => {
@@ -100,6 +106,12 @@ export function ArenaScene(props: ArenaSceneProps) {
         bossBarrier={props.bossBarrier}
       />
       <ReserveReactor level={props.reserve} />
+      <CockpitBay
+        crew={props.crew ?? []}
+        director={director}
+        reducedMotion={reducedMotion}
+        locale={props.locale}
+      />
       <ModelRobotActor
         teamId="RAIJIN"
         url={props.robotModels?.RAIJIN}

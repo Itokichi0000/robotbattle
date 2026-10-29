@@ -14,3 +14,12 @@ export { applyClip } from './robots/animate';
 export { cueFromEvent } from './cues';
 export { SfxEngine, type SfxName } from './audio';
 export { QualityGovernor, type GovernorLevel } from './qualityGovernor';
+export {
+  CockpitBay,
+  placeCrew,
+  rotatingTags,
+  seatPosition,
+  ROLE_SEAT_COLORS,
+  SEATS_PER_ROLE,
+} from './CockpitBay';
+export { CockpitStrip } from './CockpitStrip';

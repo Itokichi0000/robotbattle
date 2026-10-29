@@ -223,6 +223,12 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (pilot_id, cosmetic_id)
   );
   `,
+  `
+  -- Optional Nostr key (display only). One key, one pilot.
+  ALTER TABLE pilots ADD COLUMN nostr_pubkey TEXT;
+  ALTER TABLE pilots ADD COLUMN nostr_show INTEGER NOT NULL DEFAULT 0;
+  CREATE UNIQUE INDEX pilots_nostr_pubkey ON pilots(nostr_pubkey) WHERE nostr_pubkey IS NOT NULL;
+  `,
 ];
 
 export type Db = DatabaseSync;

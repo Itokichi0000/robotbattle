@@ -269,6 +269,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
             }}
             reserve={snap.reserveEnergy / 100}
             bossBarrier={view.bossBarrier}
+            crew={snap.crew}
             quality="medium"
             reducedMotion={reducedMotion}
             locale="ja"

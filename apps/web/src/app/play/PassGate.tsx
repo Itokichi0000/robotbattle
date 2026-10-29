@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { InvoiceResponse, InvoiceStatusResponse, PublicRaidSnapshot } from '@sats-wars/shared';
 import { SATS_EXPLAINER } from '@sats-wars/shared';
+import { Term } from '@/components/Term';
 import { QrCode } from '@/components/QrCode';
 import { ApiError, api } from '@/lib/api';
 import type { RaidConnection } from '@/lib/connection';
@@ -87,8 +88,11 @@ export function PassGate({
   return (
     <div className="sw-panel flex flex-col gap-3 p-4" data-testid="pass-gate">
       <h3 className="sw-display text-lg">
-        {L(`出撃パス ${snap.ticketPriceSats} sats`, `Raid pass ${snap.ticketPriceSats} sats`)}
+        {L('出撃パス', 'Raid pass')} {snap.ticketPriceSats} <Term k="sats">sats</Term>
       </h3>
+      <p className="text-xs">
+        <Term k="lightning">{L('Lightningとは？', 'What is Lightning?')}</Term>
+      </p>
       <p className="text-sm text-muted">
         {L(
           '1回払うとこの作戦の間ずっと全部の席で遊べます。払った額で強くはなりません。',

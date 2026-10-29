@@ -227,8 +227,10 @@ export class RaidRuntime {
   /** Cockpit looks for pilots who allowed it (others keep the default look). */
   private withLooks(crew: CrewMember[]): CrewMember[] {
     return crew.map((m) => {
-      const look = this.names.get(m.pilotId)?.look;
-      return look ? { ...m, look } : m;
+      const policy = this.names.get(m.pilotId);
+      // Name tags in the cockpit only for names shown with consent (bots are named BOT-x).
+      const named = !this.namesHidden && (policy ? policy.show && !policy.hidden : m.isBot);
+      return policy?.look ? { ...m, look: policy.look, named } : { ...m, named };
     });
   }
 

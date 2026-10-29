@@ -7,6 +7,7 @@ import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { LicenseCard } from './LicenseCard';
+import { NostrLink } from './NostrLink';
 
 /**
  * Pilot license + SATS PASSPORT: rank, titles and raid history. Everything
@@ -253,6 +254,7 @@ export function PassportView() {
             )}
           </Link>
         )}
+        <NostrLink pilot={p} onChanged={load} />
         <button type="button" className="sw-btn bg-navy-3" onClick={() => void exportData()}>
           ⬇ {L('自分のデータをダウンロード', 'Download my data')}
         </button>

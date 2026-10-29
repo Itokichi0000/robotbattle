@@ -179,3 +179,97 @@ describe('operators: next raid, venue screen, rehearsal', () => {
     expect(refused.statusCode).toBe(403);
   });
 });
+
+describe('spec API contract (F5 aliases by raid id)', () => {
+  it('status / reserve / board / tasks / submit by id; other ids are refused; admin raids, lifecycle, metrics', async () => {
+    s = await makeServer({ env: DEMO });
+    const token = await s.adminToken();
+    const id = s.services.manager.current().raidId;
+    const st = (await s.inject({ url: `/api/raids/${id}/status` })).json();
+    expect(st).toMatchObject({ raidId: id, current: true, joinOpen: true, passMode: 'FREE' });
+    const a = await guest(s);
+    const reserve = await s.inject({
+      method: 'POST',
+      url: `/api/raids/${id}/join/reserve`,
+      headers: auth(a.token),
+    });
+    expect(reserve.json()).toMatchObject({ joinOpen: true, entitled: false });
+    expect(
+      (
+        await s.inject({
+          method: 'POST',
+          url: '/api/raids/raid-old/board',
+          headers: auth(a.token),
+          payload: { role: 'GUNNER' },
+        })
+      ).statusCode,
+    ).toBe(409);
+    const b = await s.inject({
+      method: 'POST',
+      url: `/api/raids/${id}/board`,
+      headers: auth(a.token),
+      payload: { role: 'GUARDIAN' },
+    });
+    expect(b.statusCode).toBe(200);
+
+    const start = await s.inject({
+      method: 'POST',
+      url: `/api/admin/raids/${id}/start`,
+      headers: auth(token),
+    });
+    expect(start.statusCode).toBe(200);
+    await s.advance(2000);
+    const req = (
+      await s.inject({
+        method: 'POST',
+        url: `/api/raids/${id}/tasks`,
+        headers: auth(a.token),
+        payload: {},
+      })
+    ).json();
+    expect(req.code).toBe('OK');
+    const open = (await s.inject({ url: `/api/raids/${id}/tasks`, headers: auth(a.token) })).json();
+    expect(open.task.taskId).toBe(req.task.taskId);
+    const input = solveTask(req.task.params, 1, mulberry32(1), 700);
+    await s.advance(('releaseAtMs' in input ? input.releaseAtMs : 1500) + 100);
+    const sub = await s.inject({
+      method: 'POST',
+      url: `/api/raids/${id}/tasks/${req.task.taskId}/submit`,
+      headers: auth(a.token),
+      payload: { clientSubmissionId: 'alias-sub-0001', input },
+    });
+    expect(sub.json().result.ok).toBe(true);
+
+    const metrics = (await s.inject({ url: '/api/admin/metrics', headers: auth(token) })).json();
+    expect(metrics.crew).toMatchObject({ total: 1 });
+    expect(metrics.raid.raidId).toBe(id);
+    expect((await s.inject({ url: '/api/admin/metrics' })).statusCode).toBe(401);
+    const stop = await s.inject({
+      method: 'POST',
+      url: '/api/admin/emergency-stop',
+      headers: auth(token),
+    });
+    expect(stop.statusCode).toBe(200);
+    expect(s.services.manager.current().state.status).toBe('PAUSED');
+    await s.inject({ method: 'POST', url: `/api/admin/raids/${id}/end`, headers: auth(token) });
+    const created = await s.inject({
+      method: 'POST',
+      url: '/api/admin/raids',
+      headers: auth(token),
+      payload: { preset: 'EASY', eventId: 'test-event' },
+    });
+    expect(created.statusCode).toBe(200);
+    const list = (await s.inject({ url: '/api/admin/raids', headers: auth(token) })).json();
+    expect(list.current).toBe(created.json().raidId);
+    expect(list.raids.map((r: { raidId: string }) => r.raidId)).toContain(id);
+    expect(s.services.manager.current().state.config.difficultyPreset).toBe('EASY');
+
+    const link = await s.inject({
+      method: 'POST',
+      url: '/api/me/link-wallet/start',
+      headers: auth(a.token),
+    });
+    expect(link.statusCode).toBe(200);
+    expect(link.json().challengeId).toBeTruthy();
+  });
+});

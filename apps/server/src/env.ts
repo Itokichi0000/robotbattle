@@ -46,6 +46,8 @@ const envSchema = z.object({
   DEMO_BOT_SKILL: z.coerce.number().min(0).max(1).default(0.65),
   /** Rehearsal shortcut: 6 demo bots when DEMO_BOTS is 0. */
   DEMO_AUTOPILOT: boolish,
+  /** Optional Nostr key link for the license card (display only, never login). Off by default. */
+  NOSTR_LINK: boolish,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
@@ -90,7 +92,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     if (missing.length) throw new Error(`PAYMENT_MODE=lnbits requires ${missing.join(', ')}`);
     if (!parsed.ALLOW_REAL_PAYMENTS) {
       throw new Error(
-        'PAYMENT_MODE=lnbits requires ALLOW_REAL_PAYMENTS=true (explicit owner approval). See docs/PAYMENT_FLOW.md',
+        'PAYMENT_MODE=lnbits requires ALLOW_REAL_PAYMENTS=true (explicit owner approval). See docs/SECURITY.md',
       );
     }
     if (prod && !/^https:\/\//.test(parsed.SERVER_PUBLIC_URL))

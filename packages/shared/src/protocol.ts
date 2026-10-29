@@ -131,6 +131,8 @@ export const profilePatchSchema = z.object({
   assistMode: z.boolean().optional(),
   /** Show my avatar decorations in the venue cockpit (names are a separate choice). */
   showAvatarOnArena: z.boolean().optional(),
+  /** Print my linked npub on my license card. */
+  nostrShowOnCard: z.boolean().optional(),
   /** Equip unlocked cosmetics (slot → item id); locked items are refused. */
   equip: equipPatchSchema.optional(),
 });
@@ -159,6 +161,8 @@ export interface PilotProfile {
     unlocked: string[];
     equipped: Record<CosmeticSlot, string>;
   };
+  /** Optional Nostr key (display only, never login). */
+  nostr: { npub: string | null; showOnCard: boolean };
 }
 
 export interface SessionResponse {

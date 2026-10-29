@@ -2,7 +2,7 @@
 // One-command local launcher: game server (:4000) + web (:3000).
 // Usage: pnpm dev            (development, hot reload)
 //        pnpm start          (after pnpm build; production mode)
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,13 @@ if (existsSync(envFile)) {
 }
 env.DATABASE_PATH ??= resolve(root, 'data/sats-wars.db');
 if (mode === 'start') env.NODE_ENV ??= 'production';
+
+// The offline demo (/demo) is a build artifact of apps/solo: make it once if missing.
+if (!existsSync(resolve(root, 'apps/web/public/demo/solo.html'))) {
+  console.log('building the offline demo for /demo (apps/solo)…');
+  const r = spawnSync('node', [resolve(root, 'apps/solo/build.mjs')], { stdio: 'inherit' });
+  if (r.status !== 0) console.warn('offline demo build failed; /demo will show instructions');
+}
 
 const procs = [
   { name: 'server', color: '\x1b[33m', args: ['--filter', '@sats-wars/server', mode] },

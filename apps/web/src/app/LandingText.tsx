@@ -27,6 +27,18 @@ export function LandingHeader() {
         <a href="/passport" className="sw-btn flex items-center border border-line px-6 text-lg">
           🪪 {L('パイロット手帳', 'Passport')}
         </a>
+        <a
+          href="/pilot/create"
+          className="sw-btn flex items-center border border-line px-6 text-lg"
+        >
+          {L('ライセンス発行', 'Get a license')}
+        </a>
+        <a href="/demo" className="sw-btn flex items-center border border-line px-6 text-lg">
+          {L('デモで遊ぶ', 'Try the demo')}
+        </a>
+        <a href="/leaderboard" className="sw-btn flex items-center border border-line px-6 text-lg">
+          🏆 {L('記録', 'Records')}
+        </a>
         <LanguageToggle />
       </div>
     </div>

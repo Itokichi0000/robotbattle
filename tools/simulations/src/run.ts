@@ -54,7 +54,8 @@ out.push('');
 out.push('## 1. Crew size (balanced seats, skill 0.65)');
 out.push('');
 out.push(HEAD);
-for (const p of [1, 2, 3, 5, 9, 10, 16, 30, 50, 60, 100]) out.push(row(`${p} pilots`, run(p, 'spread', 0.65)));
+for (const p of [1, 2, 3, 5, 9, 10, 16, 30, 50, 60, 100])
+  out.push(row(`${p} pilots`, run(p, 'spread', 0.65)));
 out.push('');
 
 out.push('## 2. Role mix matters more than head count (skill 0.65)');

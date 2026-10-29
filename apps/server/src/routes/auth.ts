@@ -61,6 +61,9 @@ export function registerAuthRoutes(app: FastifyInstance, services: Services): vo
     mock: env.mockAuth,
     lightning: env.lnurlAuth,
     demo: env.DEMO_MODE,
+    nostr: env.NOSTR_LINK,
+    // Guests can always board (spec B2): wallet login is never required to play.
+    guest: true,
   }));
 
   app.post(

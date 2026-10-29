@@ -15,7 +15,12 @@ export function cueFromEvent(director: ArenaDirector, e: GameEvent): void {
       director.play({ kind: 'phase', phase: e.data.to });
       return;
     case 'PILOT_BOARDED':
-      director.play({ kind: 'boarded', callsign: e.data.callsign, robot: e.data.robot });
+      director.play({
+        kind: 'boarded',
+        callsign: e.data.callsign,
+        robot: e.data.robot,
+        pilotId: e.data.pilotId,
+      });
       return;
     case 'ENEMY_TELEGRAPH':
       director.play({
@@ -34,6 +39,7 @@ export function cueFromEvent(director: ArenaDirector, e: GameEvent): void {
         effect: e.data.effect,
         callsign: e.data.callsign,
         assist: e.data.assist,
+        pilotId: e.data.pilotId,
       });
       return;
     case 'ATTACK_RESOLVED':

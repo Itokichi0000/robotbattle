@@ -7,6 +7,7 @@ import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
 import { ApiError, api, storage } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { Term } from '@/components/Term';
 
 interface Start {
   challengeId: string;
@@ -132,6 +133,11 @@ export function LightningLogin() {
           ? L('ウォレットを連携', 'Link a wallet')
           : L('Lightningでログイン', 'Log in with Lightning')}
       </h1>
+      <p className="text-xs">
+        <Term k="lightning">{L('Lightningとは？', 'What is Lightning?')}</Term>
+        {' · '}
+        <Term k="auth">{L('ウォレット認証とは？', 'What is wallet login?')}</Term>
+      </p>
       <p className="text-sm text-muted">
         {L(
           'ウォレットでQRを読むと、このブラウザでログインできます。鍵を持っていることの確認で、本人確認ではありません。秘密鍵やシードを入力させることはありません。',

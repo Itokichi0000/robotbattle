@@ -243,10 +243,16 @@ export function aggregate(sims: RaidSim[]): Aggregate {
     shieldAbsorbedMean: mean(sims.map((x) => x.shieldAbsorbed)),
     escortLandRate:
       sims.reduce((a, x) => a + x.escortLanded, 0) /
-      Math.max(1, sims.reduce((a, x) => a + x.escortTelegraphs, 0)),
+      Math.max(
+        1,
+        sims.reduce((a, x) => a + x.escortTelegraphs, 0),
+      ),
     gunnerIdleRate:
       sims.reduce((a, x) => a + x.gunnerIdle, 0) /
-      Math.max(1, sims.reduce((a, x) => a + x.gunnerRequests, 0)),
+      Math.max(
+        1,
+        sims.reduce((a, x) => a + x.gunnerRequests, 0),
+      ),
     specialReached: share((x) => x.specialAtSeconds !== null),
   };
 }

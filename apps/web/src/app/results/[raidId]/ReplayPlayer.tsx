@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { PublicRaidSnapshot, ReplayEvent, ReplayResponse } from '@sats-wars/shared';
 import { ENEMY_LABELS, ROLE_LABELS, SPECIAL_LABELS } from '@sats-wars/shared';
 import {
@@ -12,6 +13,19 @@ import {
 } from '@sats-wars/ui';
 import { api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { recordingSupported } from '@/lib/recorder';
+import type { RecordRequest } from './Replay3D';
+
+const Replay3D = dynamic(() => import('./Replay3D').then((m) => m.Replay3D), { ssr: false });
+
+const webgl = () => {
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') ?? c.getContext('webgl'));
+  } catch {
+    return false;
+  }
+};
 
 type Lx = (ja: string, en: string) => string;
 
@@ -83,7 +97,27 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
   const [failed, setFailed] = useState(false);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(8);
+  const [mode, setMode] = useState<'2d' | '3d'>('2d');
+  const [can3d, setCan3d] = useState(false);
+  const [canRecord, setCanRecord] = useState(false);
+  const [record, setRecord] = useState<RecordRequest | null>(null);
+  const [recMsg, setRecMsg] = useState<string | null>(null);
   const last = useRef<number | null>(null);
+  useEffect(() => {
+    setCan3d(webgl());
+    setCanRecord(recordingSupported());
+  }, []);
+  const onRecorded = useCallback(
+    (ok: boolean) => {
+      setRecord(null);
+      setPlaying(false);
+      setRecMsg(
+        ok ? L('動画を保存しました', 'Video saved') : L('録画できませんでした', 'Recording failed'),
+      );
+    },
+    [L],
+  );
 
   useEffect(() => {
     api<ReplayResponse>(`/api/raids/${encodeURIComponent(snap.raidId)}/replay`)
@@ -98,7 +132,7 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
       const dt = last.current === null ? 0 : now - last.current;
       last.current = now;
       setT((x) => {
-        const next = Math.min(replay.endGameMs, x + dt * 8);
+        const next = Math.min(replay.endGameMs, x + dt * speed);
         if (next >= replay.endGameMs) setPlaying(false);
         return next;
       });
@@ -109,7 +143,7 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
       cancelAnimationFrame(raf);
       last.current = null;
     };
-  }, [playing, replay]);
+  }, [playing, replay, speed]);
 
   const lines = useMemo(
     () =>
@@ -153,6 +187,46 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
     <section className="sw-panel flex flex-col gap-3 p-4" data-testid="replay">
       <h2 className="font-black">{L('リプレイ', 'Replay')}</h2>
       <RaidHeader raid={raid} view={view} locale={locale} compact />
+      {can3d && (
+        <div className="flex flex-wrap items-center gap-2 text-sm" role="group">
+          {(['2d', '3d'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={mode === m}
+              className={`sw-btn sw-focus px-3 ${mode === m ? 'bg-teal text-navy' : 'bg-navy-3'}`}
+              onClick={() => {
+                setMode(m);
+                setSpeed(m === '3d' ? 1 : 8);
+              }}
+              data-testid={`replay-mode-${m}`}
+            >
+              {m === '2d' ? L('地図とログ', 'Map & log') : L('3Dで見る', '3D view')}
+            </button>
+          ))}
+          {[1, 2, 8].map((x) => (
+            <button
+              key={x}
+              type="button"
+              aria-pressed={speed === x}
+              className={`sw-btn sw-focus px-2 ${speed === x ? 'bg-amber text-navy' : 'bg-navy-3'}`}
+              onClick={() => setSpeed(x)}
+            >
+              ×{x}
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === '3d' && (
+        <Replay3D
+          replay={replay}
+          snap={snap}
+          board={frame.board}
+          t={t}
+          record={record}
+          onRecorded={onRecorded}
+        />
+      )}
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -163,7 +237,7 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
           }}
           data-testid="replay-play"
         >
-          {playing ? '⏸' : '▶'} ×8
+          {playing ? '⏸' : '▶'} ×{speed}
         </button>
         <input
           type="range"
@@ -196,6 +270,11 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
           ))}
         </ol>
       </div>
+      {recMsg && (
+        <p className="text-sm text-muted" role="status">
+          {recMsg}
+        </p>
+      )}
       {highlights.length > 0 && (
         <div>
           <h3 className="text-sm font-black">
@@ -214,6 +293,28 @@ export function ReplayPlayer({ snap }: { snap: PublicRaidSnapshot }) {
                 >
                   {fmtClock(e.gameMs)} {d.text}
                 </button>
+                {mode === '3d' && canRecord && (
+                  <button
+                    type="button"
+                    disabled={!!record}
+                    className="sw-focus ml-1 rounded-full border border-amber px-2 py-1 text-amber hover:bg-white/10"
+                    title={L('この場面を15秒録画して保存', 'Record this moment (15 s) and save')}
+                    onClick={() => {
+                      setRecMsg(L('録画中…（15秒）', 'Recording… (15 s)'));
+                      setT(Math.max(0, e.gameMs - 6000));
+                      setSpeed(1);
+                      setPlaying(true);
+                      setRecord({
+                        id: Date.now(),
+                        seconds: 15,
+                        label: `${fmtClock(e.gameMs)} ${d.text}`,
+                      });
+                    }}
+                    data-testid="replay-record"
+                  >
+                    🎬
+                  </button>
+                )}
               </li>
             ))}
           </ul>

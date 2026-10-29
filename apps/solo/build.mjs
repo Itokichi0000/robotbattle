@@ -1,5 +1,11 @@
 import { build } from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Paths below are relative to this app (the web build calls this script too).
+const here = dirname(fileURLToPath(import.meta.url));
+process.chdir(here);
 
 /**
  * Builds ONE self-contained HTML file (no server, no external requests except
@@ -7,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
  * Output: dist/sats-wars-solo.html  (open it directly in a browser).
  */
 const result = await build({
+  absWorkingDir: here,
   entryPoints: ['src/main.tsx'],
   bundle: true,
   minify: true,
@@ -41,4 +48,10 @@ writeFileSync(
   'dist/sats-wars-solo.standalone.html',
   `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">${html.replace('<div id="root"></div>', '</head><body style="margin:0"><div id="root"></div>')}</body></html>`,
 );
-console.log(`dist/sats-wars-solo.html  ${(html.length / 1024).toFixed(0)} KB`);
+// The web app serves the same offline demo at /demo (no wallet, no server: bots only).
+mkdirSync('../web/public/demo', { recursive: true });
+writeFileSync(
+  '../web/public/demo/solo.html',
+  `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">${html.replace('<div id="root"></div>', '</head><body style="margin:0"><div id="root"></div>')}</body></html>`,
+);
+console.log(`dist/sats-wars-solo.html  ${(html.length / 1024).toFixed(0)} KB (+ apps/web/public/demo/solo.html)`);

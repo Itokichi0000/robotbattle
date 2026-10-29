@@ -57,6 +57,8 @@ export interface PilotRow {
   deleted_at: number | null;
   equipped_json: string;
   show_avatar: number;
+  nostr_pubkey: string | null;
+  nostr_show: number;
 }
 
 export interface SessionRow {
@@ -319,6 +321,8 @@ export class Repo {
       | 'deleted_at'
       | 'equipped_json'
       | 'show_avatar'
+      | 'nostr_pubkey'
+      | 'nostr_show'
     >,
   ): void {
     this.run(
@@ -365,6 +369,7 @@ export class Repo {
         | 'merged_into'
         | 'equipped_json'
         | 'show_avatar'
+        | 'nostr_show'
       >
     >,
   ): void {
@@ -425,7 +430,7 @@ export class Repo {
   /** Account deletion: anonymise, keep aggregate raid records consistent. */
   deletePilot(id: string, now: number): void {
     this.run(
-      "UPDATE pilots SET callsign = 'deleted', callsign_hidden = 1, device_hash = NULL, deleted_at = ?, titles_json = '[]', equipped_json = '{}', show_avatar = 0 WHERE id = ?",
+      "UPDATE pilots SET callsign = 'deleted', callsign_hidden = 1, device_hash = NULL, deleted_at = ?, titles_json = '[]', equipped_json = '{}', show_avatar = 0, nostr_pubkey = NULL, nostr_show = 0 WHERE id = ?",
       now,
       id,
     );
@@ -805,6 +810,22 @@ export class Repo {
       fromId,
     );
   }
+  // ---- optional Nostr key ---------------------------------------------------------
+  pilotByNostrKey(pubkey: string): PilotRow | undefined {
+    return this.get<PilotRow>(
+      'SELECT * FROM pilots WHERE nostr_pubkey = ? AND deleted_at IS NULL',
+      pubkey,
+    );
+  }
+  setNostrKey(pilotId: string, pubkey: string | null): void {
+    this.run(
+      'UPDATE pilots SET nostr_pubkey = ?, nostr_show = CASE WHEN ? IS NULL THEN 0 ELSE nostr_show END WHERE id = ?',
+      pubkey,
+      pubkey,
+      pilotId,
+    );
+  }
+
   // ---- cosmetics -------------------------------------------------------------------
   /** Record newly unlocked items (idempotent). Returns the ids that were new. */
   unlockCosmetics(pilotId: string, ids: string[], now: number, raidId: string | null): string[] {

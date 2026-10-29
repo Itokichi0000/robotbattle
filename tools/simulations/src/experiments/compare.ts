@@ -17,7 +17,9 @@ const VARIANTS: Record<string, Partial<GameConfig>> = {
     adaptive: { ...D.adaptive, maxAdjust: 0 },
   },
   defaults: {},
-  ...(process.env.EXTRA ? (JSON.parse(process.env.EXTRA) as Record<string, Partial<GameConfig>>) : {}),
+  ...(process.env.EXTRA
+    ? (JSON.parse(process.env.EXTRA) as Record<string, Partial<GameConfig>>)
+    : {}),
 };
 const only = process.env.ONLY?.split(',');
 const pct = (x: number) => `${Math.round(x * 100)}%`.padStart(4);
@@ -27,7 +29,13 @@ for (const [name, config] of Object.entries(VARIANTS)) {
   console.log('crew | win | fell | t/o | cities | land | idle | special | sp@ | dmg/shield');
   for (const pilots of CREWS) {
     const sims = Array.from({ length: SEEDS }, (_, i) =>
-      simulateRaid({ pilots, mix: (process.env.MIX ?? 'spread') as 'spread', skill: Number(process.env.SKILL ?? 0.65), seed: 1000 + i * 7919 + pilots * 31, config }),
+      simulateRaid({
+        pilots,
+        mix: (process.env.MIX ?? 'spread') as 'spread',
+        skill: Number(process.env.SKILL ?? 0.65),
+        seed: 1000 + i * 7919 + pilots * 31,
+        config,
+      }),
     );
     const a = aggregate(sims);
     const sp = sims.filter((x) => x.specialAtSeconds !== null).map((x) => x.specialAtSeconds!);

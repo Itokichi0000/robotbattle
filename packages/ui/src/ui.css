@@ -804,3 +804,73 @@
 .sw-map-label-shield {
   color: var(--swc-teal);
 }
+
+/* ---- venue cockpit bay labels (three-game CockpitBay) ---- */
+.sw-cockpit-group {
+  padding: 0.2em 0.7em;
+  border: 2px solid;
+  border-radius: 999px;
+  background: rgba(7, 13, 26, 0.85);
+  color: var(--swc-text, #eff5ff);
+  font-weight: 800;
+  font-size: 1.1vw;
+  white-space: nowrap;
+}
+.sw-cockpit-more {
+  opacity: 0.75;
+}
+.sw-cockpit-tag {
+  padding: 0.1em 0.5em;
+  border-radius: 6px;
+  background: rgba(7, 13, 26, 0.8);
+  color: var(--swc-text, #eff5ff);
+  font-weight: 700;
+  font-size: 0.9vw;
+  white-space: nowrap;
+  max-width: 12vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sw-cockpit-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.5em 0.7em;
+  border-radius: 10px;
+  background: rgba(7, 13, 26, 0.7);
+  font-size: 0.9vw;
+  font-weight: 800;
+}
+.sw-cockpit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.sw-cockpit-role {
+  min-width: 3.2em;
+}
+.sw-cockpit-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 14vw;
+}
+.sw-cockpit-dots i {
+  display: inline-block;
+  width: 0.55vw;
+  height: 0.55vw;
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 2px;
+  background: rgba(239, 245, 255, 0.22);
+  transition: background 0.4s ease;
+}
+.sw-cockpit-dots b {
+  font-size: 0.8em;
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-cockpit-dots i {
+    transition: none;
+  }
+}

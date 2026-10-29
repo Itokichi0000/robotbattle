@@ -26,7 +26,9 @@ import { type Realtime, createRealtime } from './realtime/socket';
 import { registerAdminRoutes } from './routes/admin';
 import { registerAuthRoutes } from './routes/auth';
 import { ReplayService } from './raid/replay';
+import { registerNostrRoutes } from './routes/nostr';
 import { registerPublicRoutes } from './routes/public';
+import { registerSpecAliases } from './routes/specAliases';
 import type { Services } from './services';
 
 export interface BuildOptions {
@@ -205,6 +207,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
 
   registerPublicRoutes(app, services);
   registerAuthRoutes(app, services);
+  registerNostrRoutes(app, services);
   // Assigned after app.ready(); admin routes only read it at request time.
   const holder: { realtime: Realtime | null } = { realtime: null };
   registerAdminRoutes(app, services, {
@@ -212,6 +215,11 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     realtimeStats: () => holder.realtime!.stats(),
     onSettingsChanged: () => holder.realtime?.broadcastSnapshot(),
     arenaCue: (cue) => holder.realtime?.arenaCue(cue),
+  });
+  registerSpecAliases(app, services, {
+    isAllowedOrigin,
+    realtimeStats: () => holder.realtime!.stats(),
+    onSettingsChanged: () => holder.realtime?.broadcastSnapshot(),
   });
 
   await app.ready();

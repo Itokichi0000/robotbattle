@@ -13,6 +13,7 @@ export type ErrorCode =
   | 'INVALID_PASS'
   | 'NOT_MOCK_MODE'
   | 'INVALID_COMMAND'
+  | 'CONFLICT'
   | 'INTERNAL';
 
 const STATUS: Record<ErrorCode, number> = {
@@ -30,6 +31,7 @@ const STATUS: Record<ErrorCode, number> = {
   INVALID_PASS: 400,
   NOT_MOCK_MODE: 404,
   INVALID_COMMAND: 409,
+  CONFLICT: 409,
   INTERNAL: 500,
 };
 

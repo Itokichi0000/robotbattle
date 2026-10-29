@@ -5,6 +5,7 @@ import { buildFujin, buildRaijin, JOINT_NAMES } from './robots/build';
 import { applyClip } from './robots/animate';
 import { CLIP_NAMES } from './director';
 import { BOSS_POSITION, resolveFxTarget } from './layout';
+import { SEATS_PER_ROLE, placeCrew, rotatingTags, seatPosition } from './CockpitBay';
 
 function run(d: ArenaDirector, seconds: number) {
   for (let i = 0; i < seconds * 60; i++) d.update(1 / 60);
@@ -183,8 +184,12 @@ describe('ArenaDirector', () => {
     run(d, 0.1);
     expect(banners).toContain('神雷風陣 起動準備');
     d.play({ kind: 'specialResolved', outcome: 'ACTIVATED', damage: 250, bossId: 9, cityHits: [] });
-    // Queued right after the "stand by" banner's short hold.
-    run(d, 0.7);
+    // The charge-up (gods glowing, then a look at the pilots inside) plays first.
+    run(d, 0.1);
+    expect(d.camera.preset).toBe('specialCharge');
+    run(d, 2);
+    expect(d.camera.preset).toBe('cockpit');
+    run(d, 2);
     expect(d.camera.preset).toBe('special');
     expect(d.robots.RAIJIN.clip).toBe('Special');
     expect(banners).toContain('神雷風陣、発動！');
@@ -216,11 +221,15 @@ describe('ArenaDirector', () => {
     expect(d.banner?.textJa).toBe('東京 復旧！');
     d.play({ kind: 'raidEnded', result: result('SUCCEEDED') });
     run(d, 0.5);
+    // The crew first, then the gods' pose and the result.
+    expect(d.camera.preset).toBe('cockpit');
+    run(d, 2.5);
+    expect(d.camera.preset).toBe('final');
     expect(d.banner).toMatchObject({ kind: 'victory', textJa: '地球防衛成功！' });
     expect(d.robots.RAIJIN.clip).toBe('Victory');
     const f = new ArenaDirector();
     f.play({ kind: 'raidEnded', result: result('FAILED') });
-    run(f, 0.5);
+    run(f, 3);
     expect(f.banner?.textJa).toBe('防衛失敗…');
     expect(f.robots.FUJIN.clip).toBe('Defeat');
   });
@@ -289,5 +298,85 @@ describe('procedural robots', () => {
       }
       rig.dispose();
     }
+  });
+});
+
+describe('cockpit (spec D4) and camera beats (D6)', () => {
+  it('boarding lights a seat, success pulses it; a boarding burst gets one short cockpit look', () => {
+    const d = new ArenaDirector();
+    run(d, 1);
+    d.play({ kind: 'boarded', callsign: 'A', robot: 'RAIJIN', pilotId: 'p1' });
+    expect(d.boardedAt.get('p1')).toBe(d.time);
+    expect(d.camera.preset).toBe('cockpit');
+    run(d, 3);
+    expect(d.camera.preset).toBe('overview');
+    d.play({ kind: 'boarded', callsign: 'B', robot: 'FUJIN', pilotId: 'p2' });
+    expect(d.camera.preset).toBe('overview'); // throttled: no jump-cut montage
+    d.play({
+      kind: 'task',
+      role: 'GUARDIAN',
+      robot: 'FUJIN',
+      success: 1,
+      callsign: 'B',
+      assist: false,
+      pilotId: 'p2',
+      effect: { kind: 'SHIELD', cityId: 'kanto', amount: 40 },
+    });
+    expect(d.pulsedAt.get('p2')).toBe(d.time);
+  });
+
+  it('reduced motion: no camera beats, no cockpit cut before the result', () => {
+    const d = new ArenaDirector();
+    d.settings = { ...d.settings, reducedMotion: true };
+    run(d, 1);
+    d.play({ kind: 'boarded', callsign: 'A', robot: 'RAIJIN', pilotId: 'p1' });
+    expect(d.camera.preset).toBe('overview');
+  });
+});
+
+describe('cockpit seating', () => {
+  it('places 100 pilots without overlap, caps seats per role, rotates only consented names', () => {
+    const crew = Array.from({ length: 100 }, (_, i) => ({
+      pilotId: `p${i}`,
+      callsign: `P${i}`,
+      role: (['GUNNER', 'GUARDIAN', 'ROUTER', 'ENGINEER'] as const)[i % 4]!,
+      robot: 'RAIJIN' as const,
+      isBot: false,
+      named: i % 3 === 0,
+    }));
+    const { placed, overflow } = placeCrew(crew);
+    expect(placed.length).toBe(4 * SEATS_PER_ROLE);
+    expect(overflow.GUNNER).toBe(0);
+    const pts = placed.map((p) => seatPosition(p.roleIndex, p.slot));
+    for (let i = 0; i < pts.length; i++)
+      for (let j = i + 1; j < pts.length; j++)
+        expect(pts[i]!.distanceTo(pts[j]!)).toBeGreaterThan(0.5);
+    const tags = rotatingTags(placed, new Map(), 0);
+    expect(tags.length).toBeLessThanOrEqual(8);
+    expect(tags.every((t) => t.member.named)).toBe(true);
+    const later = rotatingTags(placed, new Map(), 4);
+    expect(later.map((t) => t.member.pilotId)).not.toEqual(tags.map((t) => t.member.pilotId));
+    const more = placeCrew([
+      ...crew,
+      ...crew
+        .slice(0, 40)
+        .map((m) => ({ ...m, pilotId: `x${m.pilotId}`, role: 'GUNNER' as const })),
+    ]);
+    expect(more.overflow.GUNNER).toBeGreaterThan(0);
+  });
+});
+
+describe('cheers', () => {
+  it('a roaring room glows brighter than a lone cheer (rate, not raw count)', () => {
+    const d = new ArenaDirector();
+    d.play({ kind: 'cheer' });
+    const lone = d.cheerIntensity();
+    for (let i = 0; i < 30; i++) {
+      run(d, 0.1);
+      d.play({ kind: 'cheer' });
+    }
+    expect(d.cheerIntensity()).toBeGreaterThan(lone + 0.4);
+    run(d, 30);
+    expect(d.cheerIntensity()).toBeLessThan(0.35);
   });
 });

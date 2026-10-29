@@ -7,7 +7,8 @@ import {
   ROLE_LABELS,
   SATS_EXPLAINER,
 } from '@sats-wars/shared';
-import type { Banner, BannerTone, FrameStats } from '@sats-wars/three-game';
+import type { ArenaDirector, Banner, BannerTone, FrameStats } from '@sats-wars/three-game';
+import { CockpitStrip } from '@sats-wars/three-game';
 import { RaidHeader, ResultCard, RobotBars, type RaidView, cityName } from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
@@ -38,6 +39,7 @@ export function ArenaHud({
   renderer,
   contextLost,
   preview = false,
+  director,
 }: {
   snap: PublicRaidSnapshot;
   view: RaidView;
@@ -49,6 +51,8 @@ export function ArenaHud({
   contextLost: boolean;
   /** Rehearsal mode: hide status overlays so cinematics stay visible. */
   preview?: boolean;
+  /** Seat lamps for the cockpit strip (the 3D/2D director). */
+  director?: ArenaDirector;
 }) {
   const { locale, L } = useI18n();
   const playUrl =
@@ -223,8 +227,13 @@ export function ArenaHud({
       <div className="flex items-end justify-between gap-[1vw]">
         <ActionPopups conn={conn} locale={locale} />
         {!lobby && snap.status !== 'ENDED' && (
-          <div className="w-[30vw] text-[1.1vw]">
-            <RobotBars raid={snap} locale={locale} />
+          <div className="flex items-end gap-[1vw]">
+            {director && snap.crew.length > 0 && (
+              <CockpitStrip crew={snap.crew} director={director} locale={locale} />
+            )}
+            <div className="w-[30vw] text-[1.1vw]">
+              <RobotBars raid={snap} locale={locale} />
+            </div>
           </div>
         )}
       </div>

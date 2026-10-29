@@ -32,6 +32,8 @@ export interface PassportCardInput {
   /** ISO date (YYYY-MM-DD) printed on the card. */
   date: string;
   lightning: boolean;
+  /** Linked npub, only when the pilot chose to print it (never on anonymous cards). */
+  npub?: string | null;
   locale: 'ja' | 'en';
 }
 
@@ -141,7 +143,12 @@ export function passportCardSvg(c: PassportCardInput): string {
     `<g transform="translate(1040 110)"><circle r="46" fill="#161B20" stroke="#F7931A" stroke-width="6"/><text y="16" text-anchor="middle" font-size="44" font-weight="900" fill="#F7931A">雷</text></g>`,
     `<g transform="translate(1130 170)"><circle r="40" fill="#102836" stroke="#25C8D7" stroke-width="6"/><text y="14" text-anchor="middle" font-size="38" font-weight="900" fill="#25C8D7">風</text></g>`,
     `<text x="520" y="${H - 40}" font-size="20" fill="#9FB7C9">${esc(
-      [c.eventLine, c.date, c.lightning ? '⚡ Lightning' : ja ? 'ゲスト' : 'Guest']
+      [
+        c.eventLine,
+        c.date,
+        c.lightning ? '⚡ Lightning' : ja ? 'ゲスト' : 'Guest',
+        c.npub ? `${c.npub.slice(0, 12)}…${c.npub.slice(-6)}` : null,
+      ]
         .filter(Boolean)
         .join('  ·  '),
     )}</text>`,
@@ -179,6 +186,7 @@ export function passportCardInput(
     eventLine: venue ? [venue.eventId, o.venueName].filter(Boolean).join(' · ') : null,
     date: new Date(o.now).toISOString().slice(0, 10),
     lightning: p.pilot.lightningLinked,
+    npub: !o.anonymous && p.pilot.nostr.showOnCard ? p.pilot.nostr.npub : null,
     locale: o.locale,
   };
 }

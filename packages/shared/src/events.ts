@@ -26,6 +26,8 @@ export interface CrewMember {
   isBot: boolean;
   /** Cockpit avatar colours: only when the pilot allowed it (default look otherwise). */
   look?: AvatarLook;
+  /** The callsign is the pilot's own name shown with consent (not a PILOT-xxxxx pseudonym). */
+  named?: boolean;
 }
 
 /**

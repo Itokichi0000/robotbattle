@@ -31,6 +31,7 @@ import type { AuthKind, PilotRow, Repo } from '../db/repo';
 import { AppError } from '../errors';
 import type { RaidManager } from '../raid/manager';
 import type { SessionService } from '../auth/sessions';
+import { npubEncode } from '../auth/nostr';
 import { newId, sha256 } from '../auth/tokens';
 
 export interface PilotServiceOptions {
@@ -166,6 +167,10 @@ export class PilotService {
       showNameOnArena: p.show_name === 1,
       showAvatarOnArena: p.show_avatar === 1,
       cosmetics: { unlocked, equipped },
+      nostr: {
+        npub: p.nostr_pubkey ? npubEncode(p.nostr_pubkey) : null,
+        showOnCard: !!p.nostr_pubkey && p.nostr_show === 1,
+      },
       locale: p.locale === 'en' ? 'en' : 'ja',
       reducedMotion: p.reduced_motion === 1,
       assistMode: p.assist_mode === 1,
@@ -190,6 +195,7 @@ export class PilotService {
     }
     this.repo.updatePilot(p.id, {
       ...(equippedJson !== undefined ? { equipped_json: equippedJson } : {}),
+      ...(patch.nostrShowOnCard !== undefined ? { nostr_show: patch.nostrShowOnCard ? 1 : 0 } : {}),
       ...(patch.showAvatarOnArena !== undefined
         ? { show_avatar: patch.showAvatarOnArena ? 1 : 0 }
         : {}),

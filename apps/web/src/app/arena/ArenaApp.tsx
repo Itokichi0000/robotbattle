@@ -263,6 +263,7 @@ export function ArenaApp() {
           }
           bossModel={!modelError ? models?.BOSS : undefined}
           bossBarrier={view.bossBarrier}
+          crew={snap.crew}
           onModelError={() => setModelError(true)}
         />
       ) : (
@@ -278,6 +279,7 @@ export function ArenaApp() {
         renderer={use3d ? 'webgl' : '2d'}
         contextLost={contextLost}
         preview={preview}
+        director={director}
       />
       {!audioOn && !settings.muted && (
         <button

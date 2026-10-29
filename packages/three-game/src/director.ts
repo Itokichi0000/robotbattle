@@ -38,7 +38,24 @@ export const CLIP_DURATION: Record<ClipName, number> = {
 };
 export const LOOPING_CLIPS: ReadonlySet<ClipName> = new Set(['Idle', 'Victory']);
 
-export type CameraPresetName = 'intro' | 'overview' | 'boss' | 'mapFocus' | 'special' | 'final';
+/**
+ * Camera sequences (spec D6): intro, overview (= WideBattle), boss, mapFocus
+ * (= ThreatFocus), cityDefense, gunnerImpact, routerPulse, repairRecovery,
+ * cockpit, specialCharge, special (= SpecialHit), final (= Victory/Defeat).
+ */
+export type CameraPresetName =
+  | 'intro'
+  | 'overview'
+  | 'boss'
+  | 'mapFocus'
+  | 'cityDefense'
+  | 'gunnerImpact'
+  | 'routerPulse'
+  | 'repairRecovery'
+  | 'cockpit'
+  | 'specialCharge'
+  | 'special'
+  | 'final';
 
 /** What an effect points at; the scene resolves it to a world position. */
 export type FxTarget =
@@ -108,7 +125,7 @@ export interface RobotCue {
 export type Cue =
   | { kind: 'raidStart' }
   | { kind: 'phase'; phase: RaidPhase }
-  | { kind: 'boarded'; callsign: string; robot: TeamId }
+  | { kind: 'boarded'; callsign: string; robot: TeamId; pilotId?: string }
   | { kind: 'telegraph'; enemyId: number; enemyKind: EnemyKind; targets: RegionId[] }
   | {
       kind: 'task';
@@ -118,6 +135,7 @@ export type Cue =
       effect: TaskEffect | null;
       callsign: string;
       assist: boolean;
+      pilotId?: string;
     }
   | {
       kind: 'attack';
@@ -176,12 +194,23 @@ export class ArenaDirector {
   settings: DirectorSettings = { reducedMotion: false, shakeScale: 1, shortSpecials: false };
   /** Slow-motion factor for rehearsal/preview only (1 = real time). */
   timeScale = 1;
+  /** Cockpit seats: when each pilot boarded (lamp lights) and last succeeded (pulse). */
+  boardedAt = new Map<string, number>();
+  pulsedAt = new Map<string, number>();
 
   private queue: Scheduled[] = [];
   private order = 0;
   private effectId = 0;
   private lastFx: Record<string, number> = {};
   private cheerSide = 0;
+  private cheerLevel = 0;
+  private cheerAt = 0;
+
+  /** 0.3 (a lone cheer) … 1 (a roaring room), from the recent cheer rate. */
+  cheerIntensity(): number {
+    const level = this.cheerLevel * Math.exp(-(this.time - this.cheerAt) / 5);
+    return Math.min(1, 0.3 + level / 15);
+  }
   private effectListeners = new Set<(e: DirectorEffect) => void>();
   private bannerListeners = new Set<(b: Banner | null) => void>();
   private soundListeners = new Set<(sound: string, teamId: TeamId | null) => void>();
@@ -218,11 +247,15 @@ export class ArenaDirector {
       case 'phase':
         return this.playPhase(cue.phase);
       case 'boarded':
+        if (cue.pilotId) this.boardedAt.set(cue.pilotId, this.time);
         if (this.throttle('boarded', 0.6))
           this.emitEffect('chargeAura', cue.robot, null, { kind: 'robot', id: cue.robot }, 0.4);
+        // New pilots light their seats: a short look inside, at most every 25 s.
+        if (this.throttle('cockpit-board', 25)) this.beat('cockpit', 2.4);
         return;
       case 'telegraph':
         if (this.throttle('sfx-alarm', 1.5)) this.sound('tick', null);
+        if (cue.enemyKind !== 'BOSS' && cue.targets.length) this.beat('mapFocus', 2);
         return;
       case 'task':
         return this.playTask(cue);
@@ -271,7 +304,12 @@ export class ArenaDirector {
         return this.playSpecial(cue);
       case 'raidEnded':
         return this.playEnded(cue.result);
-      case 'cheer':
+      case 'cheer': {
+        // Louder rooms glow brighter: the aura follows the cheer rate (decaying
+        // count over ~5 s), still emitted at most twice a second.
+        const k = Math.exp(-(this.time - this.cheerAt) / 5);
+        this.cheerLevel = this.cheerLevel * k + 1;
+        this.cheerAt = this.time;
         if (this.throttle('cheer', 0.5)) {
           this.cheerSide = 1 - this.cheerSide;
           this.emitEffect(
@@ -279,10 +317,13 @@ export class ArenaDirector {
             GODS[this.cheerSide]!,
             null,
             { kind: 'robot', id: GODS[this.cheerSide]! },
-            0.35,
+            this.cheerIntensity(),
           );
+          if (this.cheerLevel >= 12 && this.throttle('cheer-wave', 4))
+            this.emitEffect('syncPulse', null, null, null, 0.6);
         }
         return;
+      }
     }
   }
 
@@ -312,6 +353,8 @@ export class ArenaDirector {
   /** Back to a calm stance (new raid loaded, preview reset). */
   reset(): void {
     this.queue = [];
+    this.boardedAt.clear();
+    this.pulsedAt.clear();
     this.busyUntil = this.time;
     for (const t of GODS) this.setClip(t, 'Idle', 0);
     this.setCamera('overview');
@@ -403,6 +446,7 @@ export class ArenaDirector {
 
   private playTask(cue: Extract<Cue, { kind: 'task' }>): void {
     if (cue.success <= 0 || !cue.effect) return;
+    if (cue.pilotId) this.pulsedAt.set(cue.pilotId, this.time);
     const e = cue.effect;
     const free = (t: TeamId) =>
       !this.busy &&
@@ -422,6 +466,7 @@ export class ArenaDirector {
         if (this.throttle('hit-RAIJIN', 0.08)) this.sound('hit', 'RAIJIN');
         if (free('RAIJIN'))
           this.setClip('RAIJIN', e.weakpoint === 'CORE' ? 'AttackHeavy' : 'AttackLight', 0.25);
+        if (e.defeated && e.enemyKind !== 'BOSS') this.beat('gunnerImpact', 2);
         return;
       }
       case 'SHIELD': {
@@ -446,6 +491,7 @@ export class ArenaDirector {
           );
           this.sound('charge', null);
         }
+        if (e.sink === 'RESERVE' && e.amount >= 10) this.beat('routerPulse', 1.8);
         return;
       }
       case 'REPAIR': {
@@ -457,6 +503,7 @@ export class ArenaDirector {
               ? { kind: 'city', id: r.cityId }
               : { kind: 'reserve' };
         if (this.throttle('repair', 0.25)) this.emitEffect('repair', cue.robot, null, to, 0.8);
+        if (r.type === 'ROBOT' && e.amount >= 15) this.beat('repairRecovery', 1.8);
         return;
       }
     }
@@ -472,6 +519,8 @@ export class ArenaDirector {
         this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
     }
     if (cue.robotHit && !this.busy) this.setClip(cue.robotHit, 'HitReact', 0);
+    // A barrier that soaked a real hit: show the defended city.
+    if (cue.hits.some((h) => h.absorbed >= 20)) this.beat('cityDefense', 2);
     if (cue.hits.some((h) => h.damage > 0) && this.throttle('attack-shake', 0.4)) {
       this.addShake(cue.enemyKind === 'BOSS' ? 0.5 : 0.25);
       this.sound('hit', null);
@@ -504,6 +553,14 @@ export class ArenaDirector {
 
   private playSpecialOpen(): void {
     const s = this.startTime();
+    const short = this.settings.reducedMotion || this.settings.shortSpecials;
+    if (!short) {
+      // Charge-up: both gods glow, then a look at the pilots inside, back to the fight.
+      // Each step only if nothing else took the camera meanwhile.
+      this.at(s, () => this.setCamera('specialCharge'));
+      this.at(s + 1.8, () => this.camera.preset === 'specialCharge' && this.setCamera('cockpit'));
+      this.at(s + 3.6, () => this.camera.preset === 'cockpit' && this.setCamera('overview'));
+    }
     this.at(s, () => {
       for (const t of GODS) this.emitEffect('chargeAura', t, null, { kind: 'robot', id: t }, 1);
       this.sound('charge', null);
@@ -517,7 +574,7 @@ export class ArenaDirector {
         until: s + 3.5,
       });
     });
-    this.busyUntil = Math.max(this.busyUntil, s + 0.5);
+    this.busyUntil = Math.max(this.busyUntil, s + (short ? 0.5 : 3.6));
   }
 
   private playSpecial(cue: Extract<Cue, { kind: 'specialResolved' }>): void {
@@ -576,7 +633,10 @@ export class ArenaDirector {
   private playEnded(r: RaidResult): void {
     const s = this.startTime();
     const won = r.outcome === 'SUCCEEDED';
-    this.at(s, () => {
+    // The crew first (cockpit), then the gods' pose for the result.
+    const lead = this.settings.reducedMotion ? 0 : 2.4;
+    if (lead) this.at(s, () => this.setCamera('cockpit'));
+    this.at(s + lead, () => {
       this.setCamera('final');
       for (const t of GODS) this.setClip(t, won ? 'Victory' : 'Defeat', 0);
       this.sound(won ? 'victory' : 'ko', null);
@@ -616,10 +676,25 @@ export class ArenaDirector {
               },
       );
     });
-    this.busyUntil = s + 1;
+    this.busyUntil = s + lead + 1;
   }
 
   // ---- primitives -------------------------------------------------------
+
+  /**
+   * A short camera beat on something that just happened (spec D6), then back
+   * to the wide view. Never during a cinematic, never with reduced motion, at
+   * most one every 12 s so a busy raid does not turn into a jump-cut montage.
+   */
+  private beat(preset: CameraPresetName, seconds: number): void {
+    if (this.settings.reducedMotion || this.busy || this.camera.preset !== 'overview') return;
+    if (!this.throttle('camera-beat', 12)) return;
+    this.setCamera(preset);
+    const since = this.camera.since;
+    this.at(this.time + seconds, () => {
+      if (this.camera.preset === preset && this.camera.since === since) this.setCamera('overview');
+    });
+  }
 
   /** True at most once per `interval` seconds for a key. */
   private throttle(key: string, interval: number): boolean {

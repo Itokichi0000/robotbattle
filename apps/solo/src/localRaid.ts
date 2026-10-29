@@ -365,6 +365,8 @@ export class LocalRaid implements RaidClient {
     const core = snapshotCore(this.state, this.recent, Date.now());
     this.snap = {
       ...core,
+      // Offline demo: everyone aboard is on this device, names can be shown.
+      crew: core.crew.map((m) => ({ ...m, named: true })),
       lobbyEndsAt:
         this.state.status === 'LOBBY_OPEN'
           ? Date.now() + Math.max(0, (this.lobbyEndsAt - this.clock()) / this.options.speed)
