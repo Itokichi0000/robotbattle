@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { CityState, CrewMember, Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
@@ -10,6 +10,7 @@ import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS, RESERVE_POSITION } from
 import { type CityThreat, MapOverlay } from './MapOverlay';
 import { ModelRobotActor } from './GlbRobotActor';
 import { ArenaModel } from './ArenaModel';
+import { PostFx, StageEnvironment } from './PostFx';
 import {
   ArenaStage,
   CameraRig,
@@ -68,90 +69,130 @@ export function ArenaScene(props: ArenaSceneProps) {
   statsRef.current = props.onStats;
 
   return (
-    <Canvas
-      shadows={q.shadows}
-      dpr={q.dpr}
-      gl={{
-        antialias: q.antialias,
-        powerPreference: 'high-performance',
-        // Replays keep the frame so the browser recorder can copy it.
-        preserveDrawingBuffer: !!props.preserveDrawingBuffer,
-      }}
-      camera={{ fov: 42, near: 0.1, far: 200, position: CAMERA_PRESETS.intro.position }}
-      onCreated={({ gl }) => {
-        gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.1;
-        gl.domElement.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault();
-          props.onContextLost?.();
-        });
-      }}
-      style={{ position: 'absolute', inset: 0 }}
+    <>
+      <Canvas
+        shadows={q.shadows}
+        dpr={q.dpr}
+        gl={{
+          // With post-processing the HDR buffer does its own multisampling.
+          antialias: q.antialias && !q.post,
+          powerPreference: 'high-performance',
+          // Replays keep the frame so the browser recorder can copy it.
+          preserveDrawingBuffer: !!props.preserveDrawingBuffer,
+        }}
+        camera={{ fov: 42, near: 0.1, far: 200, position: CAMERA_PRESETS.intro.position }}
+        onCreated={({ gl }) => {
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.1;
+          gl.domElement.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            props.onContextLost?.();
+          });
+        }}
+        style={{ position: 'absolute', inset: 0 }}
+      >
+        <color attach="background" args={['#070D1A']} />
+        <fog attach="fog" args={['#070D1A', 24, 60]} />
+        <DirectorClock director={director} />
+        <CameraRig director={director} reducedMotion={reducedMotion} targets={() => live.current} />
+        <StageEnvironment intensity={q.envIntensity} />
+        <LightingRig shadows={q.shadows} />
+        {props.arenaModel ? (
+          <>
+            <ArenaStage stars={q.stars} floor={false} />
+            <ArenaModel
+              url={props.arenaModel}
+              fallback={<ArenaStage stars={0} />}
+              onError={props.onModelError}
+            />
+          </>
+        ) : (
+          <ArenaStage stars={q.stars} />
+        )}
+        <MapOverlay
+          cities={props.cities}
+          threats={props.threats}
+          cityMaxHp={props.cityMaxHp}
+          director={director}
+          reducedMotion={reducedMotion}
+          locale={props.locale}
+        />
+        <Enemies
+          enemies={props.enemies}
+          telegraphs={props.telegraphs}
+          director={director}
+          reducedMotion={reducedMotion}
+          bossModel={props.bossModel}
+          bossBarrier={props.bossBarrier}
+        />
+        <ReserveReactor level={props.reserve} />
+        <CockpitBay
+          crew={props.crew ?? []}
+          director={director}
+          reducedMotion={reducedMotion}
+          locale={props.locale}
+        />
+        <ModelRobotActor
+          teamId="RAIJIN"
+          url={props.robotModels?.RAIJIN}
+          director={director}
+          energyRatio={glow.RAIJIN}
+          health={props.health?.RAIJIN}
+          onModelError={props.onModelError}
+        />
+        <ModelRobotActor
+          teamId="FUJIN"
+          url={props.robotModels?.FUJIN}
+          director={director}
+          energyRatio={glow.FUJIN}
+          health={props.health?.FUJIN}
+          onModelError={props.onModelError}
+        />
+        <Effects
+          director={director}
+          budget={q.fx}
+          reducedMotion={reducedMotion}
+          targets={() => live.current}
+        />
+        {q.post && <PostFx director={director} config={q.post} reducedMotion={reducedMotion} />}
+        <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
+      </Canvas>
+      <Letterbox director={director} reducedMotion={reducedMotion} />
+    </>
+  );
+}
+
+/**
+ * Cinema bars for the big cinematics (DOM, above the 3D view and below the
+ * page's HUD, so every quality level gets them).
+ */
+function Letterbox({
+  director,
+  reducedMotion,
+}: {
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
+  const [on, setOn] = useState(director.letterbox);
+  useEffect(() => director.onLetterbox(setOn), [director]);
+  const bar = {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: on ? '8%' : '0%',
+    background: '#000',
+    transition: reducedMotion ? 'none' : 'height 0.45s ease',
+  } as const;
+  return (
+    <div
+      aria-hidden
+      data-testid="arena-letterbox"
+      data-on={on ? '1' : '0'}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
     >
-      <color attach="background" args={['#070D1A']} />
-      <fog attach="fog" args={['#070D1A', 24, 60]} />
-      <DirectorClock director={director} />
-      <CameraRig director={director} reducedMotion={reducedMotion} />
-      <LightingRig shadows={q.shadows} />
-      {props.arenaModel ? (
-        <>
-          <ArenaStage stars={q.stars} floor={false} />
-          <ArenaModel
-            url={props.arenaModel}
-            fallback={<ArenaStage stars={0} />}
-            onError={props.onModelError}
-          />
-        </>
-      ) : (
-        <ArenaStage stars={q.stars} />
-      )}
-      <MapOverlay
-        cities={props.cities}
-        threats={props.threats}
-        cityMaxHp={props.cityMaxHp}
-        director={director}
-        reducedMotion={reducedMotion}
-        locale={props.locale}
-      />
-      <Enemies
-        enemies={props.enemies}
-        telegraphs={props.telegraphs}
-        director={director}
-        reducedMotion={reducedMotion}
-        bossModel={props.bossModel}
-        bossBarrier={props.bossBarrier}
-      />
-      <ReserveReactor level={props.reserve} />
-      <CockpitBay
-        crew={props.crew ?? []}
-        director={director}
-        reducedMotion={reducedMotion}
-        locale={props.locale}
-      />
-      <ModelRobotActor
-        teamId="RAIJIN"
-        url={props.robotModels?.RAIJIN}
-        director={director}
-        energyRatio={glow.RAIJIN}
-        health={props.health?.RAIJIN}
-        onModelError={props.onModelError}
-      />
-      <ModelRobotActor
-        teamId="FUJIN"
-        url={props.robotModels?.FUJIN}
-        director={director}
-        energyRatio={glow.FUJIN}
-        health={props.health?.FUJIN}
-        onModelError={props.onModelError}
-      />
-      <Effects
-        director={director}
-        maxParticles={q.particles}
-        reducedMotion={reducedMotion}
-        targets={() => live.current}
-      />
-      <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
-    </Canvas>
+      <div style={{ ...bar, top: 0 }} />
+      <div style={{ ...bar, bottom: 0 }} />
+    </div>
   );
 }
 

@@ -100,6 +100,19 @@ export const CLIP_DURATION: Record<ClipName, number> = {
 export const LOOPING_CLIPS: ReadonlySet<ClipName> = new Set(['Idle', 'Victory']);
 
 /**
+ * Seconds into a clip at which the blow lands (the "hit marker"). The bolt, the
+ * crack, the sound and the hit-stop are timed to it so they land together.
+ * Artist GLBs deliver the same markers (docs/art/ART_BRIEF.md).
+ */
+export const CLIP_HIT_TIME: Partial<Record<ClipName, number>> = {
+  AttackLight: 0.08,
+  AttackHeavy: 0.33,
+  Special: 1.04,
+  HitReact: 0,
+  HitHeavy: 0,
+};
+
+/**
  * Camera sequences (spec D6): intro, overview (= WideBattle), boss, mapFocus
  * (= ThreatFocus), cityDefense, gunnerImpact, routerPulse, repairRecovery,
  * cockpit, specialCharge, special (= SpecialHit), final (= Victory/Defeat).
@@ -222,6 +235,23 @@ export type Cue =
   | { kind: 'raidEnded'; result: RaidResult }
   | { kind: 'cheer' };
 
+/**
+ * Authored camera moves for the cinematics (poses in CAMERA_SHOTS, layout.ts).
+ * A shot eases from its first pose to its second and then holds.
+ */
+export type ShotName =
+  | 'specialRise'
+  | 'specialLaunch'
+  | 'bossImpact'
+  | 'heroes'
+  | 'bossReveal'
+  | 'bossGlare'
+  | 'bossDown'
+  | 'cityFall';
+
+/** Background music intensity (procedural score, music.ts). */
+export type MusicCue = 'calm' | 'wave' | 'battle' | 'boss' | 'victory' | 'defeat';
+
 export interface DirectorSettings {
   reducedMotion: boolean;
   /** 0..1 multiplier for camera shake. */
@@ -247,8 +277,31 @@ export class ArenaDirector {
     RAIJIN: { clip: 'Idle', start: 0, advance: 0 },
     FUJIN: { clip: 'Idle', start: 0, advance: 0 },
   };
-  camera: { preset: CameraPresetName; since: number } = { preset: 'overview', since: 0 };
+  /**
+   * `preset` is where the camera rests; a `shot` (cinematic move) overrides it
+   * until it is cleared. `anchor` makes the shot relative to a target (a city).
+   */
+  camera: {
+    preset: CameraPresetName;
+    since: number;
+    shot: ShotName | null;
+    anchor: FxTarget | null;
+  } = { preset: 'overview', since: 0, shot: null, anchor: null };
   shake = 0;
+  /**
+   * Presentation speed this frame: the rehearsal `timeScale` times any hit-stop
+   * or slow motion. Only the show slows down; the raid clock is the server's.
+   */
+  scale = 1;
+  /** Unscaled seconds since start (hit-stops and flashes are timed in real time). */
+  realTime = 0;
+  /** Screen accents for the grade pass, 0..1. Always 0 with reduced motion. */
+  flash = 0;
+  flashTone: 'ally' | 'enemy' = 'ally';
+  aberration = 0;
+  /** Cinema bars during the big cinematics. */
+  letterbox = false;
+  music: MusicCue = 'calm';
   banner: Banner | null = null;
   /** Until this time a cinematic owns the camera and robot clips. */
   busyUntil = 0;
@@ -259,6 +312,9 @@ export class ArenaDirector {
   boardedAt = new Map<string, number>();
   pulsedAt = new Map<string, number>();
 
+  private warps: Array<{ until: number; scale: number }> = [];
+  private lastHitStop = -100;
+  private lastFlash = -100;
   private queue: Scheduled[] = [];
   private order = 0;
   private effectId = 0;
@@ -275,6 +331,8 @@ export class ArenaDirector {
   private effectListeners = new Set<(e: DirectorEffect) => void>();
   private bannerListeners = new Set<(b: Banner | null) => void>();
   private soundListeners = new Set<(sound: string, teamId: TeamId | null) => void>();
+  private letterboxListeners = new Set<(on: boolean) => void>();
+  private musicListeners = new Set<(cue: MusicCue) => void>();
 
   onEffect(l: (e: DirectorEffect) => void) {
     this.effectListeners.add(l);
@@ -288,11 +346,27 @@ export class ArenaDirector {
       this.bannerListeners.delete(l);
     };
   }
-  /** Audio hooks: 'hit', 'thunder', 'wind', 'shield', 'capture', 'charge', 'special', 'victory', 'ko', 'intro', 'tick'. */
+  /**
+   * Audio hooks: 'hit', 'thunder', 'wind', 'shield', 'capture', 'charge', 'special', 'victory',
+   * 'ko', 'intro', 'tick', 'impact', 'explosion', 'whoosh', 'riser', 'alarm', 'shatter'.
+   */
   onSound(l: (sound: string, teamId: TeamId | null) => void) {
     this.soundListeners.add(l);
     return (): void => {
       this.soundListeners.delete(l);
+    };
+  }
+
+  onLetterbox(l: (on: boolean) => void) {
+    this.letterboxListeners.add(l);
+    return (): void => {
+      this.letterboxListeners.delete(l);
+    };
+  }
+  onMusic(l: (cue: MusicCue) => void) {
+    this.musicListeners.add(l);
+    return (): void => {
+      this.musicListeners.delete(l);
     };
   }
 
@@ -337,8 +411,12 @@ export class ArenaDirector {
         return this.playDefeated(cue);
       case 'cityDestroyed':
         this.emitEffect('cityBlast', null, null, { kind: 'city', id: cue.cityId }, 1.2);
-        this.sound('ko', null);
+        this.sound('shatter', null);
+        this.sound('alarm', null);
         this.addShake(0.5);
+        this.hitStop(0.1);
+        this.accent('enemy', 0.7);
+        this.cityFallShot(cue.cityId);
         this.setBanner({
           kind: 'cityLost',
           tone: 'enemy',
@@ -396,11 +474,19 @@ export class ArenaDirector {
   }
 
   update(dt: number): void {
-    this.time += Math.max(0, Math.min(dt, 0.25)) * this.timeScale;
+    const real = Math.max(0, Math.min(dt, 0.25));
+    this.realTime += real;
+    if (this.warps.length) this.warps = this.warps.filter((w) => w.until > this.realTime);
+    let warp = 1;
+    for (const w of this.warps) warp = Math.min(warp, w.scale);
+    this.scale = this.timeScale * warp;
+    this.time += real * this.scale;
     this.queue.sort((a, b) => a.at - b.at || a.order - b.order);
     while (this.queue.length && this.queue[0]!.at <= this.time) this.queue.shift()!.run();
     const decay = this.settings.reducedMotion ? 10 : 3.2;
     this.shake = Math.max(0, this.shake - dt * decay);
+    this.flash = Math.max(0, this.flash - real * 3.5);
+    this.aberration = Math.max(0, this.aberration - real * 2.5);
     if (this.banner && this.banner.until <= this.time) this.setBanner(null);
     for (const t of GODS) {
       const r = this.robots[t];
@@ -421,12 +507,16 @@ export class ArenaDirector {
   /** Back to a calm stance (new raid loaded, preview reset). */
   reset(): void {
     this.queue = [];
+    this.warps = [];
     this.boardedAt.clear();
     this.pulsedAt.clear();
     this.busyUntil = this.time;
+    this.flash = this.aberration = 0;
     for (const t of GODS) this.setClip(t, 'Idle', 0);
     this.setCamera('overview');
     this.setBanner(null);
+    this.setLetterbox(false);
+    this.setMusic('calm');
   }
 
   // ---- sequences --------------------------------------------------------
@@ -447,6 +537,7 @@ export class ArenaDirector {
       if (!short) this.setCamera('intro');
       for (const t of GODS) this.setClip(t, 'Intro', 0);
       this.sound('intro', null);
+      this.setMusic('wave');
       this.setBanner({
         kind: 'opening',
         tone: 'ally',
@@ -457,9 +548,13 @@ export class ArenaDirector {
         until: s + 3,
       });
     });
+    // Touchdown: the stage takes the weight of both gods.
     this.at(s + 0.9, () => {
       for (const t of GODS) this.emitEffect('shockwave', t, null, { kind: 'robot', id: t }, 0.8);
       this.addShake(0.4);
+      this.hitStop(0.08);
+      this.accent('ally', 0.45);
+      this.sound('impact', null);
     });
     this.at(s + (short ? 1 : 2.6), () => this.setCamera('overview'));
     // Step up to the line after landing.
@@ -479,6 +574,7 @@ export class ArenaDirector {
     const label = PHASE_LABELS[phase];
     this.at(s, () => {
       this.sound('intro', null);
+      this.setMusic(phase === 'FINAL_WAVE' ? 'boss' : phase === 'WAVE_1' ? 'wave' : 'battle');
       this.setBanner({
         kind: 'phase',
         tone: phase === 'FINAL_WAVE' ? 'enemy' : 'neutral',
@@ -497,9 +593,15 @@ export class ArenaDirector {
     const s = this.startTime();
     const short = this.settings.reducedMotion || this.settings.shortSpecials;
     this.at(s, () => {
-      if (!short) this.setCamera('boss');
+      if (!short) {
+        this.setCamera('boss');
+        this.setShot('bossReveal');
+        this.setLetterbox(true);
+      }
       this.sound('special', null);
+      this.setMusic('boss');
       this.addShake(0.6);
+      this.accent('enemy', 0.5);
       this.setBanner({
         kind: 'boss',
         tone: 'enemy',
@@ -510,7 +612,10 @@ export class ArenaDirector {
         until: s + 3.2,
       });
     });
-    this.at(s + (short ? 0.2 : 3), () => this.setCamera('overview'));
+    this.at(s + (short ? 0.2 : 3), () => {
+      this.setCamera('overview');
+      this.setLetterbox(false);
+    });
     this.busyUntil = s + (short ? 0.2 : 3);
   }
 
@@ -525,17 +630,29 @@ export class ArenaDirector {
     switch (e.kind) {
       case 'DAMAGE': {
         const to: FxTarget = { kind: 'enemy', id: e.enemyId };
-        this.emitEffect('impact', 'RAIJIN', null, to, e.defeated ? 1 : 0.6);
-        // The core barrier deflects the bolt: a ripple instead of a crack.
-        if (e.note === 'BARRIER' && this.throttle('barrier', 0.5))
-          this.emitEffect('shockwave', null, null, to, 0.4);
-        if (this.throttle('sig-RAIJIN', 0.3)) {
-          this.emitEffect('lightning', 'RAIJIN', { kind: 'robot', id: 'RAIJIN' }, to, 0.9);
-          this.sound('thunder', 'RAIJIN');
-        }
-        if (this.throttle('hit-RAIJIN', 0.08)) this.sound('hit', 'RAIJIN');
-        if (free('RAIJIN'))
-          this.setClip('RAIJIN', e.weakpoint === 'CORE' ? 'AttackHeavy' : 'AttackLight', 0.25);
+        const clip: ClipName = e.weakpoint === 'CORE' ? 'AttackHeavy' : 'AttackLight';
+        const swing = free('RAIJIN');
+        if (swing) this.setClip('RAIJIN', clip, 0.25);
+        // The bolt leaves Raijin on the strike frame of its swing, so the bolt,
+        // the crack, the sound and the hit-stop land together. A robot already
+        // mid-swing (a busy crowd) shows the hit at once.
+        const land = () => {
+          this.emitEffect('impact', 'RAIJIN', null, to, e.defeated ? 1 : 0.6);
+          // The core barrier deflects the bolt: a ripple instead of a crack.
+          if (e.note === 'BARRIER' && this.throttle('barrier', 0.5))
+            this.emitEffect('shockwave', null, null, to, 0.4);
+          if (this.throttle('sig-RAIJIN', 0.3)) {
+            this.emitEffect('lightning', 'RAIJIN', { kind: 'robot', id: 'RAIJIN' }, to, 0.9);
+            this.sound('thunder', 'RAIJIN');
+          }
+          if (this.throttle('hit-RAIJIN', 0.08)) this.sound('hit', 'RAIJIN');
+          if (swing && clip === 'AttackHeavy' && e.note !== 'BARRIER') {
+            this.hitStop(0.06);
+            if (this.throttle('sfx-impact', 0.5)) this.sound('impact', 'RAIJIN');
+          }
+        };
+        if (swing && CLIP_HIT_TIME[clip]) this.at(this.time + CLIP_HIT_TIME[clip]!, land);
+        else land();
         if (e.defeated && e.enemyKind !== 'BOSS') this.beat('gunnerImpact', 2);
         return;
       }
@@ -593,8 +710,14 @@ export class ArenaDirector {
       if (h.damage > 0)
         this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
     }
-    if (cue.robotHit && !this.busy)
+    if (cue.robotHit && !this.busy) {
       this.setClip(cue.robotHit, cue.enemyKind === 'BOSS' ? 'HitHeavy' : 'HitReact', 0);
+      if (cue.enemyKind === 'BOSS') {
+        this.hitStop(0.07);
+        this.accent('enemy', 0.4);
+        this.sound('impact', cue.robotHit);
+      }
+    }
     // Fujin braces when its barrier soaks a blow.
     else if (
       !this.busy &&
@@ -611,16 +734,11 @@ export class ArenaDirector {
   }
 
   private playDefeated(cue: Extract<Cue, { kind: 'enemyDefeated' }>): void {
-    this.emitEffect(
-      'explosion',
-      null,
-      null,
-      { kind: 'enemy', id: cue.enemyId },
-      cue.enemyKind === 'BOSS' ? 2 : 1,
-    );
-    this.sound('ko', null);
-    this.addShake(cue.enemyKind === 'BOSS' ? 0.9 : 0.3);
-    if (cue.enemyKind === 'BOSS') return;
+    if (cue.enemyKind === 'BOSS') return this.playBossDown(cue);
+    this.emitEffect('explosion', null, null, { kind: 'enemy', id: cue.enemyId }, 1);
+    this.sound('explosion', null);
+    this.addShake(0.3);
+    this.hitStop(0.06);
     if (this.throttle('banner-defeat', 2.5)) {
       this.setBanner({
         kind: 'defeated',
@@ -632,6 +750,61 @@ export class ArenaDirector {
         until: this.time + 1.8,
       });
     }
+  }
+
+  /**
+   * NULL CORE breaks apart: a chain of blasts over two seconds, the last one in
+   * slow motion, seen from low on the stage. The result sequence follows.
+   */
+  private playBossDown(cue: Extract<Cue, { kind: 'enemyDefeated' }>): void {
+    const s = this.startTime();
+    const short = this.settings.reducedMotion || this.settings.shortSpecials;
+    const boss: FxTarget = { kind: 'enemy', id: cue.enemyId };
+    if (short) {
+      this.at(s, () => {
+        this.emitEffect('explosion', null, null, boss, 2);
+        this.sound('explosion', null);
+        this.addShake(0.9);
+      });
+      this.busyUntil = Math.max(this.busyUntil, s + 0.3);
+      return;
+    }
+    this.at(s, () => {
+      this.setCamera('boss');
+      this.setShot('bossDown');
+      this.setLetterbox(true);
+      this.setBanner({
+        kind: 'defeated',
+        tone: 'ally',
+        textJa: 'NULL CORE 撃破！',
+        textEn: 'NULL CORE DESTROYED!',
+        subJa: cue.callsign ? `とどめ：${cue.callsign}` : undefined,
+        subEn: cue.callsign ? `final blow: ${cue.callsign}` : undefined,
+        until: s + 2.6,
+      });
+    });
+    [0, 0.45, 0.9].forEach((dt, i) =>
+      this.at(s + dt, () => {
+        this.emitEffect('explosion', null, null, boss, 1 + i * 0.3);
+        this.sound('explosion', null);
+        this.addShake(0.35);
+      }),
+    );
+    this.at(s + 1.4, () => {
+      this.emitEffect('explosion', null, null, boss, 2.2);
+      this.emitEffect('shockwave', null, null, boss, 1.4);
+      this.sound('impact', null);
+      this.sound('explosion', null);
+      this.hitStop(0.18);
+      this.slowMo(1.1, 0.35);
+      this.accent('ally', 1);
+      this.addShake(1);
+    });
+    this.at(s + 2.4, () => {
+      this.setCamera('overview');
+      this.setLetterbox(false);
+    });
+    this.busyUntil = Math.max(this.busyUntil, s + 2.4);
   }
 
   private playSpecialOpen(): void {
@@ -649,6 +822,7 @@ export class ArenaDirector {
       this.setClip('RAIJIN', 'Charge', 0);
       this.setClip('FUJIN', 'Hover', 0);
       this.sound('charge', null);
+      if (!short) this.sound('riser', null);
       this.setBanner({
         kind: 'special',
         tone: 'ally',
@@ -662,17 +836,31 @@ export class ArenaDirector {
     this.busyUntil = Math.max(this.busyUntil, s + (short ? 0.5 : 3.6));
   }
 
+  /**
+   * The finale's three outcomes. ACTIVATED is the long cut: a low look up at
+   * both gods powering up, a push toward NULL CORE as the bolt and the wind
+   * fly, the blow in slow motion, the boss reeling, then the heroes. FALLBACK
+   * is the same strike, shorter and weaker; FAILED turns the camera to the boss
+   * as its beam answers. Reduced motion / short specials keep the quick cut.
+   */
   private playSpecial(cue: Extract<Cue, { kind: 'specialResolved' }>): void {
     const s = this.startTime();
     const short = this.settings.shortSpecials || this.settings.reducedMotion;
     const boss: FxTarget | null = cue.bossId !== null ? { kind: 'enemy', id: cue.bossId } : null;
     if (cue.outcome === 'FAILED') {
       this.at(s, () => {
+        if (!short) {
+          this.setShot('bossGlare');
+          this.setLetterbox(true);
+        }
         for (const h of cue.cityHits)
           this.emitEffect('beam', null, boss, { kind: 'city', id: h.cityId }, 1.2);
         this.addShake(0.7);
+        this.accent('enemy', 0.8);
+        this.hitStop(0.1);
         this.sound('ko', null);
-        for (const t of GODS) this.setClip(t, 'HitReact', 0);
+        this.sound('explosion', null);
+        for (const t of GODS) this.setClip(t, 'HitHeavy', 0);
         this.setBanner({
           kind: 'specialResult',
           tone: 'enemy',
@@ -683,13 +871,24 @@ export class ArenaDirector {
           until: s + 3,
         });
       });
-      this.busyUntil = s + 1.2;
+      if (!short)
+        this.at(s + 2.2, () => {
+          this.setCamera('overview');
+          this.setLetterbox(false);
+        });
+      this.busyUntil = s + (short ? 1.2 : 2.2);
       return;
     }
     const full = cue.outcome === 'ACTIVATED';
-    const dur = short ? 1.2 : full ? 4.5 : 2;
+    // Seconds from the start: the strike lands on Raijin's slam (Special hit marker).
+    const strike = short ? 0.4 : full ? 2 : 0.9;
+    const dur = short ? 1.2 : full ? 5.6 : 2.6;
     this.at(s, () => {
-      if (!short) this.setCamera(full ? 'special' : 'final');
+      if (!short) {
+        this.setCamera(full ? 'special' : 'final');
+        this.setShot(full ? 'specialRise' : 'specialLaunch');
+        this.setLetterbox(true);
+      }
       for (const t of GODS) {
         this.setClip(t, 'Special', 0.3);
         this.emitEffect('specialStorm', t, null, { kind: 'robot', id: t }, full ? 1 : 0.6);
@@ -705,13 +904,33 @@ export class ArenaDirector {
         until: s + dur + 1,
       });
     });
-    this.at(s + (short ? 0.4 : full ? 2 : 0.8), () => {
+    if (full && !short)
+      this.at(s + 1.5, () => {
+        this.setShot('specialLaunch');
+        this.sound('whoosh', null);
+      });
+    this.at(s + strike, () => {
       this.emitEffect('lightning', 'RAIJIN', { kind: 'robot', id: 'RAIJIN' }, boss, 1.6);
       this.emitEffect('wind', 'FUJIN', { kind: 'robot', id: 'FUJIN' }, boss, 1.6);
-      if (boss) this.emitEffect('explosion', null, null, boss, full ? 1.6 : 0.9);
+      if (boss) {
+        this.emitEffect('explosion', null, null, boss, full ? 1.8 : 0.9);
+        this.emitEffect('shockwave', null, null, boss, full ? 1.4 : 0.7);
+      }
       this.addShake(full ? 1 : 0.5);
+      this.sound('impact', null);
+      this.hitStop(full ? 0.16 : 0.08);
+      this.accent('ally', full ? 1 : 0.5);
+      if (full && !short) this.slowMo(0.9, 0.3);
     });
-    if (!short) this.at(s + dur, () => this.setCamera('overview'));
+    if (full && !short) {
+      this.at(s + strike + 0.25, () => this.setShot('bossImpact'));
+      this.at(s + strike + 2.1, () => this.setShot('heroes'));
+    }
+    if (!short)
+      this.at(s + dur, () => {
+        this.setCamera('overview');
+        this.setLetterbox(false);
+      });
     this.busyUntil = Math.max(this.busyUntil, s + dur);
   }
 
@@ -721,6 +940,10 @@ export class ArenaDirector {
     // The crew first (cockpit), then the gods' pose for the result.
     const lead = this.settings.reducedMotion ? 0 : 2.4;
     if (lead) this.at(s, () => this.setCamera('cockpit'));
+    this.at(s, () => {
+      this.setLetterbox(false);
+      this.setMusic(won ? 'victory' : 'defeat');
+    });
     this.at(s + lead, () => {
       this.setCamera('final');
       for (const t of GODS) this.setClip(t, won ? 'Victory' : 'Defeat', 0);
@@ -773,6 +996,7 @@ export class ArenaDirector {
    */
   private beat(preset: CameraPresetName, seconds: number): void {
     if (this.settings.reducedMotion || this.busy || this.camera.preset !== 'overview') return;
+    if (this.camera.shot) return;
     if (!this.throttle('camera-beat', 12)) return;
     this.setCamera(preset);
     const since = this.camera.since;
@@ -794,7 +1018,66 @@ export class ArenaDirector {
   }
 
   private setCamera(preset: CameraPresetName): void {
-    if (this.camera.preset !== preset) this.camera = { preset, since: this.time };
+    if (this.camera.preset !== preset || this.camera.shot)
+      this.camera = { preset, since: this.time, shot: null, anchor: null };
+  }
+
+  /** Start an authored camera move (never with reduced motion). */
+  private setShot(shot: ShotName, anchor: FxTarget | null = null): void {
+    if (this.settings.reducedMotion) return;
+    this.camera = { ...this.camera, since: this.time, shot, anchor };
+  }
+
+  /** A fallen city: a short push in on it, unless a cinematic owns the camera. */
+  private cityFallShot(cityId: RegionId): void {
+    if (this.settings.reducedMotion || this.busy || this.camera.preset !== 'overview') return;
+    if (!this.throttle('city-fall', 8)) return;
+    this.setShot('cityFall', { kind: 'city', id: cityId });
+    const since = this.camera.since;
+    this.at(this.time + 2, () => {
+      if (this.camera.shot === 'cityFall' && this.camera.since === since)
+        this.setCamera('overview');
+    });
+  }
+
+  /**
+   * Freeze the show for a few frames on a heavy blow (real seconds). At most
+   * one every 0.45 s, so a busy crowd never turns into a stutter.
+   */
+  private hitStop(seconds: number): void {
+    if (this.realTime - this.lastHitStop < 0.45) return;
+    this.lastHitStop = this.realTime;
+    this.warps.push({ until: this.realTime + seconds, scale: 0.03 });
+  }
+
+  /** Slow the show down (real seconds) for the finale's blow. */
+  private slowMo(seconds: number, scale: number): void {
+    this.warps.push({ until: this.realTime + seconds, scale });
+  }
+
+  /**
+   * A brief glow and colour fringe on the screen for big moments. Never with
+   * reduced motion, and at most twice a second (≤2 Hz, no strobing).
+   */
+  private accent(tone: 'ally' | 'enemy', amount: number): void {
+    if (this.settings.reducedMotion) return;
+    if (this.realTime - this.lastFlash < 0.5) return;
+    this.lastFlash = this.realTime;
+    this.flashTone = tone;
+    this.flash = Math.min(1, Math.max(this.flash, amount));
+    this.aberration = Math.min(1, Math.max(this.aberration, amount * 0.8));
+  }
+
+  private setLetterbox(on: boolean): void {
+    if (this.letterbox === on) return;
+    this.letterbox = on;
+    for (const l of this.letterboxListeners) l(on);
+  }
+
+  private setMusic(cue: MusicCue): void {
+    if (this.music === cue) return;
+    this.music = cue;
+    for (const l of this.musicListeners) l(cue);
   }
 
   private addShake(amount: number): void {

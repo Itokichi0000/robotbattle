@@ -54,7 +54,18 @@ export const REQUIRED_CLIPS = [
 export const TRI_BUDGET = 100_000;
 
 /** NULL CORE: weak points are separate parts so hits can light them up. */
-export const BOSS_JOINTS = ['Root', 'Core', 'Ring', 'WP_CORE', 'WP_ARM', 'WP_LEG'];
+// WP_* are bones; weak_* are the meshes the game lights up on hits (own materials).
+export const BOSS_JOINTS = [
+  'Root',
+  'Core',
+  'Ring',
+  'WP_CORE',
+  'WP_ARM',
+  'WP_LEG',
+  'weak_core',
+  'weak_arm',
+  'weak_leg',
+];
 export const BOSS_CLIPS = ['Idle', 'Telegraph', 'Attack', 'HitReact', 'Defeat'];
 
 /** Arena: stage, both spawn pads, the map pedestal and the 8 defence bases. */

@@ -20,6 +20,7 @@
   生成済み。仕様の全クリップ（Walk, Dash, Hover, ShieldDeploy, Charge, Boarding, HitHeavy と仕様名の Punch/HeavyAttack/HitLight）、
   ダメージ差分2段階、カメラプリセット、モーションのコンタクトシート（`docs/art/motion/`）あり。ただし形はプリミティブの組み合わせ
   （ブロックアウト）で、会場画面の既定はコード生成モデル（`?models=blender` で切替、D-047）。**人間のアーティストの仕上げが必要。**
+  発注仕様と自動検収は `docs/art/ART_BRIEF.md`（D-071）。
 - 🟢 リプレイ動画は会場PCのブラウザで録画（WebM/MP4、D-057）。サーバー側での自動動画生成はしない方針。
 - 🟢 一時停止中・接続断から戻ったときのミニゲームは「残り時間がある場合のみ再開」。実機で確認。
 - 🟢 デモシードは1本（`earth-defense-opening`）。会場ごとの台本を増やすのはデータ追加で可能（`packages/game-engine/src/scenario.ts`）。
@@ -27,7 +28,9 @@
 ## 品質・検証（このコンテナでは確認できないもの）
 
 - 🔴 **実機スマホ**（iPhone Safari / Android Chrome）でのタップ・ミニゲームの体感・文字の大きさ。自動テストは Chromium のモバイルエミュレーション。
-- 🔴 **会場PCのGPUでの3D FPS**：このコンテナは SwiftShader（約4fps）。FPS による自動品質低下（→2D）は実装済みだが閾値は会場で確認。
+- 🔴 **会場PCのGPUでの3D FPS**：このコンテナは SwiftShader（ソフトウェア描画）。後処理・粒子・照明を足した新しい演出（D-070）は
+  SwiftShader で約1.4fps（旧版は約4fps）で、実GPUでの負荷は未計測。FPS による自動品質低下（高→中→低→2D）は実装済みだが、
+  閾値と既定の画質は会場で確認する。
 - 🔴 **会場Wi-Fiでの通し試験**：負荷試験は localhost（50人＋観客100で伝送 p95 7ms、CPU 4%、`docs/LOAD_TEST_REPORT.md`）。
   回線断30秒・サーバー再起動・DB書き込み不可・LNbits 5xx は自動テスト済みだが、会場ネットワーク・実機での通しは未。
 - 🟠 **実ウォレットでの LNURL-auth 互換性**（Wallet of Satoshi, Phoenix, Zeus, Blink など）。公開 HTTPS の URL が必要（承認後）。
@@ -35,6 +38,10 @@
 - 🟠 **アクセシビリティ**：axe-core（WCAG 2.1 A/AA）の自動検査は全画面で違反0（E2E）。スクリーンリーダー（VoiceOver/TalkBack）・
   キーボードだけでの全操作・実機での読みやすさは手動確認が必要。
 - 🟢 英語文言のネイティブチェック。
+- 🟢 **演出の体感**（D-070）：ヒットストップの長さ、カメラワークの長さ、ブルームの強さ、BGM と効果音の音量バランスは、
+  会場の画面とスピーカーで確認して調整する（数値は `layout.ts` の `QUALITY_SETTINGS`・`CAMERA_SHOTS` と `director.ts`）。
+  BGM は会場画面の設定（S）で切れる。
+- 🟢 ボスの GLB の Attack・HitReact・Defeat クリップは未使用（Idle と Telegraph のみ再生）。
 - 🟠 **VPS キット（`deploy/`）**：`deploy.sh`・`rollback.sh` はこの環境で https プロキシ（Caddyfile と同じ振り分け）と `satswars`
   ユーザーのサービスに対して通しで試験済み。ただし**本物の Caddy・systemd・Let's Encrypt・実 VPS では未実行**
   （外部バイナリを実行できなかった。`setup-vps.sh` は VPS 上で `caddy validate` してから読み込む）。初回は VPS で一度通して確認する。

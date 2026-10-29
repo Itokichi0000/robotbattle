@@ -125,6 +125,14 @@ export function SettingsPanel({
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
+            checked={settings.music}
+            onChange={(e) => set('music', e.target.checked)}
+          />
+          BGM / Music
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
             checked={settings.showStats}
             onChange={(e) => set('showStats', e.target.checked)}
           />

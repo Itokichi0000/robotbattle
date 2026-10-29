@@ -53,7 +53,7 @@
 
 ## 実行結果（2026-10-29、開発コンテナ：4 CPU、GPU なし・SwiftShader）
 
-- `pnpm test`：**128件すべて成功**（engine 32, shared 11, three-game 24, server 52, simulations＋blender 7, solo 2）
+- `pnpm test`：**140件すべて成功**（engine 32, shared 11, three-game 36＋納品物検査2件 skip, server 52, simulations＋blender 7, solo 2）
 - `pnpm e2e`：**14件すべて成功**（約4分。デモシードの2ルートを含む）
 - `pnpm lint`：エラー0・警告0 / `pnpm typecheck`：成功 / `pnpm build`：成功（最終確認は PROGRESS）
 - `pnpm demo:seed`：成功ルート SUCCEEDED・神雷風陣 ACTIVATED（7:01）、失敗ルート FAILED・神雷風陣 FAILED（日本陥落 7:56）

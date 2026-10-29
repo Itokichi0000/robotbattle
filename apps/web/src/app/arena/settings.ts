@@ -9,6 +9,8 @@ export interface ArenaSettings {
   shortSpecials: boolean;
   volume: number;
   muted: boolean;
+  /** Background music (procedural score); off when the venue plays its own. */
+  music: boolean;
   showStats: boolean;
   /**
    * auto = artist GLBs when a manifest exists (none yet), else the code-built models;
@@ -28,6 +30,7 @@ const DEFAULTS: ArenaSettings = {
   shortSpecials: false,
   volume: 0.7,
   muted: false,
+  music: true,
   showStats: false,
   models: 'auto',
   autoQuality: true,

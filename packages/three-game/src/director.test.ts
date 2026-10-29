@@ -85,11 +85,20 @@ describe('ArenaDirector', () => {
     d.onSound((s) => sounds.push(s));
     d.play(gunnerHit());
     expect(d.robots.RAIJIN.clip).toBe('AttackHeavy');
+    // The bolt leaves on the strike frame of the swing, with a hit-stop.
+    expect(fx.find((e) => e.kind === 'lightning')).toBeUndefined();
+    let froze = false;
+    for (let i = 0; i < 24; i++) {
+      d.update(1 / 60);
+      froze ||= d.scale < 0.5;
+    }
     expect(fx.find((e) => e.kind === 'lightning')).toMatchObject({
       from: { kind: 'robot', id: 'RAIJIN' },
       to: { kind: 'enemy', id: 7 },
     });
     expect(sounds).toContain('thunder');
+    expect(sounds).toContain('impact');
+    expect(froze).toBe(true);
     run(d, 2);
     expect(d.robots.RAIJIN.clip).toBe('Idle');
   });
@@ -153,6 +162,7 @@ describe('ArenaDirector', () => {
       d.play(gunnerHit());
       d.update(0.02);
     }
+    run(d, 1);
     expect(fx.filter((e) => e.kind === 'impact')).toHaveLength(50);
     expect(fx.filter((e) => e.kind === 'lightning').length).toBeLessThanOrEqual(4);
     expect(sounds.filter((s) => s === 'hit').length).toBeLessThanOrEqual(13);
@@ -296,6 +306,124 @@ describe('ArenaDirector', () => {
     const escort = resolveFxTarget({ kind: 'enemy', id: 2 }, ctx)!;
     const city = resolveFxTarget({ kind: 'city', id: 'kanto' }, ctx)!;
     expect(escort.distanceTo(city)).toBeLessThan(4);
+  });
+});
+
+describe('cinematic timing (hit-stop, slow motion, shots, accents)', () => {
+  it('a hit-stop freezes only the show, briefly, and never more than ~2 per second', () => {
+    const d = new ArenaDirector();
+    d.play({ kind: 'cityDestroyed', cityId: 'kanto' });
+    const t0 = d.time;
+    d.update(0.05);
+    // The show barely moves during the freeze; real time keeps going.
+    expect(d.time - t0).toBeLessThan(0.01);
+    expect(d.realTime).toBeCloseTo(0.05, 5);
+    run(d, 0.2);
+    expect(d.scale).toBe(1);
+    // A second blow right away does not freeze again (no stutter under a crowd).
+    d.play({ kind: 'cityDestroyed', cityId: 'tohoku' });
+    const t1 = d.time;
+    d.update(0.05);
+    expect(d.time - t1).toBeCloseTo(0.05, 5);
+  });
+
+  it('screen accents are at most 2 Hz and off with reduced motion', () => {
+    const d = new ArenaDirector();
+    let flashes = 0;
+    let prev = 0;
+    for (let i = 0; i < 120; i++) {
+      d.play({ kind: 'cityDestroyed', cityId: 'kanto' });
+      d.update(1 / 60);
+      if (d.flash > prev + 0.05) flashes++;
+      prev = d.flash;
+    }
+    // 2 s of non-stop blows: no more than 4 flashes plus the first.
+    expect(flashes).toBeLessThanOrEqual(5);
+    const r = new ArenaDirector();
+    r.settings = { reducedMotion: true, shakeScale: 1, shortSpecials: false };
+    r.play({ kind: 'cityDestroyed', cityId: 'kanto' });
+    expect(r.flash).toBe(0);
+    expect(r.aberration).toBe(0);
+  });
+
+  it('the full special plays its shots in order with cinema bars and slow motion at the blow', () => {
+    const d = new ArenaDirector();
+    const bars: boolean[] = [];
+    const sounds: string[] = [];
+    d.onLetterbox((on) => bars.push(on));
+    d.onSound((s) => sounds.push(s));
+    d.play({ kind: 'specialResolved', outcome: 'ACTIVATED', damage: 250, bossId: 9, cityHits: [] });
+    const shots: string[] = [];
+    let slowest = 1;
+    for (let i = 0; i < 60 * 9; i++) {
+      d.update(1 / 60);
+      const shot = d.camera.shot;
+      if (shot && shots[shots.length - 1] !== shot) shots.push(shot);
+      slowest = Math.min(slowest, d.scale);
+    }
+    expect(shots).toEqual(['specialRise', 'specialLaunch', 'bossImpact', 'heroes']);
+    expect(bars).toEqual([true, false]);
+    expect(slowest).toBeLessThan(0.5);
+    expect(sounds).toEqual(expect.arrayContaining(['special', 'whoosh', 'impact']));
+    expect(d.camera).toMatchObject({ preset: 'overview', shot: null });
+    // Partial and failure use their own shorter cuts.
+    const f = new ArenaDirector();
+    f.play({ kind: 'specialResolved', outcome: 'FAILED', damage: 0, bossId: 9, cityHits: [] });
+    run(f, 0.1);
+    expect(f.camera.shot).toBe('bossGlare');
+    expect(f.letterbox).toBe(true);
+    run(f, 3);
+    expect(f.letterbox).toBe(false);
+  });
+
+  it('NULL CORE breaks apart in a chain of blasts before the result', () => {
+    const d = new ArenaDirector();
+    const fx: DirectorEffect[] = [];
+    d.onEffect((e) => fx.push(e));
+    d.play({ kind: 'enemyDefeated', enemyId: 9, enemyKind: 'BOSS', callsign: 'PILOT-7' });
+    d.play({ kind: 'raidEnded', result: result('SUCCEEDED') });
+    run(d, 0.1);
+    expect(d.camera.shot).toBe('bossDown');
+    expect(d.banner?.textJa).toBe('NULL CORE 撃破！');
+    run(d, 2.6);
+    expect(fx.filter((e) => e.kind === 'explosion').length).toBe(4);
+    // Then the crew and the result, as before.
+    run(d, 3);
+    expect(d.camera.preset).toBe('final');
+    expect(d.banner?.kind).toBe('victory');
+  });
+
+  it('a fallen city gets a short push-in on it, not during a cinematic, not with reduced motion', () => {
+    const d = new ArenaDirector();
+    d.play({ kind: 'cityDestroyed', cityId: 'kyushu' });
+    expect(d.camera).toMatchObject({ shot: 'cityFall', anchor: { kind: 'city', id: 'kyushu' } });
+    run(d, 2.2);
+    expect(d.camera.shot).toBeNull();
+    const busy = new ArenaDirector();
+    busy.play({ kind: 'enemySpawned', enemyId: 9, enemyKind: 'BOSS' });
+    run(busy, 0.1);
+    busy.play({ kind: 'cityDestroyed', cityId: 'kyushu' });
+    expect(busy.camera.shot).toBe('bossReveal');
+    const r = new ArenaDirector();
+    r.settings = { reducedMotion: true, shakeScale: 1, shortSpecials: false };
+    r.play({ kind: 'cityDestroyed', cityId: 'kyushu' });
+    expect(r.camera.shot).toBeNull();
+  });
+
+  it('the score follows the raid: waves, the boss, the result, back to calm', () => {
+    const d = new ArenaDirector();
+    const cues: string[] = [];
+    d.onMusic((c) => cues.push(c));
+    d.play({ kind: 'raidStart' });
+    run(d, 3);
+    d.play({ kind: 'phase', phase: 'WAVE_2' });
+    run(d, 1);
+    d.play({ kind: 'phase', phase: 'FINAL_WAVE' });
+    run(d, 1);
+    d.play({ kind: 'raidEnded', result: result('FAILED') });
+    run(d, 3);
+    d.reset();
+    expect(cues).toEqual(['wave', 'battle', 'boss', 'defeat', 'calm']);
   });
 });
 

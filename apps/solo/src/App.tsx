@@ -6,8 +6,12 @@ import {
   ArenaScene,
   type Banner,
   type BannerTone,
+  type FrameStats,
+  type GovernorLevel,
+  type Quality,
+  QualityGovernor,
   SfxEngine,
-  type SfxName,
+  connectDirectorAudio,
   cueFromEvent,
 } from '@sats-wars/three-game';
 import {
@@ -32,19 +36,62 @@ const TONE: Record<BannerTone, string> = {
   FUJIN: '#25C8D7',
 };
 
+/** Picture settings chosen on the setup screen (not part of the raid). */
+export interface Display {
+  quality: Quality;
+  /** Step the quality down (finally to 2D) when the frame rate stays low. */
+  autoQuality: boolean;
+}
+
+const QUALITY_LABELS: Record<Quality, { ja: string; hint: string }> = {
+  high: { ja: '高', hint: '光・煙・破片・演出' },
+  medium: { ja: '中', hint: '光と演出' },
+  low: { ja: '軽', hint: '古い端末向け' },
+};
+
+/** Phones and tablets start at medium; computers at high. */
+function defaultQuality(): Quality {
+  try {
+    return window.matchMedia?.('(pointer: coarse)').matches ? 'medium' : 'high';
+  } catch {
+    return 'medium';
+  }
+}
+
 export function App() {
   const [options, setOptions] = useState<SoloOptions | null>(null);
-  if (!options) return <Setup onStart={setOptions} />;
-  return <Game options={options} onSettings={() => setOptions(null)} />;
+  const [display, setDisplay] = useState<Display>(() => ({
+    quality: defaultQuality(),
+    autoQuality: true,
+  }));
+  if (!options)
+    return (
+      <Setup
+        display={display}
+        onStart={(o, d) => {
+          setDisplay(d);
+          setOptions(o);
+        }}
+      />
+    );
+  return <Game options={options} display={display} onSettings={() => setOptions(null)} />;
 }
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
-function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
+function Setup({
+  display,
+  onStart,
+}: {
+  display: Display;
+  onStart: (o: SoloOptions, d: Display) => void;
+}) {
   const [callsign, setCallsign] = useState('');
   const [crew, setCrew] = useState(5);
+  const [quality, setQuality] = useState<Quality>(display.quality);
+  const [autoQuality, setAutoQuality] = useState(display.autoQuality);
   return (
     <main className="setup">
       <div className="hero">
@@ -87,7 +134,10 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
         className="form"
         onSubmit={(e) => {
           e.preventDefault();
-          onStart({ callsign: callsign.trim() || 'あなた', crew, botSkill: 0.65, speed: 1 });
+          onStart(
+            { callsign: callsign.trim() || 'あなた', crew, botSkill: 0.65, speed: 1 },
+            { quality, autoQuality },
+          );
         }}
       >
         <label className="field">
@@ -118,6 +168,32 @@ function Setup({ onStart }: { onStart: (o: SoloOptions) => void }) {
             少人数のときは補佐AIが空いた席を手伝います（記録は「AI支援あり」）。
           </span>
         </div>
+        <div className="field">
+          <span className="label">画質（大画面の3D）</span>
+          <div className="seg" role="group" aria-label="画質">
+            {(['high', 'medium', 'low'] as const).map((q) => (
+              <button
+                key={q}
+                type="button"
+                aria-pressed={quality === q}
+                data-testid={`solo-quality-${q}`}
+                onClick={() => setQuality(q)}
+              >
+                {QUALITY_LABELS[q].ja}
+                <small>{QUALITY_LABELS[q].hint}</small>
+              </button>
+            ))}
+          </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={autoQuality}
+              data-testid="solo-auto-quality"
+              onChange={(e) => setAutoQuality(e.target.checked)}
+            />
+            動きが重いときは自動で画質を下げる
+          </label>
+        </div>
         <button type="submit" className="go" data-testid="solo-start">
           搭乗する
         </button>
@@ -146,7 +222,15 @@ interface Pop {
 // Game: big screen + phone side by side
 // ---------------------------------------------------------------------------
 
-function Game({ options, onSettings }: { options: SoloOptions; onSettings: () => void }) {
+function Game({
+  options,
+  display,
+  onSettings,
+}: {
+  options: SoloOptions;
+  display: Display;
+  onSettings: () => void;
+}) {
   const raid = useMemo(() => new LocalRaid(options), [options]);
   const director = useMemo(() => new ArenaDirector(), []);
   const sfx = useMemo(() => new SfxEngine(), []);
@@ -161,6 +245,16 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
   const [sound, setSound] = useState(false);
   const [use3d] = useState(webglAvailable);
   const [contextLost, setContextLost] = useState(false);
+  // Automatic quality: steps down on a sustained low frame rate, finally to 2D.
+  const [level, setLevel] = useState<GovernorLevel>(display.quality);
+  const governor = useMemo(
+    () => (display.autoQuality ? new QualityGovernor({ ceiling: display.quality }) : null),
+    [display],
+  );
+  const onStats = (s: FrameStats) => {
+    const next = governor?.sample(s.fps, performance.now() / 1000);
+    if (next) setLevel(next);
+  };
   const [seatPatch, setSeatPatch] = useState<Partial<SeatState>>({});
   const ids = useRef(0);
   const reducedMotion = useMemo(
@@ -179,7 +273,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
     const L = (ja: string) => ja;
     const offs = [
       director.onBanner(setBanner),
-      director.onSound((name) => sfx.play(name as SfxName)),
+      connectDirectorAudio(director, sfx),
       raid.onEvent((e) => {
         cueFromEvent(director, e);
         if (e.type === 'RAID_STATUS_CHANGED' && e.data.to === 'LOBBY_OPEN') director.reset();
@@ -209,7 +303,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
     let raf = 0;
     let prev = performance.now();
     const loop = (now: number) => {
-      if (!use3d || contextLost) director.update((now - prev) / 1000);
+      if (!use3d || contextLost || level === '2d') director.update((now - prev) / 1000);
       prev = now;
       raf = requestAnimationFrame(loop);
     };
@@ -219,7 +313,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
       clearInterval(id);
       cancelAnimationFrame(raf);
     };
-  }, [raid, director, sfx, reducedMotion, use3d, contextLost]);
+  }, [raid, director, sfx, reducedMotion, use3d, contextLost, level]);
 
   const toggleSound = async () => {
     if (!sound) {
@@ -255,7 +349,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
   return (
     <main className="game">
       <section className="stage" aria-label="会場の大画面">
-        {use3d && !contextLost ? (
+        {use3d && !contextLost && level !== '2d' ? (
           <ArenaScene
             director={director}
             cities={snap.cities}
@@ -271,9 +365,10 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
             health={{ RAIJIN: snap.robots[0]!.health, FUJIN: snap.robots[1]!.health }}
             bossBarrier={view.bossBarrier}
             crew={snap.crew}
-            quality="medium"
+            quality={level}
             reducedMotion={reducedMotion}
             locale="ja"
+            onStats={onStats}
             onContextLost={() => setContextLost(true)}
           />
         ) : (
@@ -385,7 +480,9 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
             ))}
           </div>
           <p className="fine">
-            作戦 {raid.raids}回目 ・ 仲間 {options.crew}人
+            作戦 {raid.raids}回目 ・ 仲間 {options.crew}人 ・ 画質{' '}
+            {level === '2d' ? '2D' : QUALITY_LABELS[level].ja}
+            {level !== display.quality ? '（自動で調整）' : ''}
           </p>
         </div>
       </aside>

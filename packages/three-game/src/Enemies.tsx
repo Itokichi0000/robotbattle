@@ -173,7 +173,8 @@ function GlbNullCore({
     for (const [k, m] of Object.entries(weak) as Array<
       [keyof typeof WEAK_POINTS, THREE.MeshStandardMaterial]
     >) {
-      m.emissiveIntensity = 2 + Math.min(2, Math.floor(boss.partHits[k] / 3)) * 2;
+      // Brighter with each crack, capped below ~2 so the red stays red under bloom.
+      m.emissiveIntensity = 1 + Math.min(2, Math.floor(boss.partHits[k] / 3)) * 0.45;
     }
   });
   return (
@@ -208,9 +209,10 @@ function NullCore({ boss, charging, director, reducedMotion }: BossProps) {
       root.current.rotation.y = reducedMotion ? 0 : Math.sin(t * 0.25) * 0.15;
     }
     if (core.current) {
-      // Charging an attack: slow ≤1 Hz throb; low HP: angrier red.
+      // Charging an attack: slow ≤1 Hz throb; low HP: angrier red. Kept below ~1.7:
+      // brighter, tone mapping turns the red into a flat pink disc (bloom adds the glow).
       const pulse = charging && !reducedMotion ? 0.5 + 0.5 * Math.sin(t * Math.PI * 2) : 0.5;
-      core.current.emissiveIntensity = 1.2 + pulse * 1.5 + (1 - hpRatio) * 0.8;
+      core.current.emissiveIntensity = 0.75 + pulse * 0.9 + (1 - hpRatio) * 0.5;
     }
     const swing = reducedMotion ? 0 : Math.sin(t * 0.8) * 0.12;
     if (armL.current) armL.current.rotation.z = 0.5 + swing;
@@ -243,7 +245,9 @@ function NullCore({ boss, charging, director, reducedMotion }: BossProps) {
           ref={core}
           color="#200008"
           emissive={new THREE.Color(CORRUPT_RED)}
-          emissiveIntensity={1.5}
+          emissiveIntensity={1}
+          roughness={0.22}
+          metalness={0.3}
         />
       </mesh>
       {/* ARM weak points */}

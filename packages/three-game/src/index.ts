@@ -12,7 +12,9 @@ export {
 } from './robots/build';
 export { applyClip } from './robots/animate';
 export { cueFromEvent } from './cues';
-export { SfxEngine, type SfxName } from './audio';
+export { SfxEngine, type SfxName, connectDirectorAudio, panFor } from './audio';
+export { musicBar, MUSIC_BPM, type NoteEvent } from './music';
+export { ParticlePool, DebrisPool, buildRibbon } from './fx/pool';
 export { QualityGovernor, type GovernorLevel } from './qualityGovernor';
 export {
   CockpitBay,

@@ -2,7 +2,16 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { ArenaDirector } from './director';
-import { CAMERA_PRESETS, ROBOT_HOME, TEAM_COLORS } from './layout';
+import {
+  CAMERA_PRESETS,
+  CAMERA_SHOTS,
+  ROBOT_HOME,
+  TEAM_COLORS,
+  type TargetContext,
+  resolveFxTarget,
+} from './layout';
+
+const easeInOut = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2);
 
 /** Advances the director clock once per rendered frame. */
 export function DirectorClock({ director }: { director: ArenaDirector }) {
@@ -12,22 +21,53 @@ export function DirectorClock({ director }: { director: ArenaDirector }) {
 
 /**
  * Camera presets driven by the director with smooth easing and optional shake.
+ * A cinematic shot (director.camera.shot) cuts in and eases along its authored
+ * move; when it ends the camera glides back to the preset.
  * Reduced-motion mode cuts between presets instead of flying, and never shakes.
  */
 export function CameraRig({
   director,
   reducedMotion,
+  targets,
 }: {
   director: ArenaDirector;
   reducedMotion: boolean;
+  /** For shots anchored to a target (a city on the map). */
+  targets?: () => TargetContext;
 }) {
   const { camera } = useThree();
   const target = useRef(new THREE.Vector3(...CAMERA_PRESETS.intro.target));
   const desiredPos = useMemo(() => new THREE.Vector3(), []);
   const desiredTarget = useMemo(() => new THREE.Vector3(), []);
+  const tmp = useMemo(() => new THREE.Vector3(), []);
   const first = useRef(true);
 
   useFrame((_, dt) => {
+    const shotName = reducedMotion ? null : director.camera.shot;
+    if (shotName) {
+      const shot = CAMERA_SHOTS[shotName];
+      const u = easeInOut(
+        Math.min(1, Math.max(0, (director.time - director.camera.since) / shot.duration)),
+      );
+      desiredPos.set(...shot.from.position).lerp(tmp.set(...shot.to.position), u);
+      desiredTarget.set(...shot.from.target).lerp(tmp.set(...shot.to.target), u);
+      const anchor = director.camera.anchor
+        ? resolveFxTarget(director.camera.anchor, targets?.() ?? { enemies: [], telegraphs: [] })
+        : null;
+      if (anchor) {
+        desiredPos.add(anchor);
+        desiredTarget.add(anchor);
+      }
+      camera.position.copy(desiredPos);
+      target.current.copy(desiredTarget);
+      if (director.shake > 0) {
+        const s = director.shake * 0.28;
+        camera.position.x += (Math.random() - 0.5) * s;
+        camera.position.y += (Math.random() - 0.5) * s;
+      }
+      camera.lookAt(target.current);
+      return;
+    }
     const preset = CAMERA_PRESETS[director.camera.preset];
     desiredPos.set(...preset.position);
     desiredTarget.set(...preset.target);
@@ -58,8 +98,9 @@ export function CameraRig({
 export function LightingRig({ shadows }: { shadows: boolean }) {
   return (
     <>
-      <ambientLight intensity={0.35} color="#8FA6D8" />
-      <hemisphereLight args={['#5B7BC0', '#0A0F1C', 0.6]} />
+      {/* The stage environment (PostFx.tsx) adds reflected light, so the fills stay low. */}
+      <ambientLight intensity={0.22} color="#8FA6D8" />
+      <hemisphereLight args={['#5B7BC0', '#0A0F1C', 0.45]} />
       <directionalLight
         position={[6, 14, 9]}
         intensity={1.6}

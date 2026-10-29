@@ -3,9 +3,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import type { ArenaDirector, DirectorEffect, FxTarget } from './director';
+import { DebrisLayer, Ribbon, SpriteLayer } from './fx/layers';
+import { DebrisPool, ParticlePool, type SpawnOptions } from './fx/pool';
 import {
   ALIEN_COLOR,
   CORRUPT_RED,
+  type QualityConfig,
   ROBOT_HOME,
   TEAM_COLORS,
   type TargetContext,
@@ -14,22 +17,11 @@ import {
 
 export interface EffectsProps {
   director: ArenaDirector;
-  maxParticles: number;
+  /** Pool sizes for this quality level. */
+  budget: QualityConfig['fx'];
   reducedMotion: boolean;
   /** Current enemies/telegraphs, read at render time to place effects. */
   targets: () => TargetContext;
-}
-
-interface Particle {
-  alive: boolean;
-  p: THREE.Vector3;
-  v: THREE.Vector3;
-  life: number;
-  maxLife: number;
-  color: THREE.Color;
-  gravity: number;
-  swirl: number;
-  center: THREE.Vector3;
 }
 
 interface Transient {
@@ -78,142 +70,87 @@ function seeded(seed: number): () => number {
   };
 }
 
+// Colours are linear (THREE.Color converts from sRGB hex), as the shaders expect.
+const WHITE = new THREE.Color('#FFFFFF');
+const HOT = new THREE.Color('#FFD9A0');
+const FIRE = new THREE.Color('#FF8A3D');
+const EMBER = new THREE.Color('#FFB547');
+const SMOKE = new THREE.Color('#1B1A24');
+const DUST = new THREE.Color('#2C3446');
+const HEAL = new THREE.Color('#7DFFB2');
+const GOLD = new THREE.Color('#FFE27A');
+const RED = new THREE.Color(CORRUPT_RED);
+const VIOLET = new THREE.Color(ALIEN_COLOR);
+const TEAM = {
+  RAIJIN: new THREE.Color(TEAM_COLORS.RAIJIN),
+  FUJIN: new THREE.Color(TEAM_COLORS.FUJIN),
+};
+
+interface ImpactLight {
+  light: THREE.PointLight | null;
+  peak: number;
+}
+
 /**
- * Particle sparks, shockwave rings, lightning bolts, wind vortices, enemy
- * beams and auras. Purely cosmetic; driven by director effect events whose
- * targets (city, enemy, robot, reserve) are resolved to positions every frame.
+ * Sparks, fire, smoke, debris, impact lights, lightning and beam ribbons,
+ * shockwave rings, shield domes and wind vortices. Purely cosmetic; driven by
+ * director effect events whose targets (city, enemy, robot, reserve) are
+ * resolved to positions every frame. The clock follows the director's scale,
+ * so a hit-stop freezes the sparks mid-air too.
  */
-export function Effects({ director, maxParticles, reducedMotion, targets }: EffectsProps) {
+export function Effects({ director, budget, reducedMotion, targets }: EffectsProps) {
   const where = (t: FxTarget | null) => resolveFxTarget(t, targets());
-  const particles = useMemo<Particle[]>(
-    () =>
-      Array.from({ length: maxParticles }, () => ({
-        alive: false,
-        p: new THREE.Vector3(),
-        v: new THREE.Vector3(),
-        life: 0,
-        maxLife: 1,
-        color: new THREE.Color(),
-        gravity: 0,
-        swirl: 0,
-        center: new THREE.Vector3(),
-      })),
-    [maxParticles],
+  const glow = useMemo(() => new ParticlePool(budget.glow), [budget.glow]);
+  const smoke = useMemo(() => new ParticlePool(budget.smoke), [budget.smoke]);
+  const debris = useMemo(() => new DebrisPool(budget.debris), [budget.debris]);
+  const lights = useRef<ImpactLight[]>([]);
+  lights.current = Array.from(
+    { length: budget.lights },
+    (_, i) => lights.current[i] ?? { light: null, peak: 0 },
   );
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(maxParticles * 3), 3));
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(maxParticles * 3), 3));
-    return g;
-  }, [maxParticles]);
-  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const transients = useRef<Transient[]>([]);
   const ringRefs = useRef<Array<THREE.Mesh | null>>([]);
-  const bolts = useMemo(
-    () =>
-      Array.from({ length: 9 }, (_, i) => {
-        const line = new THREE.Line(
-          new THREE.BufferGeometry(),
-          new THREE.LineBasicMaterial({
-            color: i % 3 === 0 ? '#FFF4D6' : TEAM_COLORS.RAIJIN,
-            transparent: true,
-            opacity: 0,
-            blending: THREE.AdditiveBlending,
-          }),
-        );
-        line.visible = false;
-        line.frustumCulled = false;
-        return line;
-      }),
-    [],
-  );
-  useEffect(
-    () => () => {
-      for (const l of bolts) {
-        l.geometry.dispose();
-        (l.material as THREE.Material).dispose();
-      }
-    },
-    [bolts],
-  );
-  const beams = useMemo(
-    () =>
-      Array.from({ length: 10 }, () => {
-        const line = new THREE.Line(
-          new THREE.BufferGeometry(),
-          new THREE.LineBasicMaterial({
-            color: CORRUPT_RED,
-            transparent: true,
-            opacity: 0,
-            blending: THREE.AdditiveBlending,
-          }),
-        );
-        line.visible = false;
-        line.frustumCulled = false;
-        return line;
-      }),
-    [],
-  );
-  useEffect(
-    () => () => {
-      for (const l of beams) {
-        l.geometry.dispose();
-        (l.material as THREE.Material).dispose();
-      }
-    },
-    [beams],
-  );
   const domeRefs = useRef<Array<THREE.Mesh | null>>([]);
   const vortexRefs = useRef<Array<THREE.Mesh | null>>([]);
-  const next = useRef(0);
+  // Lightning: a wide core and two thinner branches per bolt (3 bolts at once).
+  const bolts = useMemo(
+    () =>
+      Array.from({ length: 9 }, (_, i) =>
+        i % 3 === 0
+          ? new Ribbon(17, TEAM_COLORS.RAIJIN, '#FFF4D6', 2.4)
+          : new Ribbon(17, TEAM_COLORS.RAIJIN, '#FFE2B0', 1.6),
+      ),
+    [],
+  );
+  const beams = useMemo(
+    () => Array.from({ length: 10 }, () => new Ribbon(9, CORRUPT_RED, '#FFC2CE', 2)),
+    [],
+  );
+  useEffect(
+    () => () => {
+      for (const r of [...bolts, ...beams]) r.dispose();
+    },
+    [bolts, beams],
+  );
 
-  const spawn = (
-    count: number,
-    origin: THREE.Vector3,
-    color: string,
-    speed: number,
-    life: number,
-    opts: {
-      gravity?: number;
-      swirl?: number;
-      spread?: number;
-      up?: number;
-      toward?: THREE.Vector3;
-    } = {},
-  ) => {
-    const c = new THREE.Color(color);
-    const n = reducedMotion ? Math.ceil(count / 3) : count;
-    for (let i = 0; i < n; i++) {
-      // The pool shrinks when the quality steps down: wrap the cursor to it.
-      const pt = particles[next.current % particles.length]!;
-      next.current = (next.current + 1) % particles.length;
-      pt.alive = true;
-      pt.p.copy(origin);
-      const spread = opts.spread ?? 1;
-      pt.v
-        .set(
-          (Math.random() - 0.5) * 2 * spread,
-          Math.random() * (opts.up ?? 1),
-          (Math.random() - 0.5) * 2 * spread,
-        )
-        .normalize()
-        .multiplyScalar(speed * (0.4 + Math.random() * 0.8));
-      if (opts.toward)
-        pt.v.add(
-          opts.toward
-            .clone()
-            .sub(origin)
-            .multiplyScalar(0.9 + Math.random() * 0.3),
-        );
-      pt.life = 0;
-      pt.maxLife = life * (0.6 + Math.random() * 0.6);
-      pt.color.copy(c).offsetHSL(0, 0, (Math.random() - 0.3) * 0.25);
-      pt.gravity = opts.gravity ?? -6;
-      pt.swirl = opts.swirl ?? 0;
-      pt.center.copy(origin);
-    }
+  // Fewer, calmer particles with reduced motion.
+  const amount = reducedMotion ? 0.35 : 1;
+  const spark = (o: SpawnOptions, pool: ParticlePool = glow) =>
+    pool.spawn({ ...o, count: Math.ceil(o.count * amount) });
+  const light = (at: THREE.Vector3, color: THREE.Color, peak: number) => {
+    const slot = lights.current.reduce<ImpactLight | null>(
+      (best, l) => (!best || (l.light?.intensity ?? 0) < (best.light?.intensity ?? 0) ? l : best),
+      null,
+    );
+    if (!slot?.light) return;
+    slot.light.position.copy(at);
+    slot.light.color.copy(color);
+    slot.light.intensity = peak * (reducedMotion ? 0.5 : 1);
   };
+  /** A hot core that blooms for a moment at the point of impact (local, not full-screen). */
+  const flare = (at: THREE.Vector3, color: THREE.Color, size: number, life = 0.16) =>
+    glow.spawn({ count: 1, origin: at, color, intensity: 2.6, speed: 0, life, size, gravity: 0 });
 
   useEffect(
     () =>
@@ -231,147 +168,363 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
           });
         const to = where(e.to);
         const from = where(e.from);
+        const k = e.intensity;
+        const team = e.teamId ? TEAM[e.teamId] : RED;
         switch (e.kind) {
           case 'impact':
-            if (to) {
-              spawn(Math.round(14 * e.intensity), to, '#FFFFFF', 7, 0.45, { gravity: -8 });
-              spawn(
-                Math.round(18 * e.intensity),
-                to,
-                e.teamId ? TEAM_COLORS[e.teamId] : CORRUPT_RED,
-                6,
-                0.6,
-                { gravity: -6 },
-              );
-            }
+            if (!to) break;
+            flare(to, WHITE, 0.9 * k);
+            spark({
+              count: 12 * k,
+              origin: to,
+              color: WHITE,
+              intensity: 3,
+              speed: 10,
+              life: 0.35,
+              size: 0.07,
+              gravity: -9,
+              drag: 1.5,
+              stretch: 0.045,
+            });
+            spark({
+              count: 16 * k,
+              origin: to,
+              color: team,
+              intensity: 2.2,
+              speed: 6,
+              life: 0.6,
+              size: 0.1,
+              gravity: -7,
+              stretch: 0.03,
+            });
+            spark(
+              {
+                count: 2,
+                origin: to,
+                color: SMOKE,
+                speed: 0.8,
+                life: 1.3,
+                size: 0.9,
+                gravity: 0.6,
+                drag: 1.2,
+              },
+              smoke,
+            );
+            light(to, team, 14 * k);
             break;
           case 'sparks':
-          case 'explosion':
-            if (to) {
-              const k = e.kind === 'explosion' ? 1.4 : 1;
-              spawn(Math.round(90 * e.intensity * k), to, '#FFFFFF', 9, 0.9, { gravity: -9 });
-              spawn(Math.round(60 * e.intensity * k), to, ALIEN_COLOR, 7, 1.0, { gravity: -7 });
-              spawn(Math.round(40 * e.intensity * k), to, TEAM_COLORS.RAIJIN, 7, 1.0, {
-                gravity: -7,
-              });
-              add(0.9);
-            }
+          case 'explosion': {
+            if (!to) break;
+            const big = e.kind === 'explosion' ? k : k * 0.6;
+            flare(to, HOT, 2.6 * big, 0.22);
+            // Fireball: fat orange blobs that expand and slow down fast.
+            spark({
+              count: 22 * big,
+              origin: to,
+              color: FIRE,
+              intensity: 2.4,
+              speed: 4,
+              life: 0.7,
+              size: 0.55,
+              gravity: 1.5,
+              drag: 3,
+              jitter: 0.3,
+            });
+            spark({
+              count: 46 * big,
+              origin: to,
+              color: WHITE,
+              intensity: 2.8,
+              speed: 13,
+              life: 0.8,
+              size: 0.06,
+              gravity: -9,
+              stretch: 0.05,
+            });
+            spark({
+              count: 26 * big,
+              origin: to,
+              color: VIOLET,
+              intensity: 2,
+              speed: 8,
+              life: 0.9,
+              size: 0.09,
+              gravity: -6,
+              stretch: 0.035,
+            });
+            // Embers drift up long after the blast.
+            spark({
+              count: 18 * big,
+              origin: to,
+              color: EMBER,
+              intensity: 1.8,
+              speed: 2.2,
+              life: 2.4,
+              size: 0.05,
+              gravity: 1.1,
+              drag: 0.6,
+              jitter: 0.4,
+            });
+            spark(
+              {
+                count: 9 * big,
+                origin: to,
+                color: SMOKE,
+                speed: 1.6,
+                life: 2.6,
+                size: 1.5,
+                gravity: 0.8,
+                drag: 1.5,
+                jitter: 0.4,
+              },
+              smoke,
+            );
+            debris.spawn({
+              count: Math.round(10 * big * amount),
+              origin: to,
+              speed: 7,
+              life: 2.4,
+              size: 0.22,
+            });
+            light(to, HOT, 55 * big);
+            add(0.9);
             break;
+          }
           case 'cityBlast':
-            if (to) {
-              spawn(Math.round(80 * e.intensity), to, CORRUPT_RED, 5, 1.2, { gravity: -2, up: 2 });
-              spawn(Math.round(40 * e.intensity), to, '#555B6E', 2, 2.0, { gravity: 1, up: 2 });
-              add(1.2);
-            }
+            if (!to) break;
+            // The hologram city shatters into red shards.
+            flare(to, RED, 1.6 * k, 0.2);
+            spark({
+              count: 50 * k,
+              origin: to,
+              color: RED,
+              intensity: 2.6,
+              speed: 5.5,
+              life: 1.1,
+              size: 0.08,
+              gravity: -3,
+              up: 2,
+              stretch: 0.05,
+            });
+            spark(
+              {
+                count: 6 * k,
+                origin: to,
+                color: SMOKE,
+                speed: 1.2,
+                life: 2.4,
+                size: 1.2,
+                gravity: 0.9,
+                up: 2,
+              },
+              smoke,
+            );
+            light(to, RED, 30 * k);
+            add(1.2);
             break;
           case 'beam':
             add(0.7);
-            if (to)
-              spawn(Math.round(40 * e.intensity), to, CORRUPT_RED, 5, 0.8, {
+            if (to) {
+              spark({
+                count: 26 * k,
+                origin: to,
+                color: RED,
+                intensity: 2.2,
+                speed: 5,
+                life: 0.7,
+                size: 0.08,
                 gravity: -3,
                 up: 1.5,
+                stretch: 0.04,
               });
+              light(to, RED, 10 * k);
+            }
             break;
           case 'shield':
             add(0.9);
-            if (to)
-              spawn(Math.round(24 * e.intensity), to, TEAM_COLORS.FUJIN, 3, 0.9, {
+            if (to) {
+              flare(to, TEAM.FUJIN, 1.2, 0.25);
+              spark({
+                count: 24 * k,
+                origin: to,
+                color: TEAM.FUJIN,
+                intensity: 1.8,
+                speed: 3,
+                life: 0.9,
+                size: 0.08,
                 gravity: 0.5,
                 swirl: 5,
               });
+            }
             break;
           case 'energy':
             if (from && to)
-              spawn(
-                Math.round(36 * e.intensity),
-                from,
-                e.teamId ? TEAM_COLORS[e.teamId] : '#FFE27A',
-                0.8,
-                1.1,
-                { gravity: 0, toward: to, spread: 0.3 },
-              );
+              spark({
+                count: 36 * k,
+                origin: from,
+                color: e.teamId ? team : GOLD,
+                intensity: 2,
+                speed: 0.6,
+                life: 1.0,
+                size: 0.09,
+                gravity: 0,
+                drag: 0,
+                toward: to,
+                spread: 0.3,
+                stretch: 0.03,
+              });
             break;
           case 'repair':
-            if (to)
-              spawn(Math.round(30 * e.intensity), to, '#7DFFB2', 2, 1.2, {
+            if (to) {
+              spark({
+                count: 24 * k,
+                origin: to,
+                color: HEAL,
+                intensity: 1.6,
+                speed: 2,
+                life: 1.2,
+                size: 0.08,
                 gravity: 1.5,
                 spread: 0.6,
                 up: 2,
               });
+              spark({
+                count: 8 * k,
+                origin: to,
+                color: WHITE,
+                intensity: 2,
+                speed: 1.2,
+                life: 0.6,
+                size: 0.05,
+                gravity: 0.5,
+                jitter: 0.5,
+              });
+            }
             break;
           case 'shockwave':
           case 'syncPulse':
             add(0.9);
+            // A ground shockwave kicks up dust around the feet.
+            if (e.kind === 'shockwave' && e.to?.kind === 'robot')
+              spark(
+                {
+                  count: 14 * k,
+                  origin: robotPos(e.to.id).setY(0.2),
+                  color: DUST,
+                  speed: 3.5,
+                  life: 1.4,
+                  size: 1,
+                  gravity: 0.2,
+                  drag: 2,
+                  spread: 1,
+                  up: 0.15,
+                },
+                smoke,
+              );
             break;
           case 'lightning':
             add(reducedMotion ? 0.25 : 0.45);
-            if (to) spawn(40, to, TEAM_COLORS.RAIJIN, 6, 0.6);
+            if (to) {
+              flare(to, WHITE, 1.1, 0.14);
+              spark({
+                count: 30,
+                origin: to,
+                color: TEAM.RAIJIN,
+                intensity: 2.6,
+                speed: 7,
+                life: 0.6,
+                size: 0.07,
+                stretch: 0.04,
+              });
+              light(to, TEAM.RAIJIN, 26 * k);
+            }
             break;
           case 'wind':
             add(1.0);
-            if (to) spawn(50, to, TEAM_COLORS.FUJIN, 3, 1.2, { gravity: 0.5, swirl: 6 });
+            if (to)
+              spark({
+                count: 50,
+                origin: to,
+                color: TEAM.FUJIN,
+                intensity: 1.5,
+                speed: 3,
+                life: 1.2,
+                size: 0.07,
+                gravity: 0.5,
+                swirl: 6,
+                stretch: 0.05,
+              });
             break;
           case 'chargeAura':
             add(1.2);
             if (e.teamId)
-              spawn(30, robotPos(e.teamId).setY(0.3), TEAM_COLORS[e.teamId], 2.5, 1.3, {
+              spark({
+                count: 30,
+                origin: robotPos(e.teamId).setY(0.3),
+                color: team,
+                intensity: 1.6 * Math.max(0.5, k),
+                speed: 2.5,
+                life: 1.3,
+                size: 0.07,
                 gravity: 2.5,
                 spread: 0.4,
                 up: 3,
+                stretch: 0.03,
               });
             break;
           case 'specialStorm':
-            add(2.8 * Math.max(0.5, e.intensity));
+            add(2.8 * Math.max(0.5, k));
             if (e.teamId === 'FUJIN') {
-              spawn(160, robotPos('FUJIN').setY(0.5), TEAM_COLORS.FUJIN, 4, 2.4, {
+              spark({
+                count: 160,
+                origin: robotPos('FUJIN').setY(0.5),
+                color: TEAM.FUJIN,
+                intensity: 2,
+                speed: 4,
+                life: 2.4,
+                size: 0.08,
                 gravity: 3,
                 swirl: 9,
                 spread: 0.6,
+                stretch: 0.05,
               });
+              light(robotPos('FUJIN'), TEAM.FUJIN, 40 * k);
             } else if (e.teamId === 'RAIJIN') {
-              spawn(160, robotPos('RAIJIN').setY(3.5), TEAM_COLORS.RAIJIN, 7, 1.8, { gravity: -5 });
+              spark({
+                count: 160,
+                origin: robotPos('RAIJIN').setY(3.5),
+                color: TEAM.RAIJIN,
+                intensity: 2.4,
+                speed: 7,
+                life: 1.8,
+                size: 0.07,
+                gravity: -5,
+                stretch: 0.05,
+              });
+              light(robotPos('RAIJIN'), TEAM.RAIJIN, 40 * k);
             }
             break;
           default:
             break;
         }
       }),
-    // spawn closes over refs only
+    // spark/light/flare close over refs and pools only
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [director, particles, reducedMotion],
+    [director, glow, smoke, debris, reducedMotion],
   );
 
-  useFrame((_, dtRaw) => {
-    const dt = Math.min(dtRaw, 0.05);
-    const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
-    const col = geometry.getAttribute('color') as THREE.BufferAttribute;
-    for (let i = 0; i < particles.length; i++) {
-      const pt = particles[i]!;
-      if (pt.alive) {
-        pt.life += dt;
-        if (pt.life >= pt.maxLife) pt.alive = false;
-      }
-      if (!pt.alive) {
-        pos.setXYZ(i, 0, -100, 0);
-        col.setXYZ(i, 0, 0, 0);
-        continue;
-      }
-      if (pt.swirl) {
-        const dx = pt.p.x - pt.center.x;
-        const dz = pt.p.z - pt.center.z;
-        pt.v.x += -dz * pt.swirl * dt;
-        pt.v.z += dx * pt.swirl * dt;
-      }
-      pt.v.y += pt.gravity * dt;
-      pt.v.multiplyScalar(1 - dt * 0.8);
-      pt.p.addScaledVector(pt.v, dt);
-      const fade = 1 - pt.life / pt.maxLife;
-      pos.setXYZ(i, pt.p.x, pt.p.y, pt.p.z);
-      col.setXYZ(i, pt.color.r * fade, pt.color.g * fade, pt.color.b * fade);
-    }
-    pos.needsUpdate = true;
-    col.needsUpdate = true;
+  useFrame((state, dtRaw) => {
+    // Follows hit-stop and slow motion; real time for the light falloff.
+    const real = Math.min(dtRaw, 0.05);
+    const dt = real * director.scale;
+    glow.step(dt);
+    smoke.step(dt);
+    debris.step(dt);
+    for (const l of lights.current)
+      if (l.light && l.light.intensity > 0)
+        l.light.intensity = l.light.intensity < 0.05 ? 0 : l.light.intensity * Math.exp(-real * 9);
 
+    const eye = state.camera.position;
     const t = director.time;
     transients.current = transients.current.filter((x) => t - x.start < x.duration);
     const rings = transients.current.filter(
@@ -393,28 +546,33 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
         m.position.set(p.x, 0.1 + u * 3.5, p.z);
         const s = 1.6 - u * 0.6;
         m.scale.set(s, s, s);
-        mat.color.set(x.kind === 'syncPulse' ? '#FFE27A' : TEAM_COLORS[x.teamId ?? 'RAIJIN']);
+        mat.color
+          .copy(x.kind === 'syncPulse' ? GOLD : TEAM[x.teamId ?? 'RAIJIN'])
+          .multiplyScalar(1.8);
       } else {
         const p = where(x.to) ?? new THREE.Vector3(0, 0.08, 0.6);
-        m.position.set(p.x, x.kind === 'cityBlast' ? p.y : 0.08, p.z);
+        m.position.set(p.x, x.kind === 'cityBlast' || x.to?.kind === 'enemy' ? p.y : 0.08, p.z);
         const s = 0.5 + u * (x.kind === 'cityBlast' ? 3 : 9) * x.intensity;
         m.scale.set(s, s, s);
-        mat.color.set(x.kind === 'cityBlast' ? CORRUPT_RED : '#FFFFFF');
+        mat.color.copy(x.kind === 'cityBlast' ? RED : WHITE).multiplyScalar(1.8);
       }
       mat.opacity = (1 - u) * 0.8;
     });
 
     const beamFx = transients.current.filter((x) => x.kind === 'beam');
-    beams.forEach((line, i) => {
+    beams.forEach((ribbon, i) => {
       const x = beamFx[i];
       const a = x ? where(x.from) : null;
       const b2 = x ? where(x.to) : null;
-      line.visible = !!(x && a && b2);
-      if (!x || !a || !b2) return;
+      if (!x || !a || !b2) return ribbon.hide();
       const age = t - x.start;
       const rng = seeded(x.seed + (reducedMotion ? 0 : Math.floor(age * 6)) * 31);
-      line.geometry.setFromPoints(boltPoints(a, b2, rng, 8, 0.15));
-      (line.material as THREE.LineBasicMaterial).opacity = (1 - age / x.duration) * x.intensity;
+      ribbon.set(
+        boltPoints(a, b2, rng, 8, 0.15),
+        eye,
+        0.16 * x.intensity,
+        (1 - age / x.duration) * x.intensity,
+      );
     });
 
     const domes = transients.current.filter((x) => x.kind === 'shield');
@@ -434,10 +592,9 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
     const boltFx = transients.current.filter(
       (x) => x.kind === 'lightning' || (x.kind === 'specialStorm' && x.teamId === 'RAIJIN'),
     );
-    bolts.forEach((line, i) => {
+    bolts.forEach((ribbon, i) => {
       const x = boltFx[Math.floor(i / 3)];
-      line.visible = !!x;
-      if (!x) return;
+      if (!x) return ribbon.hide();
       const age = t - x.start;
       // Re-jag at most ~8 times/s; reduced motion keeps a single static bolt.
       const frame = reducedMotion ? 0 : Math.floor(age * 8);
@@ -452,10 +609,13 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
         : target
             .clone()
             .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
-      const pts = boltPoints(from, target, rng, 16, 0.7);
-      line.geometry.setFromPoints(pts);
-      const mat = line.material as THREE.LineBasicMaterial;
-      mat.opacity = (1 - age / x.duration) * (i % 3 === 0 ? 1 : 0.6);
+      const core = i % 3 === 0;
+      ribbon.set(
+        boltPoints(from, target, rng, 16, core ? 0.7 : 0.9),
+        eye,
+        (core ? 0.26 : 0.1) * Math.max(0.6, x.intensity),
+        (1 - age / x.duration) * (core ? 1 : 0.6),
+      );
     });
 
     const vortices = transients.current.filter(
@@ -477,18 +637,21 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
     });
   });
 
+  const fujinGlow = useMemo(() => TEAM.FUJIN.clone().multiplyScalar(1.6), []);
   return (
     <group name="effects">
-      <points geometry={geometry} frustumCulled={false}>
-        <pointsMaterial
-          size={0.14}
-          vertexColors
-          transparent
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          sizeAttenuation
+      <SpriteLayer pool={smoke} mode="smoke" />
+      <SpriteLayer pool={glow} mode="glow" />
+      <DebrisLayer pool={debris} />
+      {lights.current.map((l, i) => (
+        <pointLight
+          key={`impact-light-${i}`}
+          ref={(o) => void (l.light = o)}
+          intensity={0}
+          distance={16}
+          decay={2}
         />
-      </points>
+      ))}
       {Array.from({ length: 6 }, (_, i) => (
         <mesh
           key={`ring-${i}`}
@@ -506,17 +669,17 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
           />
         </mesh>
       ))}
-      {bolts.map((l, i) => (
-        <primitive key={`bolt-${i}`} object={l} />
+      {bolts.map((r, i) => (
+        <primitive key={`bolt-${i}`} object={r.mesh} />
       ))}
-      {beams.map((l, i) => (
-        <primitive key={`beam-${i}`} object={l} />
+      {beams.map((r, i) => (
+        <primitive key={`beam-${i}`} object={r.mesh} />
       ))}
       {Array.from({ length: 6 }, (_, i) => (
         <mesh key={`dome-${i}`} ref={(m) => void (domeRefs.current[i] = m)} visible={false}>
           <sphereGeometry args={[1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
           <meshBasicMaterial
-            color={TEAM_COLORS.FUJIN}
+            color={fujinGlow}
             transparent
             opacity={0}
             wireframe
@@ -529,7 +692,7 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
         <mesh key={`vortex-${i}`} ref={(m) => void (vortexRefs.current[i] = m)} visible={false}>
           <torusGeometry args={[1, 0.05, 6, 48, Math.PI * 1.5]} />
           <meshBasicMaterial
-            color={TEAM_COLORS.FUJIN}
+            color={fujinGlow}
             transparent
             opacity={0}
             depthWrite={false}

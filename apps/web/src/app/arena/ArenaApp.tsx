@@ -8,7 +8,7 @@ import {
   type FrameStats,
   QualityGovernor,
   SfxEngine,
-  type SfxName,
+  connectDirectorAudio,
   cueFromEvent,
 } from '@sats-wars/three-game';
 import { raidView } from '@sats-wars/ui';
@@ -81,17 +81,16 @@ export function ArenaApp() {
     };
     sfx.setVolume(settings.volume);
     sfx.setMuted(settings.muted);
+    sfx.setMusicEnabled(settings.music);
     document.documentElement.classList.toggle('sw-reduced-motion', settings.reducedMotion);
   }, [settings, director, sfx]);
 
   useEffect(() => {
     const offBanner = director.onBanner((b) => setBanner(b));
-    const offSound = director.onSound((name) => {
-      sfx.play(name as SfxName);
-    });
+    const offAudio = connectDirectorAudio(director, sfx);
     return () => {
       offBanner();
-      offSound();
+      offAudio();
     };
   }, [director, sfx]);
 

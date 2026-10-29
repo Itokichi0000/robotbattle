@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
 import { REGION_CENTROIDS } from '@sats-wars/shared';
-import type { CameraPresetName, FxTarget } from './director';
+import type { CameraPresetName, FxTarget, ShotName } from './director';
 
 /**
  * World layout of the arena (units ≈ metres; robots ~4 tall). RAIJIN and
@@ -113,6 +113,60 @@ export const CAMERA_PRESETS: Record<
   cockpit: { position: [0, -26, 9.5], target: [0, -29.3, -2.5] },
 };
 
+type Pose = { position: [number, number, number]; target: [number, number, number] };
+
+/**
+ * Cinematic moves (director shots): eased from `from` to `to` over `duration`
+ * director seconds, then held. `cityFall` is relative to the fallen city.
+ */
+export const CAMERA_SHOTS: Record<ShotName, { from: Pose; to: Pose; duration: number }> = {
+  // Low between the two gods, looking up as they power up.
+  specialRise: {
+    from: { position: [0, 0.9, 9.6], target: [0, 3.4, 0.6] },
+    to: { position: [0, 1.5, 8.2], target: [0, 4.6, 0] },
+    duration: 1.6,
+  },
+  // From behind the robots, pushing toward NULL CORE as the bolt and the wind fly.
+  specialLaunch: {
+    from: { position: [0, 3.2, 12.5], target: [0, 7.5, -12] },
+    to: { position: [0, 6, 4.5], target: [0, 12.5, -16] },
+    duration: 1.2,
+  },
+  bossImpact: {
+    from: { position: [6, 11, -5], target: [0, 14, -17] },
+    to: { position: [3.6, 12.2, -8.5], target: [0, 14.2, -17] },
+    duration: 1.8,
+  },
+  // A slow slide across the heroes after the blow.
+  heroes: {
+    from: { position: [-3, 2, 8], target: [0, 3, 0.4] },
+    to: { position: [3, 2.5, 9], target: [0, 3.3, 0.4] },
+    duration: 2,
+  },
+  bossReveal: {
+    from: { position: [0, 2.2, 10], target: [0, 8, -10] },
+    to: { position: [0, 9, 3], target: [0, 14.5, -17] },
+    duration: 3,
+  },
+  // Beside NULL CORE, looking down at the map as its beam answers.
+  bossGlare: {
+    from: { position: [5, 17, -10], target: [0, 6.4, -8.5] },
+    to: { position: [3, 15, -4.5], target: [0, 6.4, -8.5] },
+    duration: 2.2,
+  },
+  // Low on the stage, looking up as NULL CORE breaks apart.
+  bossDown: {
+    from: { position: [-6, 3.5, 7], target: [0, 13, -17] },
+    to: { position: [-3, 5.5, 3], target: [0, 14, -17] },
+    duration: 2.4,
+  },
+  cityFall: {
+    from: { position: [0, 3.8, 7], target: [0, 0, 0] },
+    to: { position: [0, 2.6, 4.6], target: [0, 0, 0] },
+    duration: 2,
+  },
+};
+
 /** The virtual cockpit bay sits under the stage (hidden by the floor from the arena cameras). */
 export const COCKPIT_POSITION = new THREE.Vector3(0, -30, 0);
 
@@ -128,11 +182,66 @@ export const TEAM_COLORS: Record<TeamId | 'NEUTRAL', string> = {
 
 export type Quality = 'low' | 'medium' | 'high';
 
-export const QUALITY_SETTINGS: Record<
-  Quality,
-  { dpr: [number, number]; shadows: boolean; particles: number; antialias: boolean; stars: number }
-> = {
-  low: { dpr: [0.75, 1], shadows: false, particles: 120, antialias: false, stars: 150 },
-  medium: { dpr: [1, 1.5], shadows: false, particles: 300, antialias: true, stars: 400 },
-  high: { dpr: [1, 2], shadows: true, particles: 600, antialias: true, stars: 800 },
+export interface QualityConfig {
+  dpr: [number, number];
+  shadows: boolean;
+  antialias: boolean;
+  stars: number;
+  /** Particle pools: glowing sprites (sparks, embers, flashes), smoke puffs, metal debris; pooled impact lights. */
+  fx: { glow: number; smoke: number; debris: number; lights: number };
+  /**
+   * Post-processing (bloom on emissive parts, vignette, flash and colour fringe
+   * on big moments). null = render straight to the screen (cheapest).
+   */
+  post: {
+    bloom: number;
+    radius: number;
+    threshold: number;
+    /** Bloom buffer size relative to the screen. */
+    bloomScale: number;
+    /** MSAA samples of the HDR buffer. */
+    samples: number;
+    aberration: boolean;
+  } | null;
+  /** Strength of the stage's reflected light on metal (procedural, no image files). */
+  envIntensity: number;
+}
+
+export const QUALITY_SETTINGS: Record<Quality, QualityConfig> = {
+  low: {
+    dpr: [0.75, 1],
+    shadows: false,
+    antialias: false,
+    stars: 150,
+    fx: { glow: 240, smoke: 0, debris: 0, lights: 0 },
+    post: null,
+    envIntensity: 0.35,
+  },
+  medium: {
+    dpr: [1, 1.5],
+    shadows: false,
+    antialias: true,
+    stars: 400,
+    fx: { glow: 700, smoke: 60, debris: 36, lights: 1 },
+    post: {
+      // Bloom passes bright pixels through at full value and the robots' glow
+      // parts run far above 1, so a little goes a long way.
+      bloom: 0.32,
+      radius: 0.3,
+      threshold: 1.1,
+      bloomScale: 0.5,
+      samples: 4,
+      aberration: false,
+    },
+    envIntensity: 0.45,
+  },
+  high: {
+    dpr: [1, 2],
+    shadows: true,
+    antialias: true,
+    stars: 800,
+    fx: { glow: 1600, smoke: 140, debris: 96, lights: 2 },
+    post: { bloom: 0.4, radius: 0.35, threshold: 1, bloomScale: 1, samples: 4, aberration: true },
+    envIntensity: 0.5,
+  },
 };

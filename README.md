@@ -48,7 +48,7 @@ Lightning ログインの体験：`AUTH_MODE=both` → `/auth/lightning` →「�
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `pnpm dev`                                                                               | 開発起動（ホットリロード、`.env` を読む）                                                |
 | `pnpm build` / `pnpm start`                                                              | 本番ビルド / 本番起動                                                                    |
-| `pnpm test`                                                                              | ユニット・統合テスト（vitest、128件）                                                    |
+| `pnpm test`                                                                              | ユニット・統合テスト（vitest、140件）                                                    |
 | `pnpm lint` / `pnpm typecheck`                                                           | ESLint / TypeScript                                                                      |
 | `pnpm e2e`                                                                               | Playwright E2E 14件（a11y 監査込み。サーバーとwebを自分で起動。既存の dev は止めてから） |
 | `pnpm solo`                                                                              | オフライン体験版（単一HTML）                                                             |
