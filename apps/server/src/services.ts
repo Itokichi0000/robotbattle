@@ -11,6 +11,7 @@ import type { PilotService } from './pilots/service';
 import type { RaidManager } from './raid/manager';
 import type { PilotActionService } from './raid/pilotActions';
 import type { ReplayService } from './raid/replay';
+import type { BackupService } from './ops/backup';
 
 export interface Services {
   env: Env;
@@ -23,6 +24,7 @@ export interface Services {
   lnurl: LnurlAuthService;
   bots: DemoBots;
   replays: ReplayService;
+  backups: BackupService;
   adminAuth: AdminAuth;
   adapter: PaymentAdapter;
   mono: MonoClock;

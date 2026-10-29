@@ -30,11 +30,11 @@ const TAG_ROTATE_S = 4;
 
 /** Seat slot → local position: four tiers of 5×5 in an arc facing the camera. */
 export function seatPosition(roleIndex: number, slot: number): THREE.Vector3 {
-  const angle = (roleIndex - 1.5) * 0.62;
+  const angle = (roleIndex - 1.5) * 0.5;
   const col = slot % COLS;
   const row = Math.floor(slot / COLS);
   const radius = 6.5 + row * 0.95;
-  const along = (col - (COLS - 1) / 2) * 0.82;
+  const along = (col - (COLS - 1) / 2) * 0.66;
   const x = Math.sin(angle) * radius + Math.cos(angle) * along;
   const z = -Math.cos(angle) * radius + Math.sin(angle) * along;
   return new THREE.Vector3(x, row * 0.42, z + 5);
@@ -188,12 +188,12 @@ export function CockpitBay({
         <circleGeometry args={[11, 48]} />
         <meshStandardMaterial color="#0A1220" />
       </mesh>
-      <mesh position={[-2.2, 4.2, -4]}>
-        <torusGeometry args={[1.1, 0.12, 12, 40]} />
+      <mesh position={[-1.6, 4.6, -7]}>
+        <torusGeometry args={[0.8, 0.09, 12, 40]} />
         <meshStandardMaterial color="#F7931A" emissive="#F7931A" emissiveIntensity={1.2} />
       </mesh>
-      <mesh position={[2.2, 4.2, -4]}>
-        <torusGeometry args={[1.1, 0.12, 12, 40]} />
+      <mesh position={[1.6, 4.6, -7]}>
+        <torusGeometry args={[0.8, 0.09, 12, 40]} />
         <meshStandardMaterial color="#25C8D7" emissive="#25C8D7" emissiveIntensity={1.2} />
       </mesh>
       <instancedMesh ref={seats} args={[undefined, undefined, max]} frustumCulled={false}>
@@ -214,7 +214,7 @@ export function CockpitBay({
       </instancedMesh>
       {inView &&
         ROLES.map((role, i) => {
-          const anchor = seatPosition(i, COLS * 4 + 2);
+          const anchor = seatPosition(i, 2);
           return (
             <Html
               key={role}

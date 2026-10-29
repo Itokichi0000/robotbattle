@@ -1,3 +1,4 @@
+import { dirname, join, resolve } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -5,7 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { GameConfig } from '@sats-wars/shared';
-import { AdminAuth } from './auth/admin';
+import { AdminAuth, parseAdminUsers } from './auth/admin';
 import { LnurlAuthService } from './auth/lnurl';
 import { SESSION_COOKIE, SessionService, readCookie } from './auth/sessions';
 import { extractBearer, sha256 } from './auth/tokens';
@@ -30,6 +31,7 @@ import { registerNostrRoutes } from './routes/nostr';
 import { registerPublicRoutes } from './routes/public';
 import { registerSpecAliases } from './routes/specAliases';
 import type { Services } from './services';
+import { BackupService } from './ops/backup';
 
 export interface BuildOptions {
   env: Env;
@@ -110,9 +112,29 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   const bots = new DemoBots(repo, manager, wall);
   const botCount = env.DEMO_BOTS || (env.DEMO_AUTOPILOT ? 6 : 0);
   if (botCount > 0) bots.setCount(botCount, 'env', env.DEMO_BOT_SKILL);
-  const adminAuth = new AdminAuth(env.ADMIN_PASSWORD, wall);
+  const adminAuth = new AdminAuth({
+    password: env.ADMIN_PASSWORD,
+    wall,
+    users: parseAdminUsers(env.ADMIN_USERS),
+    sharedLogin: env.ADMIN_SHARED_LOGIN !== 'false',
+    ...(env.ADMIN_TOTP_SECRET ? { sharedTotp: env.ADMIN_TOTP_SECRET } : {}),
+  });
   // Careers are written once per finished raid.
   manager.onRaidEnded((state) => pilots.recordRaid(state));
+  // A copy of the database after every raid and on a timer (not for :memory:).
+  const backups = new BackupService(db, {
+    dir: env.BACKUP_DIR || join(dirname(resolve(env.DATABASE_PATH)), 'backups'),
+    keep: env.BACKUP_KEEP,
+    now: () => wall.now(),
+    enabled: env.DATABASE_PATH !== ':memory:',
+  });
+  manager.onRaidEnded((state) => {
+    try {
+      backups.run(`raid-${state.result?.outcome ?? 'end'}`.toLowerCase());
+    } catch (err) {
+      app.log.error({ err }, 'backup after raid failed');
+    }
+  });
   // Name consent of pilots already aboard (after a restart).
   const applyCrewPolicies = () => {
     for (const id of Object.keys(manager.current().state.pilots)) {
@@ -132,6 +154,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     repo,
     manager,
     replays: new ReplayService(repo, () => wall.now()),
+    backups,
     sessions,
     pilots,
     passes,
@@ -149,7 +172,11 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   };
 
   await app.register(helmet, {
-    contentSecurityPolicy: false,
+    // JSON API: nothing may load or frame it (the SVG card route sets its own).
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"] },
+    },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
   await app.register(cors, {
@@ -264,6 +291,21 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     timers.push(setInterval(() => realtime.broadcastClock(), 2000));
     timers.push(setInterval(() => realtime.broadcastPresence(), 1000));
     timers.push(setInterval(() => void poll(), 2000));
+    if (env.BACKUP_INTERVAL_MINUTES > 0)
+      timers.push(
+        setInterval(() => {
+          try {
+            backups.run('scheduled');
+          } catch (err) {
+            app.log.error({ err }, 'scheduled backup failed');
+          }
+        }, env.BACKUP_INTERVAL_MINUTES * 60_000),
+      );
+    // Retention: drop sessions that expired more than RETENTION_DAYS ago (hourly).
+    const purge = () =>
+      repo.purgeExpiredSessions(wall.now() - env.RETENTION_DAYS * 24 * 60 * 60_000);
+    purge();
+    timers.push(setInterval(purge, 60 * 60_000));
   }
 
   return {

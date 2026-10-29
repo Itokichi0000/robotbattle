@@ -8,6 +8,7 @@ import {
   arenaDisplaySchema,
   nextRaidSettingsSchema,
 } from '@sats-wars/shared';
+import { type AdminRole, roleAllows } from '../auth/admin';
 import { extractBearer } from '../auth/tokens';
 import { AppError } from '../errors';
 import { ADMIN_LIFECYCLE_COMMANDS } from '../raid/manager';
@@ -91,12 +92,21 @@ export function registerAdminRoutes(
 ): void {
   const { manager, passes, repo, adminAuth, bots, wall, env, pilots } = services;
 
-  const requireAdmin = (req: FastifyRequest): string => {
+  /**
+   * Role check on every admin route: viewer reads, operator runs the event,
+   * owner changes money and rules (payment integration, next config, credits).
+   */
+  const requireAdmin = (req: FastifyRequest, need: AdminRole = 'operator'): string => {
     const origin = req.headers.origin;
     if (origin && !deps.isAllowedOrigin(origin))
       throw new AppError('FORBIDDEN', 'origin not allowed');
     const session = adminAuth.verify(extractBearer(req.headers.authorization));
     if (!session) throw new AppError('UNAUTHORIZED', 'admin login required');
+    if (!roleAllows(session.role, need))
+      throw new AppError(
+        'FORBIDDEN',
+        `この操作には ${need} 権限が必要です / ${need} role required`,
+      );
     return session.actor;
   };
 
@@ -107,17 +117,35 @@ export function registerAdminRoutes(
       const origin = req.headers.origin;
       if (origin && !deps.isAllowedOrigin(origin))
         throw new AppError('FORBIDDEN', 'origin not allowed');
-      const { password } = z.object({ password: z.string().min(1).max(256) }).parse(req.body ?? {});
-      const token = adminAuth.login(password);
+      const body = z
+        .object({
+          username: z.string().max(32).optional(),
+          password: z.string().min(1).max(256),
+          otp: z.string().max(10).optional(),
+        })
+        .parse(req.body ?? {});
+      const r = adminAuth.login(body);
       repo.audit(
-        'admin',
-        token ? 'LOGIN' : 'LOGIN_FAILED',
+        r.ok ? r.actor : body.username ? `admin:${body.username.slice(0, 32)}` : 'admin',
+        r.ok ? 'LOGIN' : `LOGIN_FAILED_${r.reason}`,
         null,
         { ip: req.ip.replace(/\d+$/, 'x') },
         wall.now(),
       );
-      if (!token) throw new AppError('UNAUTHORIZED', 'パスワードが違います / Wrong password');
-      return { token };
+      if (!r.ok) {
+        if (r.reason === 'OTP_REQUIRED')
+          throw new AppError(
+            'OTP_REQUIRED',
+            '確認コード（6桁）を入力してください / Enter your 6-digit code',
+          );
+        if (r.reason === 'SHARED_LOGIN_DISABLED')
+          throw new AppError(
+            'UNAUTHORIZED',
+            '個別アカウントでログインしてください / Use your own account',
+          );
+        throw new AppError('UNAUTHORIZED', 'ログインできません / Wrong credentials');
+      }
+      return { token: r.token, role: r.role, actor: r.actor };
     },
   );
 
@@ -127,7 +155,8 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/admin/overview', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
+    const me = adminAuth.verify(extractBearer(req.headers.authorization))!;
     const rt = manager.current();
     const s = rt.state;
     const roles = Object.fromEntries(
@@ -168,11 +197,17 @@ export function registerAdminRoutes(
       },
       nextConfig: manager.nextConfig,
       broadcastTemplates: BROADCAST_TEMPLATES,
+      me: { actor: me.actor, role: me.role },
     };
   });
 
   app.post('/api/admin/command', async (req) => {
-    const actor = requireAdmin(req);
+    const raw = (req.body ?? {}) as { command?: string };
+    // Payment integration is the owner's call; everything else runs the event.
+    const actor = requireAdmin(
+      req,
+      raw.command === 'SET_PAYMENT_INTEGRATION' ? 'owner' : 'operator',
+    );
     const cmd = commandSchema.parse(req.body ?? {});
     switch (cmd.command) {
       case 'SET_PAYMENTS_ENABLED':
@@ -258,19 +293,19 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/admin/next-config', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     return { config: manager.nextConfig };
   });
 
   app.put('/api/admin/next-config', async (req) => {
-    const actor = requireAdmin(req);
+    const actor = requireAdmin(req, 'owner');
     const body = z.object({ config: z.unknown() }).parse(req.body ?? {});
     return { config: manager.setNextConfig(body.config, actor) };
   });
 
   /** Next raid setup (spec E4): difficulty version, price, capacity, event, venue, language. */
   app.put('/api/admin/next-raid', async (req) => {
-    const actor = requireAdmin(req);
+    const actor = requireAdmin(req, 'owner');
     const body = nextRaidSettingsSchema.parse(req.body ?? {});
     const out = manager.setNextRaid(body, actor);
     deps.onSettingsChanged();
@@ -278,7 +313,7 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/admin/pilots', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     const s = manager.current().state;
     return {
       pilots: repo.listPilots(300).map((p) => ({
@@ -312,7 +347,7 @@ export function registerAdminRoutes(
 
   /** Manual pass credit (e.g. paid but could not board). Reason required, audit-logged. */
   app.post('/api/admin/pilots/:id/pass-credit', async (req) => {
-    const actor = requireAdmin(req);
+    const actor = requireAdmin(req, 'owner');
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
     const body = z
       .object({ delta: z.number().int().min(-10).max(10), note: z.string().min(3).max(300) })
@@ -331,7 +366,7 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/admin/invoices', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     return {
       invoices: repo.listInvoices(200).map((i) => ({
         id: i.id,
@@ -386,7 +421,7 @@ export function registerAdminRoutes(
   });
 
   app.get('/api/admin/sponsored-passes', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     return {
       passes: repo.listSponsoredPasses(300).map((p) => ({
         idPrefix: p.id_hash.slice(0, 10),
@@ -410,13 +445,32 @@ export function registerAdminRoutes(
     return { ok };
   });
 
+  /** Database copies (owner): list, and make one now (e.g. before the venue closes). */
+  app.get('/api/admin/backups', async (req) => {
+    requireAdmin(req, 'owner');
+    return {
+      enabled: services.backups.enabled,
+      backups: services.backups.list().map((b) => ({
+        file: b.file.split(/[\\/]/).pop(),
+        bytes: b.bytes,
+        createdAt: b.createdAt,
+      })),
+    };
+  });
+  app.post('/api/admin/backups', async (req) => {
+    const actor = requireAdmin(req, 'owner');
+    const b = services.backups.run('manual');
+    repo.audit(actor, 'BACKUP', null, { file: b?.file.split(/[\\/]/).pop() ?? null }, wall.now());
+    return { backup: b ? { file: b.file.split(/[\\/]/).pop(), bytes: b.bytes } : null };
+  });
+
   app.get('/api/admin/audit', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     return { entries: repo.listAudit(200) };
   });
 
   app.get('/api/admin/events', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     const { afterSeq } = z
       .object({ afterSeq: z.coerce.number().int().min(0).default(0) })
       .parse(req.query);

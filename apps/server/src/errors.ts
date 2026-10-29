@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'NOT_MOCK_MODE'
   | 'INVALID_COMMAND'
   | 'CONFLICT'
+  | 'OTP_REQUIRED'
   | 'INTERNAL';
 
 const STATUS: Record<ErrorCode, number> = {
@@ -32,6 +33,7 @@ const STATUS: Record<ErrorCode, number> = {
   NOT_MOCK_MODE: 404,
   INVALID_COMMAND: 409,
   CONFLICT: 409,
+  OTP_REQUIRED: 401,
   INTERNAL: 500,
 };
 

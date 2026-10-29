@@ -112,7 +112,11 @@ export function passportCardSvg(c: PassportCardInput): string {
   const { width: W, height: H } = PASSPORT_CARD_SIZE;
   const ja = c.locale === 'ja';
   const bg = pick(c.equipped, 'LICENSE_BG');
-  const name = esc(c.name.slice(0, 24));
+  const rawName = c.name.slice(0, 24);
+  const name = esc(rawName);
+  // Fit the name into ~440 px left of the emblems (wide glyphs ≈ 1 em, latin ≈ 0.62 em).
+  const ems = [...rawName].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? 1 : 0.62), 0);
+  const nameSize = Math.max(34, Math.min(76, Math.floor(440 / Math.max(1, ems))));
   const titles = c.titles.slice(0, 4).map((t) => esc(t.slice(0, 18)));
   const stat = (x: number, label: string, value: string) =>
     `<g transform="translate(${x} 0)"><text x="0" y="0" font-size="22" fill="#9FB7C9">${esc(label)}</text><text x="0" y="52" font-size="48" font-weight="900" fill="#EFF5FF">${esc(value)}</text></g>`;
@@ -130,8 +134,8 @@ export function passportCardSvg(c: PassportCardInput): string {
     pattern(bg.id, bg.accent),
     `<rect x="12" y="12" width="${W - 24}" height="${H - 24}" rx="28" fill="none" stroke="${bg.accent}" stroke-opacity="0.6" stroke-width="4"/>`,
     bust(c.equipped),
-    `<text x="520" y="92" font-size="22" letter-spacing="6" fill="#9FB7C9">SATS WARS · EARTH DEFENSE · PILOT LICENSE</text>`,
-    `<text x="520" y="180" font-size="76" font-weight="900" fill="#EFF5FF">${name}</text>`,
+    `<text x="520" y="92" font-size="20" letter-spacing="4" fill="#9FB7C9">SATS WARS · PILOT LICENSE</text>`,
+    `<text x="520" y="180" font-size="${nameSize}" font-weight="900" fill="#EFF5FF">${name}</text>`,
     `<text x="520" y="236" font-size="34" font-weight="800" fill="#F7931A">${esc(ja ? c.rankJa : c.rankEn)}</text>`,
     `<g transform="translate(520 300)">`,
     stat(0, ja ? '出撃' : 'Sorties', String(c.sorties)),

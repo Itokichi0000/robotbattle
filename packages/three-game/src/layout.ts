@@ -110,7 +110,7 @@ export const CAMERA_PRESETS: Record<
   repairRecovery: { position: [0, 3.6, 9.5], target: [0, 2.8, 0.6] },
   specialCharge: { position: [0, 2.6, 7.5], target: [0, 3.4, 0.6] },
   // Inside the machine: the pilots' seat bay (COCKPIT_POSITION), out of the arena's view.
-  cockpit: { position: [0, -25.4, 10.5], target: [0, -29.6, 0] },
+  cockpit: { position: [0, -26, 9.5], target: [0, -29.3, -2.5] },
 };
 
 /** The virtual cockpit bay sits under the stage (hidden by the floor from the arena cameras). */

@@ -48,6 +48,8 @@ interface Overview {
   };
   nextConfig: GameConfig;
   broadcastTemplates: Record<string, { ja: string; en: string }>;
+  /** Who is logged in (viewer reads, operator runs the event, owner changes money/rules). */
+  me?: { actor: string; role: 'viewer' | 'operator' | 'owner' };
 }
 
 interface PilotRow {
@@ -132,15 +134,25 @@ export function AdminApp() {
 }
 
 function Login({ onToken }: { onToken: (t: string) => void }) {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [needOtp, setNeedOtp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
-      const r = await api<{ token: string }>('/api/admin/login', { body: { password } });
+      const r = await api<{ token: string }>('/api/admin/login', {
+        body: {
+          password,
+          ...(username.trim() ? { username: username.trim() } : {}),
+          ...(otp.trim() ? { otp: otp.trim() } : {}),
+        },
+      });
       onToken(r.token);
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'OTP_REQUIRED') setNeedOtp(true);
       setError(err instanceof ApiError ? err.message : String(err));
     }
   };
@@ -150,14 +162,35 @@ function Login({ onToken }: { onToken: (t: string) => void }) {
         <Logo size="sm" />
         <h1 className="mt-4 text-xl font-black">運営ログイン / Admin login</h1>
         <input
+          className="sw-focus mt-4 w-full rounded-lg border border-line bg-black/40 px-3 py-3"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="アカウント名（共有パスワードなら空欄） / user"
+          autoComplete="username"
+          data-testid="admin-username"
+        />
+        <input
           type="password"
           className="sw-focus mt-4 w-full rounded-lg border border-line bg-black/40 px-3 py-3"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="ADMIN_PASSWORD"
+          placeholder="パスワード / password"
           autoComplete="current-password"
           data-testid="admin-password"
         />
+        {needOtp && (
+          <input
+            className="sw-focus mt-4 w-full rounded-lg border border-line bg-black/40 px-3 py-3 tracking-[0.4em]"
+            value={otp}
+            onChange={(e) => setOtp(e.target.value)}
+            placeholder="123456"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            aria-label="確認コード（6桁） / 6-digit code"
+            data-testid="admin-otp"
+          />
+        )}
         <button
           className="sw-btn mt-4 w-full bg-amber text-navy"
           type="submit"
@@ -225,6 +258,9 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
               {label}
             </button>
           ))}
+          <span className="self-center px-2 text-xs text-muted" data-testid="admin-me">
+            {ov.me?.actor} · {ov.me?.role}
+          </span>
           <button type="button" className="sw-btn bg-navy-3 px-3" onClick={onLogout}>
             ログアウト
           </button>

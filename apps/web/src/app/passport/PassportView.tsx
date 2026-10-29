@@ -188,7 +188,10 @@ export function PassportView() {
             onChange={(e) => setCallsign(e.target.value)}
             aria-label={L('コールサイン', 'Callsign')}
           />
-          <button type="submit" className="sw-btn bg-teal px-4 text-navy">
+          <button
+            type="submit"
+            className="sw-btn shrink-0 bg-teal px-4 whitespace-nowrap text-navy"
+          >
             {L('変更', 'Save')}
           </button>
         </form>

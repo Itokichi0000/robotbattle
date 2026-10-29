@@ -8,6 +8,7 @@ import {
   taskRequestSchema,
   taskSubmitSchema,
 } from '@sats-wars/shared';
+import { type AdminRole, roleAllows } from '../auth/admin';
 import { extractBearer } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { AdminLifecycleCommand } from '../raid/manager';
@@ -44,12 +45,17 @@ export function registerSpecAliases(
       throw new AppError('NO_RAID', 'この作戦は現在の作戦ではありません / Not the running raid');
     return id;
   };
-  const requireAdmin = (req: FastifyRequest): string => {
+  const requireAdmin = (req: FastifyRequest, need: AdminRole = 'operator'): string => {
     const origin = req.headers.origin;
     if (origin && !deps.isAllowedOrigin(origin))
       throw new AppError('FORBIDDEN', 'origin not allowed');
     const session = adminAuth.verify(extractBearer(req.headers.authorization));
     if (!session) throw new AppError('UNAUTHORIZED', 'admin login required');
+    if (!roleAllows(session.role, need))
+      throw new AppError(
+        'FORBIDDEN',
+        `この操作には ${need} 権限が必要です / ${need} role required`,
+      );
     return session.actor;
   };
 
@@ -174,7 +180,7 @@ export function registerSpecAliases(
   // ---- operators ---------------------------------------------------------------------
 
   app.get('/api/admin/raids', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     return {
       current: manager.current().raidId,
       raids: repo.listRaids(50).map((r) => ({
@@ -193,8 +199,9 @@ export function registerSpecAliases(
   });
   /** Create the next raid: optional settings (preset, price, event…), then NEXT_RAID. */
   app.post('/api/admin/raids', async (req) => {
-    const actor = requireAdmin(req);
     const settings = nextRaidSettingsSchema.parse(req.body ?? {});
+    // Changing the rules or the price of the next raid is the owner's call.
+    const actor = requireAdmin(req, Object.keys(settings).length ? 'owner' : 'operator');
     manager.setNextRaid(settings, actor);
     manager.command('NEXT_RAID', actor);
     deps.onSettingsChanged();
@@ -241,7 +248,7 @@ export function registerSpecAliases(
   }
   /** Live operations metrics (spec E4 画面): crew, seats, devices, latency, payments. */
   app.get('/api/admin/metrics', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'viewer');
     const s = manager.current().state;
     const pilotsList = Object.values(s.pilots);
     return {

@@ -273,3 +273,13 @@ describe('spec API contract (F5 aliases by raid id)', () => {
     expect(link.json().challengeId).toBeTruthy();
   });
 });
+
+describe('security headers', () => {
+  it('API responses forbid loading and framing (CSP default-src none)', async () => {
+    s = await makeServer({ env: DEMO });
+    const res = await s.inject({ url: '/api/public/current-raid' });
+    expect(res.headers['content-security-policy']).toContain("default-src 'none'");
+    expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+  });
+});

@@ -185,7 +185,8 @@ export function Effects({ director, maxParticles, reducedMotion, targets }: Effe
     const c = new THREE.Color(color);
     const n = reducedMotion ? Math.ceil(count / 3) : count;
     for (let i = 0; i < n; i++) {
-      const pt = particles[next.current]!;
+      // The pool shrinks when the quality steps down: wrap the cursor to it.
+      const pt = particles[next.current % particles.length]!;
       next.current = (next.current + 1) % particles.length;
       pt.alive = true;
       pt.p.copy(origin);

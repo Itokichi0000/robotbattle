@@ -521,6 +521,14 @@ export class Repo {
   bumpChallengeAttempts(id: string): void {
     this.run('UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = ?', id);
   }
+  /** Retention: sessions that expired (or were revoked) before `before` are deleted. */
+  purgeExpiredSessions(before: number): number {
+    return this.run(
+      'DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)',
+      before,
+      before,
+    );
+  }
   purgeChallenges(olderThan: number): void {
     this.run('DELETE FROM auth_challenges WHERE created_at < ?', olderThan);
   }

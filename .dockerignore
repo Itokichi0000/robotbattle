@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+data
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+test-results
+playwright-report
+assets/blender/*.blend1
+apps/web/public/demo
+.git

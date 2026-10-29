@@ -22,6 +22,12 @@ const envSchema = z.object({
   /** Guest sign-ups per minute per IP. Venue Wi-Fi often NATs everyone to one address. */
   GUEST_SIGNUPS_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(300),
   ADMIN_PASSWORD: z.string().default(''),
+  /** Named operator accounts: "name:role:scrypt-hash[:totp-secret]" separated by ";" (pnpm admin:user). */
+  ADMIN_USERS: z.string().default(''),
+  /** Allow the shared ADMIN_PASSWORD login (owner). Turn off once named accounts exist. */
+  ADMIN_SHARED_LOGIN: z.enum(['true', 'false']).default('true'),
+  /** Optional TOTP secret (base32) required with the shared password. */
+  ADMIN_TOTP_SECRET: z.string().default(''),
   /** Demo mode: free passes, demo-only admin tools (time scale), labelled DEMO everywhere. */
   DEMO_MODE: boolish,
   /** mock = built-in mock wallet login (dev/demo); lnurl = real LNURL-auth only; both = either. */
@@ -46,6 +52,13 @@ const envSchema = z.object({
   DEMO_BOT_SKILL: z.coerce.number().min(0).max(1).default(0.65),
   /** Rehearsal shortcut: 6 demo bots when DEMO_BOTS is 0. */
   DEMO_AUTOPILOT: boolish,
+  /** Database copies (VACUUM INTO). Default ./data/backups next to the DB. */
+  BACKUP_DIR: z.string().default(''),
+  /** Minutes between automatic backups (0 = only after each raid and on demand). */
+  BACKUP_INTERVAL_MINUTES: z.coerce.number().int().min(0).max(1440).default(30),
+  BACKUP_KEEP: z.coerce.number().int().min(1).max(1000).default(48),
+  /** Expired sessions are deleted this many days after they expired. */
+  RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
   /** Optional Nostr key link for the license card (display only, never login). Off by default. */
   NOSTR_LINK: boolish,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -72,6 +85,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   }
   if (prod && parsed.ADMIN_PASSWORD.length < 12)
     throw new Error('ADMIN_PASSWORD must be at least 12 characters in production');
+  if (parsed.ADMIN_SHARED_LOGIN === 'false' && !parsed.ADMIN_USERS.trim())
+    throw new Error('ADMIN_SHARED_LOGIN=false needs ADMIN_USERS (nobody could log in)');
   const allowedOrigins = parsed.ALLOWED_ORIGINS.split(',')
     .map((s) => s.trim())
     .filter(Boolean);

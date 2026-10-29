@@ -2,7 +2,7 @@
   "name": "sats-wars",
   "version": "0.1.0",
   "private": true,
-  "description": "SATS WARS — 雷神 vs 風神: venue real-time 3D team battle game",
+  "description": "SATS WARS: EARTH DEFENSE — co-op venue raid: the crowd pilots RAIJIN and FUJIN against NULL CORE",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=22.13.0"
@@ -20,7 +20,13 @@
     "format:check": "prettier --check .",
     "simulate": "pnpm --filter @sats-wars/simulations simulate",
     "e2e": "playwright test -c tests/e2e/playwright.config.ts",
-    "solo": "pnpm --filter @sats-wars/solo build"
+    "solo": "pnpm --filter @sats-wars/solo build",
+    "admin:user": "node tools/admin-user.mjs",
+    "db:backup": "node tools/db-backup.mjs",
+    "db:restore": "node tools/db-restore.mjs",
+    "security:secrets": "node tools/security/scan-secrets.mjs",
+    "security:audit": "pnpm audit --audit-level high",
+    "smoke": "node tools/smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
