@@ -58,7 +58,10 @@ if [ -f "$DB" ]; then
     node --disable-warning=ExperimentalWarning tools/db-backup.mjs
 fi
 
-PREV=$(readlink -f "$APP/current" 2>/dev/null || true)
+# The release to fall back to. (Only a real link: `readlink -f` also prints a
+# path that does not exist yet, which on a first deploy made `current` point at itself.)
+PREV=""
+[ -L "$APP/current" ] && PREV=$(readlink -f "$APP/current")
 switch_to() {
   ln -sfn "$1" "$APP/current.next"
   mv -Tf "$APP/current.next" "$APP/current"
