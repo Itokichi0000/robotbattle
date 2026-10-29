@@ -1,0 +1,11 @@
+node_modules
+dist
+pnpm-lock.yaml
+coverage
+test-results
+playwright-report
+data
+# Owner-provided master spec and kit: kept verbatim.
+CLAUDE.md
+docs/owner_kit
+references

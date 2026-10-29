@@ -1,0 +1,35 @@
+{
+  "name": "sats-wars-earth-defense",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SATS WARS: EARTH DEFENSE \u2014 ONE MECH. EIGHT PILOTS. DEFEND JAPAN. Venue co-op 3D browser game.",
+  "packageManager": "pnpm@10.28.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @swed/server dev",
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "start": "pnpm --filter @swed/server start",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.18.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "@swed/shared": "workspace:*"
+  }
+}

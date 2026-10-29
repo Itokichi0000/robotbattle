@@ -1,0 +1,27 @@
+{
+  "name": "@swed/ui-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fontsource/chakra-petch": "^5.2.0",
+    "@swed/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "~19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.0",
+    "react": "~19.2.0",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

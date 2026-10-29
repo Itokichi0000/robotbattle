@@ -1,5 +1,11 @@
 # CLAUDE.md — SATS WARS: EARTH DEFENSE 継続開発ガイド（エージェント向け）
 
+> **2026-10-29 更新（D-075）**：オーナーが新しいマスター仕様（BUILD DIRECTIVE v1.0：一体の RAIJIN-01 に最大8人、4役割8席）を
+> 提供し、**新規プロジェクト `sats-wars-earth-defense/`（独立した pnpm workspace）で開発を進める**。新規作業はそちらで行い、
+> 仕様の正本は `sats-wars-earth-defense/CLAUDE.md`、進捗は `sats-wars-earth-defense/docs/00_execution_plan.md` と
+> `sats-wars-earth-defense/NEXT_ACTIONS.md`。このファイル以下の内容はルート直下の旧実装（雷神＋風神の2体レイド）の記録で、
+> 旧実装は参照用に残している（削除しない）。
+
 作業開始時に必ず読み、続けて `docs/PROGRESS.md`（どこまで動くか）→ `docs/OPEN_ISSUES.md`（未完・環境制約）→
 `docs/ROADMAP.md`（次のタスク）→ `docs/DECISION_LOG.md`（決定事項）を読むこと。
 最新の要件は `SATS_WARS_EARTH_DEFENSE_CLAUDE_CODE_ALL_IN_ONE.md`（リポジトリ直下、オーナー提供）。**これが唯一の最新仕様**。

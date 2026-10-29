@@ -14,6 +14,8 @@ export default tseslint.config(
       'playwright-report/**',
       '**/next-env.d.ts',
       'tools/blender/**',
+      // Separate workspace with its own lint config (D-075).
+      'sats-wars-earth-defense/**',
     ],
   },
   js.configs.recommended,
