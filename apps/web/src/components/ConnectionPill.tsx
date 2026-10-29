@@ -19,6 +19,8 @@ export function ConnectionPill({ state }: { state: ConnectionState }) {
       className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${m.cls}`}
       role="status"
       aria-live="polite"
+      data-testid="conn-pill"
+      data-state={state}
     >
       <span aria-hidden>●</span>{' '}
       <span className={state === 'connected' ? 'sr-only min-[400px]:not-sr-only' : ''}>

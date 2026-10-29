@@ -188,6 +188,22 @@ export function ArenaApp() {
     return () => clearInterval(id);
   }, [conn, settings, stats, use3d, autoLevel, quality]);
 
+  // The 3D canvas drives the director's clock every frame. The 2D screen has
+  // no render loop, so it ticks the director itself: otherwise the scheduled
+  // cinematics (raid start, boss entrance, 神雷風陣, victory) never play there.
+  useEffect(() => {
+    if (use3d || !settings) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      director.update(Math.min(0.25, (now - last) / 1000));
+      last = now;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [use3d, settings, director]);
+
   // Keyboard: F fullscreen, S settings, M mute.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -40,6 +40,8 @@ export default defineConfig({
         PUBLIC_PLAY_URL: 'http://localhost:3000/play',
         // Paid passes (mock payments) + guest and Lightning (mock wallet) login.
         PASS_MODE: 'PAID',
+        // Rehearsal tools (demo seed, time scale) for the scripted-branch test.
+        DEMO_MODE: 'true',
         AUTH_MODE: 'both',
         SERVER_PUBLIC_URL: 'http://localhost:4000',
       },

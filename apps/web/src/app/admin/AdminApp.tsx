@@ -472,19 +472,25 @@ function RaidTab({
         </div>
         {s.demoMode && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            デモBOT
-            <input
-              className="w-16 rounded border border-line bg-navy px-2 py-1"
-              value={bots}
-              onChange={(e) => setBots(e.target.value)}
-              data-testid="bots-input"
-            />
-            腕前
-            <input
-              className="w-16 rounded border border-line bg-navy px-2 py-1"
-              value={skill}
-              onChange={(e) => setSkill(e.target.value)}
-            />
+            <label className="flex items-center gap-1">
+              デモBOT
+              <input
+                className="w-16 rounded border border-line bg-navy px-2 py-1"
+                inputMode="numeric"
+                value={bots}
+                onChange={(e) => setBots(e.target.value)}
+                data-testid="bots-input"
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              腕前
+              <input
+                className="w-16 rounded border border-line bg-navy px-2 py-1"
+                inputMode="decimal"
+                value={skill}
+                onChange={(e) => setSkill(e.target.value)}
+              />
+            </label>
             <button
               className="sw-btn bg-navy-3 px-3"
               onClick={() =>
@@ -525,6 +531,7 @@ function RaidTab({
         <div className="flex flex-wrap gap-2">
           <select
             className="rounded border border-line bg-navy px-2 py-2"
+            aria-label="定型文 / Template"
             value={tpl}
             onChange={(e) => setTpl(e.target.value)}
           >
@@ -540,6 +547,7 @@ function RaidTab({
               <input
                 className="flex-1 rounded border border-line bg-navy px-2"
                 placeholder="日本語"
+                aria-label="アナウンス（日本語）"
                 value={ja}
                 maxLength={80}
                 onChange={(e) => setJa(e.target.value)}
@@ -547,6 +555,7 @@ function RaidTab({
               <input
                 className="flex-1 rounded border border-line bg-navy px-2"
                 placeholder="English"
+                aria-label="Announcement (English)"
                 value={en}
                 maxLength={80}
                 onChange={(e) => setEn(e.target.value)}

@@ -1,63 +1,15 @@
-import {
-  type APIRequestContext,
-  type BrowserContext,
-  type Page,
-  expect,
-  test,
-} from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { E2E_ADMIN_PASSWORD } from './playwright.config';
-
-const SERVER = 'http://localhost:4000';
-
-async function adminToken(request: APIRequestContext): Promise<string> {
-  const r = await request.post(`${SERVER}/api/admin/login`, {
-    data: { password: E2E_ADMIN_PASSWORD },
-  });
-  return (await r.json()).token;
-}
-async function admin(
-  request: APIRequestContext,
-  token: string,
-  body: Record<string, unknown>,
-  mustSucceed = true,
-) {
-  const r = await request.post(`${SERVER}/api/admin/command`, {
-    data: body,
-    headers: { authorization: `Bearer ${token}` },
-  });
-  if (mustSucceed) expect(r.ok(), await r.text()).toBeTruthy();
-  return r;
-}
-async function snapshot(request: APIRequestContext) {
-  return (await (await request.get(`${SERVER}/api/public/current-raid`)).json()).snapshot as {
-    raidId: string;
-    status: string;
-  };
-}
-const mobile = {
-  viewport: { width: 390, height: 844 },
-  deviceScaleFactor: 2,
-  hasTouch: true,
-  isMobile: true,
-};
-
-/** A phone that becomes a guest pilot. */
-async function guestPhone(ctx: BrowserContext, callsign: string): Promise<Page> {
-  const p = await ctx.newPage();
-  await p.goto('/play');
-  await expect(p.getByTestId('onboarding')).toBeVisible();
-  await p.getByTestId('callsign-input').fill(callsign);
-  await p.getByTestId('guest-login').click();
-  await expect(p.getByTestId('callsign')).toContainText(callsign);
-  return p;
-}
-
-/** Play the Guardian minigame well: press the attack's direction while the gauge is green. */
-async function playGuardian(p: Page) {
-  await expect(p.getByTestId('minigame')).toBeVisible();
-  await expect(p.locator('.swc-gauge-fill.is-green')).toBeVisible({ timeout: 8_000 });
-  await p.locator('.swc-dir.is-threat').click();
-}
+import {
+  SERVER,
+  admin,
+  adminToken,
+  freshLobby,
+  guestPhone,
+  mobile,
+  playGuardian,
+  snapshot,
+} from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -66,8 +18,7 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   request,
 }) => {
   const token = await adminToken(request);
-  if ((await snapshot(request)).status === 'CREATED')
-    await admin(request, token, { command: 'OPEN_LOBBY' });
+  await freshLobby(request, token);
 
   const arenaCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const arena = await arenaCtx.newPage();

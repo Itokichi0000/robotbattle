@@ -303,13 +303,14 @@ function JoinCard({
         label={L('参加用QRコード', 'Join QR code')}
       />
       <p className="text-[1vw] font-bold">
-        {demo
-          ? L('デモ：無料', 'Demo: free')
-          : passMode === 'FREE'
-            ? L('今日は無料イベント', 'Free event today')
-            : L(`出撃パス ${price} sats（1作戦）`, `Pass ${price} sats per raid`)}
+        {/* The pass mode decides (a DEMO_MODE rehearsal can run the paid flow with mock payments). */}
+        {passMode === 'FREE'
+          ? demo
+            ? L('デモ：無料', 'Demo: free')
+            : L('今日は無料イベント', 'Free event today')
+          : L(`出撃パス ${price} sats（1作戦）`, `Pass ${price} sats per raid`)}
       </p>
-      {!demo && passMode === 'PAID' && (
+      {passMode === 'PAID' && (
         <p className="max-w-[16vw] text-center text-[0.75vw] text-muted">
           {locale === 'ja' ? SATS_EXPLAINER.ja : SATS_EXPLAINER.en}
         </p>

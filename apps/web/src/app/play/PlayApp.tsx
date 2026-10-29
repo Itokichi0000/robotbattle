@@ -73,12 +73,9 @@ export function PlayApp() {
     return <Shell connState={connState}>{L('サーバーに接続中…', 'Connecting…')}</Shell>;
 
   const seat: SeatState = { ...me.seat, ...seatPatch };
+  // The server decides (DEMO_MODE defaults to FREE; a PAID rehearsal still needs a pass).
   const needsPass =
-    !seat.boarded &&
-    !me.seat.entitled &&
-    snap.passMode === 'PAID' &&
-    !snap.demoMode &&
-    me.passCredits === 0;
+    !seat.boarded && !me.seat.entitled && snap.passMode === 'PAID' && me.passCredits === 0;
   const lobby = snap.status === 'LOBBY_OPEN' || snap.status === 'CREATED';
   const gate =
     !snap.joinOpen && !seat.boarded ? (
