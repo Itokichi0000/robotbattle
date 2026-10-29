@@ -1,0 +1,233 @@
+/* Staff console: functional, dense, same tokens. No rounded cards, no emoji. */
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login form {
+  width: min(420px, 100%);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.14em;
+}
+h1 span {
+  color: var(--sw-action);
+  font-size: 14px;
+  letter-spacing: 0.3em;
+  margin-left: 8px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sw-muted);
+  letter-spacing: 0.06em;
+}
+label.toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  color: var(--sw-text);
+}
+input,
+select {
+  font: inherit;
+  color: var(--sw-text);
+  background: var(--sw-surface);
+  border: 1px solid var(--sw-line);
+  padding: 10px 12px;
+  min-height: 44px;
+}
+input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  accent-color: var(--sw-ally);
+}
+input[type='range'] {
+  padding: 0;
+  accent-color: var(--sw-action);
+}
+.b {
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--sw-surface);
+  border: 1px solid var(--sw-line);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.b:hover:not(:disabled) {
+  border-color: var(--sw-ally);
+}
+.b:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.b.primary {
+  background: var(--sw-action);
+  color: var(--sw-void);
+  border-color: var(--sw-action);
+}
+.b.warn {
+  border-color: var(--sw-action);
+  color: var(--sw-action);
+}
+.b.danger {
+  border-color: var(--sw-danger);
+  color: var(--sw-danger);
+}
+.b.small {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.err {
+  color: var(--sw-danger);
+  margin: 0;
+}
+.op {
+  padding: 16px 20px 40px;
+}
+.op header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--sw-line);
+  padding-bottom: 12px;
+}
+.op header .ok {
+  color: var(--sw-repair);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+}
+.op header .bad {
+  color: var(--sw-danger);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+}
+.op header .toast {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--sw-action);
+}
+.op header .b {
+  margin-left: auto;
+}
+.op header .toast + .b {
+  margin-left: 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.panel {
+  padding: 16px 18px;
+}
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  color: var(--sw-muted);
+}
+.btns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.row {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 10px;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(68, 96, 112, 0.4);
+}
+th {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--sw-muted);
+}
+td small {
+  color: var(--sw-muted);
+}
+td em {
+  color: var(--sw-muted);
+  font-style: normal;
+}
+.kv {
+  display: grid;
+  gap: 6px;
+}
+.kv > div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px;
+  font-size: 14px;
+}
+.kv span {
+  color: var(--sw-muted);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+.kv .ally {
+  color: var(--sw-ally);
+}
+.kv .danger {
+  color: var(--sw-danger);
+}
+.join {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 14px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--sw-muted);
+}
+.join code {
+  display: block;
+  color: var(--sw-text);
+  font-size: 14px;
+  letter-spacing: 0;
+  margin-top: 4px;
+  word-break: break-all;
+}
+.audit ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  max-height: 320px;
+  overflow: auto;
+}
+.audit li {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(68, 96, 112, 0.3);
+}
+.audit em {
+  color: var(--sw-muted);
+  font-style: normal;
+}

@@ -56,3 +56,35 @@ jobs:
           name: playwright-report
           path: test-results/
           retention-days: 7
+
+  earth-defense:
+    # The one-mech, eight-seat project (D-075) is its own pnpm workspace.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: sats-wars-earth-defense
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sats-wars-earth-defense/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13
+          cache: pnpm
+          cache-dependency-path: sats-wars-earth-defense/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm format:check
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: earth-defense-e2e
+          path: sats-wars-earth-defense/test-results/
+          retention-days: 7

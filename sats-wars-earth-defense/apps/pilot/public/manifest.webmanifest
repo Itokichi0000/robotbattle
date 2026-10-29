@@ -1,0 +1,11 @@
+{
+  "name": "SATS WARS Pilot",
+  "short_name": "SATS WARS",
+  "start_url": "/pilot/",
+  "scope": "/pilot/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050B13",
+  "theme_color": "#050B13",
+  "icons": [{ "src": "/pilot/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
