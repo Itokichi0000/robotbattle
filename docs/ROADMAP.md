@@ -4,6 +4,9 @@
 
 ## 次の優先タスク（上から順に）
 
+0. **会場の大画面 `/arena` の 3D 映像（D-073、最優先）**：`docs/arena-visual-plan.md` の順に、舞台と構図 → 光とレンダリング →
+   雷神1体＋NULL CORE の縦切り → エフェクト → カメラ → ゲーム状態との連動 → 最小限の会場 HUD → 風神・護衛へ展開。
+   スマホの操縦 UI は保持し、追加の作り込みはしない。
 1. **会場リハーサル**（コードでは代替できない）：会場PC（GPU）・実Wi-Fi・iPhone/Android 数台で `docs/EVENT_RUNBOOK.md` の
    開場前チェックとデモシード（`/admin` → リハーサル → デモシナリオ）を通す。FPS・伝送遅延・タップ精度を記録し、
    `pnpm load:matrix` を会場ネットワークで再実行して `docs/LOAD_TEST_REPORT.md` に追記する。
