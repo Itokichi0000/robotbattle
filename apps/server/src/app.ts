@@ -59,7 +59,8 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
   const wall = opts.wall ?? systemWallClock;
   const app = Fastify({
     logger: opts.logger === false ? false : { level: env.LOG_LEVEL },
-    trustProxy: true,
+    // Only the local reverse proxy may tell us the client IP (TRUST_PROXY).
+    trustProxy: env.trustProxy,
     bodyLimit: 32 * 1024,
   });
 
@@ -90,6 +91,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     eventId: env.EVENT_ID,
     demoMode: env.DEMO_MODE,
     defaultPassMode: env.passMode,
+    paidPassesAllowed: env.paidPassesAllowed,
     configOverrides,
   }).init();
   const webhookUrl =

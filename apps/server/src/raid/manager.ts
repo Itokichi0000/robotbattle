@@ -82,6 +82,8 @@ export interface ManagerOptions {
   eventId: string;
   demoMode: boolean;
   defaultPassMode: PassMode;
+  /** False on a public server with mock payments: the event stays free (D-068). */
+  paidPassesAllowed?: boolean;
   /** Applied on top of DEFAULT_GAME_CONFIG when no saved next-config exists. */
   configOverrides?: Partial<GameConfig>;
 }
@@ -231,9 +233,15 @@ export class RaidManager {
     this.set('autoLoop', v, actor, 'SET_AUTO_LOOP');
   }
   get passMode(): PassMode {
+    if (this.opts.paidPassesAllowed === false) return 'FREE';
     return this.setting<PassMode>('passMode', this.opts.defaultPassMode);
   }
   setPassMode(v: PassMode, actor: string): void {
+    if (v === 'PAID' && this.opts.paidPassesAllowed === false)
+      throw new AppError(
+        'CONFLICT',
+        '本番サーバーで有料パスを使うには実決済（承認後）が必要です / Paid passes need real payments on a production server',
+      );
     this.set('passMode', v, actor, 'SET_PASS_MODE');
   }
   /** Venue screen display pushed from /admin (2D/3D, quality, volume, QR). */

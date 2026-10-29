@@ -1,0 +1,33 @@
+# Web app (Next.js `next start`). Installed by deploy/setup-vps.sh.
+[Unit]
+Description=SATS WARS web app
+After=network-online.target sats-wars-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=satswars
+Group=satswars
+EnvironmentFile=/etc/sats-wars/web.env
+WorkingDirectory=/opt/sats-wars/current/apps/web
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=2
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+# Next.js writes its cache into the release (.next/cache is owned by satswars).
+ReadWritePaths=/opt/sats-wars/releases
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# AF_NETLINK: Node reads network interfaces (os.networkInterfaces) at startup.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

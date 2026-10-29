@@ -61,6 +61,13 @@ const envSchema = z.object({
   RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
   /** Optional Nostr key link for the license card (display only, never login). Off by default. */
   NOSTR_LINK: boolish,
+  /**
+   * Which peers may set X-Forwarded-For (the client IP used by rate limits):
+   * "loopback" = a reverse proxy on the same host (Caddy), "false" = nobody,
+   * "true" = anyone (only behind a proxy that strips the header), or a list
+   * of addresses/CIDRs. Trusting everyone would let clients pick their IP.
+   */
+  TRUST_PROXY: z.string().default('loopback'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
@@ -69,6 +76,9 @@ export type Env = z.infer<typeof envSchema> & {
   adminPasswordGenerated: boolean;
   playUrl: string;
   passMode: 'FREE' | 'PAID';
+  /** False on a public server with mock payments: passes stay free there (D-068). */
+  paidPassesAllowed: boolean;
+  trustProxy: boolean | string;
   secureCookies: boolean;
   mockAuth: boolean;
   lnurlAuth: boolean;
@@ -113,12 +123,23 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     if (prod && !/^https:\/\//.test(parsed.SERVER_PUBLIC_URL))
       throw new Error('Real payments require an https:// SERVER_PUBLIC_URL');
   }
+  const passMode = parsed.PASS_MODE ?? (parsed.DEMO_MODE ? 'FREE' : 'PAID');
+  // Mock payments on a public server would show everyone a free "test payment"
+  // button: until real payments are approved, a production event is free.
+  const paidPassesAllowed = !(prod && !parsed.DEMO_MODE && parsed.PAYMENT_MODE === 'mock');
+  if (!paidPassesAllowed && passMode === 'PAID')
+    throw new Error(
+      'PASS_MODE=PAID needs real payments in production (PAYMENT_MODE=lnbits, owner approval). Use PASS_MODE=FREE until then',
+    );
+  const trust = parsed.TRUST_PROXY.trim();
   return {
     ...parsed,
     allowedOrigins,
     adminPasswordGenerated,
     playUrl: parsed.PUBLIC_PARTICIPANT_URL || parsed.PUBLIC_PLAY_URL,
-    passMode: parsed.PASS_MODE ?? (parsed.DEMO_MODE ? 'FREE' : 'PAID'),
+    passMode,
+    paidPassesAllowed,
+    trustProxy: trust === 'true' ? true : trust === 'false' || trust === '' ? false : trust,
     secureCookies: parsed.COOKIE_SECURE ? parsed.COOKIE_SECURE === 'true' : prod,
     mockAuth: parsed.AUTH_MODE !== 'lnurl',
     lnurlAuth,

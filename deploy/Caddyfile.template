@@ -1,0 +1,36 @@
+# SATS WARS: EARTH DEFENSE — one HTTPS domain for everything (deploy/README.md).
+# setup-vps.sh renders this to /etc/caddy/Caddyfile (__DOMAIN__, __EMAIL__).
+# The game server listens on 127.0.0.1:4000 and the web app on 127.0.0.1:3000 only;
+# Caddy gets the certificate (Let's Encrypt) and is the only thing on 80/443.
+{
+	email __EMAIL__
+}
+
+__DOMAIN__ {
+	encode zstd gzip
+
+	# Game server: REST API (incl. LNURL-auth callbacks and LNbits webhooks),
+	# Socket.IO (Caddy upgrades WebSockets by itself) and health checks.
+	@server path /api/* /socket.io/* /health /healthz /ready /readyz
+	handle @server {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	# Everything else is the Next.js app: pages, /_next assets, 3D models, /demo.
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	header ?Strict-Transport-Security "max-age=31536000"
+	header -Server
+
+	# Access logs hold client IPs: keep them one week only (spec G3).
+	log {
+		output file /var/log/caddy/sats-wars-access.log {
+			roll_size 20MiB
+			roll_keep 7
+			roll_keep_for 168h
+		}
+		format json
+	}
+}
