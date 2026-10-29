@@ -9,7 +9,9 @@
     "test": "vitest run",
     "demo:seed": "tsx src/cli/demoSeed.ts",
     "demo:raid": "tsx src/cli/demoRaid.ts",
-    "sim:balance": "tsx src/cli/simBalance.ts"
+    "sim:balance": "tsx src/cli/simBalance.ts",
+    "load:matrix": "tsx src/cli/loadMatrix.ts",
+    "loadtest": "tsx src/loadtest.ts"
   },
   "dependencies": {
     "@sats-wars/game-engine": "workspace:*",

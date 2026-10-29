@@ -188,6 +188,35 @@ describe('realtime sync', () => {
     expect(c.store.snapshot?.crew).toHaveLength(1);
   });
 
+  it('a 30-second network cut mid-raid: the phone resyncs and flies again (spec G5)', async () => {
+    s = await makeServer(DEMO);
+    const url = await listen(s);
+    const a = await guest(s);
+    await board(s, a, 'GUARDIAN');
+    await startRaid(s);
+    const c = await client(url, 'pilot', a.token);
+    // A mission is open when the network drops; it expires during the cut.
+    const open = (await requestTask(s, a)).json() as { code: string; task: Task | null };
+    expect(open.code).toBe('OK');
+    c.socket.disconnect();
+    await s.advance(30_000);
+    c.socket.connect();
+    await new Promise<void>((resolve) => c.socket.once('connect', () => resolve()));
+    c.socket.emit('raid:subscribe', { role: 'pilot', token: a.token });
+    const server = s.services.manager.snapshot();
+    await waitFor(() => c.store.snapshot?.lastSeq === server.lastSeq);
+    expect(comparable(c.store.snapshot)).toEqual(comparable(server));
+    // The stale mission is gone (no double submit); a new one is handed out.
+    const late = await submitTask(s, a, open.task!.taskId, {
+      role: 'GUARDIAN',
+      direction: 'N',
+      releaseAtMs: 500,
+    });
+    expect(late.json().result?.ok ?? false).toBe(false);
+    const again = (await requestTask(s, a)).json() as { code: string };
+    expect(['OK', 'COOLDOWN']).toContain(again.code);
+  });
+
   it('pass grants go only to that pilot; cheers go to every screen with the consented name', async () => {
     s = await makeServer({ env: { PASS_MODE: 'PAID' } });
     const url = await listen(s);

@@ -190,6 +190,11 @@ async function main() {
     }
   });
   await Promise.all(loops);
+  // Server health right after the run (event-loop and tick lag, memory).
+  const status = await call<{
+    server?: { memoryMb: number; eventLoopLagMs: number | null; tickLagMs: number | null };
+    realtime?: { connections: number };
+  }>('GET', '/api/admin/overview', undefined, admin).catch(() => null);
   for (const s of sockets) s.close();
   const round = (o: Record<string, number>) =>
     Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Math.round(v)]));
@@ -211,6 +216,8 @@ async function main() {
           ...round({ p50: pctl(fanout, 50), p95: pctl(fanout, 95), max: Math.max(...fanout) }),
           samples: fanout.length,
         },
+        server: status?.json.server ?? null,
+        socketsSeenByServer: status?.json.realtime?.connections ?? null,
       },
       null,
       2,

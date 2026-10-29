@@ -244,6 +244,35 @@ describe('demo seed earth-defense-opening on the live server (spec I1)', () => {
   });
 });
 
+describe('trouble: the database stops accepting writes (spec G5)', () => {
+  it('requests fail cleanly, the raid does not move ahead of its log, then resumes', async () => {
+    s = await makeServer({ env: DEMO });
+    const a = await guest(s);
+    await board(s, a, 'GUNNER');
+    await startRaid(s);
+    await s.advance(2000);
+    const repo = s.services.repo;
+    const realTx = repo.tx.bind(repo);
+    let down = true;
+    repo.tx = (<T>(fn: () => T): T => {
+      if (down) throw new Error('SQLITE_IOERR: disk I/O error');
+      return realTx(fn);
+    }) as typeof repo.tx;
+    const rt = s.services.manager.current();
+    const before = rt.state.revision;
+    const r = await requestTask(s, a);
+    expect(r.statusCode).toBeGreaterThanOrEqual(500);
+    // The tick loop keeps running (errors are logged) without advancing unsaved state.
+    await s.advance(3000);
+    expect(s.services.manager.current().state.revision).toBe(before);
+    down = false;
+    await s.advance(500);
+    const ok = (await requestTask(s, a)).json() as { code: string };
+    expect(ok.code).toBe('OK');
+    expect(s.services.manager.current().state.revision).toBeGreaterThan(before);
+  });
+});
+
 describe('spec API contract (F5 aliases by raid id)', () => {
   it('status / reserve / board / tasks / submit by id; other ids are refused; admin raids, lifecycle, metrics', async () => {
     s = await makeServer({ env: DEMO });
