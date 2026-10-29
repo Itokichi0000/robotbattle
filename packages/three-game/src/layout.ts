@@ -111,6 +111,12 @@ export const CAMERA_PRESETS: Record<
   specialCharge: { position: [0, 2.6, 7.5], target: [0, 3.4, 0.6] },
   // Inside the machine: the pilots' seat bay (COCKPIT_POSITION), out of the arena's view.
   cockpit: { position: [0, -26, 9.5], target: [0, -29.3, -2.5] },
+  // Pre-launch hangar (pilot screens): low and close so the machines read big.
+  // The single-robot views put it left of centre, clear of the station list.
+  // 3/4 front of each machine (it faces the map, half turned from the room).
+  hangar: { position: [0, 2.2, 13.5], target: [0, 2.6, 0] },
+  hangarRaijin: { position: [1.33, 2.4, 7.64], target: [-3.53, 2.1, -0.3] },
+  hangarFujin: { position: [-1.33, 2.6, 7.64], target: [5.67, 2.4, 1.5] },
 };
 
 type Pose = { position: [number, number, number]; target: [number, number, number] };

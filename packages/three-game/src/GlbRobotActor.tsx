@@ -4,6 +4,7 @@ import { Component, type ReactNode, Suspense, useEffect, useMemo, useRef } from 
 import * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import { type ClipName, LOOPING_CLIPS } from './director';
+import { ContactShadow } from './Grounding';
 import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
 import { RobotActor, type RobotActorProps } from './RobotActor';
 import { applyClip } from './robots/animate';
@@ -115,6 +116,10 @@ function GlbRobot({
       name={`robot-glb-${teamId}`}
     >
       <primitive object={gltf.scene} />
+      <ContactShadow
+        root={gltf.scene.getObjectByName('Root') ?? gltf.scene}
+        radius={teamId === 'RAIJIN' ? 1.7 : 1.3}
+      />
     </group>
   );
 }

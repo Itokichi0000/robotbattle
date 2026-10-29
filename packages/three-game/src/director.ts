@@ -129,7 +129,10 @@ export type CameraPresetName =
   | 'cockpit'
   | 'specialCharge'
   | 'special'
-  | 'final';
+  | 'final'
+  | 'hangar'
+  | 'hangarRaijin'
+  | 'hangarFujin';
 
 /** What an effect points at; the scene resolves it to a world position. */
 export type FxTarget =
@@ -502,6 +505,24 @@ export class ArenaDirector {
   /** Remaining scheduled items (for tests). */
   get pending(): number {
     return this.queue.length;
+  }
+
+  /**
+   * The hangar before launch (pilot screens, spec 2.6): a low 3/4 look at the
+   * robot whose station is being chosen, or at both. Never over a cinematic;
+   * the raid start takes the camera back to the arena.
+   */
+  hangarView(focus: TeamId | 'BOTH' | null): void {
+    if (this.busy) return;
+    this.setCamera(
+      focus === null
+        ? 'overview'
+        : focus === 'BOTH'
+          ? 'hangar'
+          : focus === 'RAIJIN'
+            ? 'hangarRaijin'
+            : 'hangarFujin',
+    );
   }
 
   /** Back to a calm stance (new raid loaded, preview reset). */

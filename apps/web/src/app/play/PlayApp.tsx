@@ -1,47 +1,70 @@
 'use client';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { MeResponse, SessionResponse } from '@sats-wars/shared';
-import { CHEER_EMOJIS, ONE_LINE_RULES } from '@sats-wars/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MeResponse, Role, SessionResponse, TeamId } from '@sats-wars/shared';
+import { ONE_LINE_RULES, ROLES, ROLE_LABELS } from '@sats-wars/shared';
 import {
-  Cockpit,
-  JapanMapMini,
-  RaidHeader,
-  ResultCard,
+  ArenaDirector,
+  type Banner,
+  type FrameStats,
+  type GovernorLevel,
+  QualityGovernor,
+  cueFromEvent,
+} from '@sats-wars/three-game';
+import {
+  type CommsItem,
+  type ConsoleCallout,
+  Icon,
+  type LinkState,
+  PilotConsole,
+  ROLE_ICON,
   type SeatState,
-  ThreatLine,
-  TrainingPanel,
+  type TargetDesignation,
+  effectSentence,
   raidView,
 } from '@sats-wars/ui';
-import { ConnectionPill } from '@/components/ConnectionPill';
-import { LanguageToggle } from '@/components/LanguageToggle';
-import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
+import type { RaidConnection } from '@/lib/connection';
 import { useConnectionState, useRaid, useRaidConnection, useTicker } from '@/lib/hooks';
 import { useI18n } from '@/lib/i18n';
 import { httpRaidClient } from '@/lib/raidClient';
 import { PassGate } from './PassGate';
 import { deviceId } from './session';
 
+const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
+  ssr: false,
+  loading: () => null,
+});
+
+type Snapshot = NonNullable<ReturnType<typeof useRaid>>;
+
+/** The robot a station flies (the hangar camera looks at it). */
+const ROBOT_OF: Record<Role, TeamId | 'BOTH'> = {
+  GUNNER: 'RAIJIN',
+  GUARDIAN: 'FUJIN',
+  ROUTER: 'BOTH',
+  ENGINEER: 'BOTH',
+};
+
 /**
- * Phone: become a pilot (guest or Lightning), take a seat, fly missions.
- * The session is an HttpOnly cookie; nothing secret is kept in the page.
+ * The pilot's screen: pilot authentication (guest or Lightning), then the
+ * pilot console — hangar, battle, debrief — over the 3D battlefield on a
+ * computer or the tactical map on a phone. The session is an HttpOnly
+ * cookie; nothing secret is kept in the page.
  */
 export function PlayApp() {
-  const { L, locale } = useI18n();
+  const { L } = useI18n();
   const conn = useRaidConnection('pilot');
   const snap = useRaid(conn);
   const connState = useConnectionState(conn);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [seatPatch, setSeatPatch] = useState<Partial<SeatState>>({});
   const client = useMemo(() => (conn ? httpRaidClient(conn) : null), [conn]);
 
   const refreshMe = useCallback(async () => {
     try {
-      const m = await api<MeResponse>('/api/me');
-      setMe(m);
-      setSeatPatch({});
+      setMe(await api<MeResponse>('/api/me'));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setMe(null);
     } finally {
@@ -62,166 +85,424 @@ export function PlayApp() {
     conn?.resubscribe();
   }, [refreshMe, conn]);
 
-  if (!authChecked) return <Shell connState={connState}>{L('読み込み中…', 'Loading…')}</Shell>;
+  if (!authChecked)
+    return <AuthShell connState={connState}>{L('読み込み中…', 'Loading…')}</AuthShell>;
   if (!me)
     return (
-      <Shell connState={connState}>
+      <AuthShell connState={connState}>
         <Onboarding onLogin={onLogin} />
-      </Shell>
+      </AuthShell>
     );
-  if (!snap || !client)
-    return <Shell connState={connState}>{L('サーバーに接続中…', 'Connecting…')}</Shell>;
-
-  const seat: SeatState = { ...me.seat, ...seatPatch };
-  // The server decides (DEMO_MODE defaults to FREE; a PAID rehearsal still needs a pass).
-  const needsPass =
-    !seat.boarded && !me.seat.entitled && snap.passMode === 'PAID' && me.passCredits === 0;
-  const lobby = snap.status === 'LOBBY_OPEN' || snap.status === 'CREATED';
-  const gate =
-    !snap.joinOpen && !seat.boarded ? (
-      <div className="sw-panel p-4 text-center" data-testid="join-closed">
-        <p className="font-bold">
-          {L('今回の出撃受付は終了しました', 'Boarding has closed for this raid')}
-        </p>
-        <p className="text-sm text-muted">
-          {L(
-            '応援して次の作戦を待とう！ 次はすぐ始まります',
-            'Cheer now and join the next raid soon!',
-          )}
-        </p>
-      </div>
-    ) : needsPass ? (
-      <PassGate snap={snap} conn={conn!} pending={me.pendingInvoice} onGranted={refreshMe} />
-    ) : undefined;
-
+  if (!snap || !client || !conn)
+    return <AuthShell connState={connState}>{L('サーバーに接続中…', 'Connecting…')}</AuthShell>;
   return (
-    <Shell connState={connState} callsign={me.pilot.callsign}>
-      <PlayBody snap={snap} me={me} />
-      {snap.status === 'ENDED' && snap.result ? (
-        <>
-          <ResultCard result={snap.result} locale={locale} bestScore={snap.bestScore} />
-          <p className="text-center text-sm text-muted">
-            {L('まもなく次の作戦が始まります', 'The next raid starts soon')}
-          </p>
-          <Link className="sw-btn sw-focus bg-navy-3 px-4 py-3 text-center" href="/passport">
-            🪪 {L('パイロット手帳を見る', 'Open my passport')}
-          </Link>
-        </>
-      ) : (
-        <Cockpit
-          client={client}
-          raid={snap}
-          seat={seat}
-          onSeat={(p) => setSeatPatch((s) => ({ ...s, ...p }))}
-          locale={locale}
-          easy={me.pilot.assistMode}
-          boardGate={gate}
-        />
-      )}
-      {!lobby && <PlayMap snap={snap} />}
-      {(lobby || !seat.boarded) && snap.status !== 'ENDED' && (
-        <TrainingPanel locale={locale} initialRole={seat.role ?? 'GUNNER'} />
-      )}
-      <CheerRow />
-      <Settings me={me} onChanged={refreshMe} />
-    </Shell>
+    <PlayConsole
+      snap={snap}
+      me={me}
+      conn={conn}
+      client={client}
+      connState={connState}
+      refreshMe={refreshMe}
+    />
   );
 }
 
-function PlayBody({ snap, me }: { snap: NonNullable<ReturnType<typeof useRaid>>; me: MeResponse }) {
+function linkOf(s: ReturnType<typeof useConnectionState>): LinkState {
+  return s === 'connected' ? 'connected' : s === 'offline' ? 'offline' : 'connecting';
+}
+
+/** The 3D battlefield behind the console: computers with WebGL, unless turned off. */
+function want3d(): boolean {
+  try {
+    const saved = localStorage.getItem('sw-play-3d');
+    if (saved) return saved === '1';
+  } catch {
+    // storage blocked: fall through to the device check
+  }
+  try {
+    if (!window.matchMedia('(min-width: 900px) and (pointer: fine)').matches) return false;
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') ?? c.getContext('webgl'));
+  } catch {
+    return false;
+  }
+}
+
+function PlayConsole({
+  snap,
+  me,
+  conn,
+  client,
+  connState,
+  refreshMe,
+}: {
+  snap: Snapshot;
+  me: MeResponse;
+  conn: RaidConnection;
+  client: ReturnType<typeof httpRaidClient>;
+  connState: ReturnType<typeof useConnectionState>;
+  refreshMe: () => Promise<void>;
+}) {
   const { L, locale } = useI18n();
-  useTicker(500);
-  const view = raidView(snap, snapNow(snap));
-  const lobbyLeft = snap.lobbyEndsAt
-    ? Math.max(0, Math.ceil((snap.lobbyEndsAt - Date.now()) / 1000))
+  useTicker(250);
+  const [seatPatch, setSeatPatch] = useState<Partial<SeatState>>({});
+  // A fresh /api/me is the server's seat: drop local patches.
+  useEffect(() => setSeatPatch({}), [me]);
+  const director = useMemo(() => new ArenaDirector(), []);
+  const designation = useRef<TargetDesignation | null>(null);
+  const [banner, setBanner] = useState<Banner | null>(null);
+  const [comms, setComms] = useState<CommsItem[]>([]);
+  const [use3d, setUse3d] = useState(false);
+  const [contextLost, setContextLost] = useState(false);
+  const [level, setLevel] = useState<GovernorLevel>('medium');
+  const governor = useMemo(() => new QualityGovernor({ ceiling: 'medium' }), []);
+  const reducedMotion = useMemo(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    [],
+  );
+  useEffect(() => setUse3d(want3d()), []);
+  const show3d = use3d && !contextLost && level !== '2d';
+
+  useEffect(() => {
+    director.settings = { reducedMotion, shakeScale: 0.5, shortSpecials: true };
+  }, [director, reducedMotion]);
+
+  // Server events: director cues (camera, robots, banners) and the comms line.
+  // My own results and the big moments always; the crowd's at most every 2 s.
+  const myId = me.pilot.pilotId;
+  useEffect(() => {
+    let lastAlly = 0;
+    let n = 0;
+    const say = (item: Omit<CommsItem, 'id'>, priority: boolean) => {
+      const now = performance.now();
+      if (!priority) {
+        if (now - lastAlly < 2000) return;
+        lastAlly = now;
+      }
+      setComms((xs) => [...xs.slice(-29), { ...item, id: `${Date.now()}-${++n}` }]);
+    };
+    const offs = [
+      director.onBanner(setBanner),
+      conn.store.onEvent((e) => {
+        cueFromEvent(director, e);
+        if (e.type === 'TASK_RESOLVED') {
+          const d = e.data;
+          const mine = d.pilotId === myId;
+          const who = mine ? L('あなた', 'You') : d.assist ? L('補佐AI', 'Assist AI') : d.callsign;
+          say(
+            {
+              text: `${who}: ${d.success > 0 ? effectSentence(d.effect, L) : L('ミス', 'miss')}`,
+              role: d.role,
+              tone: mine ? 'mine' : d.success > 0 ? 'ally' : 'miss',
+            },
+            mine,
+          );
+        }
+        if (e.type === 'ENEMY_DEFEATED' && e.data.callsign)
+          say(
+            {
+              text: L(`${e.data.callsign} が敵を撃破`, `${e.data.callsign} destroyed an enemy`),
+              tone: 'big',
+            },
+            true,
+          );
+        if (e.type === 'CITY_REBUILT')
+          say(
+            {
+              text: L(`${e.data.callsign} が都市を再建`, `${e.data.callsign} rebuilt a city`),
+              tone: 'big',
+            },
+            true,
+          );
+      }),
+      conn.onCheer(() => director.play({ kind: 'cheer' })),
+    ];
+    return () => offs.forEach((o) => o());
+  }, [conn, director, myId, L]);
+
+  // A different raid: calm stance, empty comms.
+  const lastRaid = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastRaid.current === snap.raidId) return;
+    lastRaid.current = snap.raidId;
+    director.reset();
+    setComms([]);
+  }, [snap.raidId, director]);
+
+  // Without the 3D canvas nothing ticks the director (banners, cinematics).
+  useEffect(() => {
+    if (show3d) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      director.update(Math.min(0.25, (now - last) / 1000));
+      last = now;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [show3d, director]);
+
+  const seat: SeatState = { ...me.seat, ...seatPatch };
+  const lobby = snap.status === 'LOBBY_OPEN' || snap.status === 'CREATED';
+  const [browsing, setBrowsing] = useState<Role | null>(null);
+  const focus = browsing ?? seat.role;
+  useEffect(() => {
+    if (lobby) director.hangarView(focus ? ROBOT_OF[focus] : 'BOTH');
+    else setBrowsing(null);
+  }, [lobby, focus, director]);
+
+  // The server decides (DEMO_MODE defaults to FREE; a PAID rehearsal still needs a pass).
+  const needsPass =
+    !seat.boarded && !me.seat.entitled && snap.passMode === 'PAID' && me.passCredits === 0;
+  const gate =
+    !snap.joinOpen && !seat.boarded ? (
+      <div className="hud-gate" data-testid="join-closed">
+        <b>{L('今回の出撃受付は終了しました', 'Boarding has closed for this raid')}</b>
+        <span className="hud-hint">
+          {L(
+            '応援して次の作戦を待とう。次はすぐ始まります',
+            'Cheer now and join the next raid soon',
+          )}
+        </span>
+      </div>
+    ) : needsPass ? (
+      <PassGate snap={snap} conn={conn} pending={me.pendingInvoice} onGranted={refreshMe} />
+    ) : undefined;
+
+  const view = raidView(snap, conn.gameNow());
+  const threats = Object.fromEntries(
+    Object.entries(view.threats).map(([k, t]) => [k, { seconds: t!.seconds, lethal: t!.lethal }]),
+  );
+  const callout: ConsoleCallout | null = banner
+    ? {
+        title: L(banner.textJa, banner.textEn),
+        sub: L(banner.subJa ?? '', banner.subEn ?? '') || undefined,
+        tone: banner.tone === 'enemy' ? 'enemy' : banner.tone === 'neutral' ? 'neutral' : 'ally',
+      }
     : null;
+
+  const toggle3d = () => {
+    const next = !use3d;
+    setUse3d(next);
+    setContextLost(false);
+    try {
+      localStorage.setItem('sw-play-3d', next ? '1' : '0');
+    } catch {
+      // per-device convenience only
+    }
+  };
+
+  return (
+    <PilotConsole
+      client={client}
+      raid={snap}
+      seat={seat}
+      onSeat={(p) => setSeatPatch((s) => ({ ...s, ...p }))}
+      locale={locale}
+      easy={me.pilot.assistMode}
+      pilot={{
+        callsign: me.pilot.callsign,
+        detail: (
+          <span className="hud-pilot-detail">
+            <span className="hud-hint">
+              {me.pilot.lightningLinked
+                ? L('Lightning 鍵で認証済み', 'Lightning key verified')
+                : L('ゲスト', 'Guest')}
+              {me.seat.stats && me.seat.stats.tasks > 0
+                ? L(
+                    ` · 出撃 ${me.seat.stats.tasks}回・成功 ${me.seat.stats.successes}回`,
+                    ` · ${me.seat.stats.tasks} sorties, ${me.seat.stats.successes} hits`,
+                  )
+                : ''}
+            </span>
+            <Link className="hud-link" href="/passport">
+              {L('パイロット手帳', 'Passport')}
+            </Link>
+          </span>
+        ),
+      }}
+      backdrop={
+        show3d ? (
+          <ArenaScene
+            director={director}
+            cities={snap.cities}
+            enemies={snap.enemies}
+            telegraphs={snap.telegraphs}
+            threats={threats}
+            cityMaxHp={snap.config.cityMaxHp}
+            glow={{
+              RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100),
+              FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
+            }}
+            health={{ RAIJIN: snap.robots[0]!.health, FUJIN: snap.robots[1]!.health }}
+            reserve={snap.reserveEnergy / 100}
+            quality={level}
+            reducedMotion={reducedMotion}
+            locale={locale}
+            bossBarrier={view.bossBarrier}
+            crew={snap.crew}
+            designation={designation}
+            focusStation={lobby ? focus : null}
+            onStats={(s: FrameStats) => {
+              const next = governor.sample(s.fps, performance.now() / 1000);
+              if (next) setLevel(next);
+            }}
+            onContextLost={() => setContextLost(true)}
+          />
+        ) : undefined
+      }
+      designation={designation}
+      lobbyEndsAt={snap.lobbyEndsAt}
+      boardGate={gate}
+      link={linkOf(connState)}
+      callout={callout}
+      comms={comms}
+      broadcast={snap.broadcast ? L(snap.broadcast.messageJa, snap.broadcast.messageEn) : null}
+      onCheer={(emoji) => void api('/api/cheer', { body: { emoji } }).catch(() => undefined)}
+      onFocusStation={setBrowsing}
+      bestScore={snap.bestScore}
+      reducedMotion={reducedMotion}
+      menu={<PilotMenu me={me} onChanged={refreshMe} use3d={use3d} onToggle3d={toggle3d} />}
+      debriefActions={
+        <>
+          <span className="hud-hint">
+            {L('まもなく次の作戦が始まります', 'The next raid starts soon')}
+          </span>
+          <Link className="hud-btn" href="/passport">
+            <Icon name="pilot" size={16} />
+            {L('パイロット手帳を見る', 'Open my passport')}
+          </Link>
+        </>
+      }
+    />
+  );
+}
+
+/** Pilot menu (inside the console's SYSTEM panel): settings and links. */
+function PilotMenu({
+  me,
+  onChanged,
+  use3d,
+  onToggle3d,
+}: {
+  me: MeResponse;
+  onChanged: () => Promise<void>;
+  use3d: boolean;
+  onToggle3d: () => void;
+}) {
+  const { L, locale, setLocale } = useI18n();
+  // Optimistic: the box flips at once; the server copy replaces it after the save.
+  const [local, setLocal] = useState({
+    assistMode: me.pilot.assistMode,
+    showNameOnArena: me.pilot.showNameOnArena,
+  });
+  useEffect(
+    () => setLocal({ assistMode: me.pilot.assistMode, showNameOnArena: me.pilot.showNameOnArena }),
+    [me.pilot.assistMode, me.pilot.showNameOnArena],
+  );
+  const patch = async (body: Partial<typeof local>) => {
+    setLocal((l) => ({ ...l, ...body }));
+    try {
+      await api('/api/me', { method: 'PATCH', body });
+    } finally {
+      await onChanged();
+    }
+  };
   return (
     <>
-      {snap.broadcast && (
-        <p className="rounded-lg bg-teal/20 px-3 py-2 text-sm font-bold" role="status">
-          📢 {L(snap.broadcast.messageJa, snap.broadcast.messageEn)}
-        </p>
-      )}
-      <RaidHeader raid={snap} view={view} locale={locale} compact />
-      {snap.status === 'LIVE' && <ThreatLine view={view} locale={locale} />}
-      {snap.status === 'LOBBY_OPEN' && (
-        <p className="sw-panel p-3 text-center font-bold" data-testid="lobby-countdown">
-          {lobbyLeft !== null
-            ? L(`出撃まで ${lobbyLeft}秒`, `Launch in ${lobbyLeft}s`)
-            : L('パイロット募集中', 'Pilots wanted')}
-          <span className="block text-xs font-normal text-muted">
-            {L(`${snap.crew.length}人が搭乗中`, `${snap.crew.length} aboard`)}
-          </span>
-        </p>
-      )}
-      {snap.status === 'PAUSED' && (
-        <p className="rounded-lg bg-amber/20 px-3 py-2 text-center font-bold" role="status">
-          ⏸ {L('一時停止中', 'Paused')}
-        </p>
-      )}
-      {me.seat.stats && me.seat.stats.tasks > 0 && (
-        <p className="text-center text-xs text-muted">
+      <section data-testid="pilot-settings">
+        <span className="hud-label">{L('設定', 'SETTINGS')}</span>
+        <label className="hud-check">
+          <input
+            type="checkbox"
+            checked={local.assistMode}
+            onChange={(e) => void patch({ assistMode: e.target.checked })}
+          />
+          {L('かんたん操作（的が大きい・ゆっくり）', 'Easy controls (bigger, slower targets)')}
+        </label>
+        <label className="hud-check">
+          <input
+            type="checkbox"
+            checked={local.showNameOnArena}
+            onChange={(e) => void patch({ showNameOnArena: e.target.checked })}
+            data-testid="show-name"
+          />
+          {L('大画面にコールサインを表示する', 'Show my callsign on the big screen')}
+        </label>
+        <label className="hud-check">
+          <input type="checkbox" checked={use3d} onChange={onToggle3d} data-testid="play-3d" />
           {L(
-            `あなたの出撃 ${me.seat.stats.tasks}回・成功 ${me.seat.stats.successes}回`,
-            `Your sorties ${me.seat.stats.tasks} · hits ${me.seat.stats.successes}`,
+            '3D の戦場を表示（重い端末ではオフ）',
+            'Show the 3D battlefield (off on slow devices)',
           )}
-        </p>
-      )}
+        </label>
+        <button
+          type="button"
+          className="hud-btn"
+          onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')}
+          aria-label={locale === 'ja' ? 'Switch to English' : '日本語に切り替え'}
+        >
+          {locale === 'ja' ? 'English' : '日本語'}
+        </button>
+      </section>
+      <section>
+        <span className="hud-label">{L('パイロット', 'PILOT')}</span>
+        <Link className="hud-btn" href="/passport">
+          <Icon name="pilot" size={16} />
+          {L('パイロット手帳', 'Passport')}
+        </Link>
+        {!me.pilot.lightningLinked && (
+          <Link className="hud-btn" href="/auth/lightning?next=/play">
+            <Icon name="energy" size={16} />
+            {L('ウォレットで記録を保存', 'Save records with a wallet')}
+          </Link>
+        )}
+      </section>
     </>
   );
 }
 
-/** Map below the cockpit: the phone's job is the mission, the big screen shows the map. */
-function PlayMap({ snap }: { snap: NonNullable<ReturnType<typeof useRaid>> }) {
-  const { L, locale } = useI18n();
-  const view = raidView(snap, snapNow(snap));
-  return (
-    <details className="sw-panel p-3">
-      <summary className="min-h-11 cursor-pointer content-center text-sm font-bold">
-        🗾 {L('日本の地図を見る', 'Show the map of Japan')}
-      </summary>
-      <div className="mx-auto max-w-sm">
-        <JapanMapMini view={view} locale={locale} maxHp={snap.config.cityMaxHp} />
-      </div>
-    </details>
-  );
-}
-
-/** Rough game time from the snapshot anchor (the cockpit uses the synced clock). */
-function snapNow(s: NonNullable<ReturnType<typeof useRaid>>): number {
-  return s.running ? s.gameMs + Math.max(0, Date.now() - s.serverTime) : s.gameMs;
-}
-
-function Shell({
+/** Before the console: the pilot authentication frame (no raid data needed). */
+function AuthShell({
   children,
   connState,
-  callsign,
 }: {
   children: React.ReactNode;
   connState: ReturnType<typeof useConnectionState>;
-  callsign?: string;
 }) {
+  const { L, locale, setLocale } = useI18n();
+  const link = linkOf(connState);
   return (
-    <main className="swc-root mx-auto flex min-h-dvh w-full max-w-xl flex-col gap-3 px-4 pt-3 pb-10">
-      <header className="flex items-center justify-between gap-2">
-        <Link href="/" className="sw-focus shrink-0 rounded">
-          <Logo size="sm" />
+    <main className="hud-root hud-auth">
+      <header className="hud-topbar">
+        <Link href="/" className="hud-brand">
+          SATS WARS <span>· EARTH DEFENSE</span>
         </Link>
-        <div className="flex min-w-0 items-center gap-1.5">
-          {callsign && (
-            <Link
-              href="/passport"
-              className="sw-focus max-w-[7rem] min-w-[4.5rem] truncate rounded-full sm:max-w-[11rem] border border-line px-2 py-1 text-xs font-bold"
-              data-testid="callsign"
-            >
-              🪪 {callsign}
-            </Link>
-          )}
-          <ConnectionPill state={connState} />
-          <LanguageToggle />
-        </div>
+        <span className="hud-topbar-sys">
+          <span
+            className={`hud-lamp hud-tone-${link === 'connected' ? 'ok' : link === 'connecting' ? 'act' : 'danger'}`}
+          >
+            <i aria-hidden="true" />
+            <span data-testid="conn-pill" data-state={connState}>
+              {link === 'connected'
+                ? 'NETWORK OK'
+                : link === 'connecting'
+                  ? L('接続中', 'LINKING')
+                  : L('切断', 'OFFLINE')}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')}
+            aria-label={locale === 'ja' ? 'Switch to English' : '日本語に切り替え'}
+          >
+            {locale === 'ja' ? 'EN' : '日本語'}
+          </button>
+        </span>
       </header>
-      {children}
+      <div className="hud-auth-body">{children}</div>
     </main>
   );
 }
@@ -257,27 +538,30 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
     }
   };
   return (
-    <section className="flex flex-col gap-4" data-testid="onboarding">
-      <div className="sw-panel p-4">
-        <h1 className="sw-display text-2xl">
-          {L('君も、パイロットになろう。', 'Become a pilot.')}
-        </h1>
-        <p className="mt-2 text-sm">{locale === 'ja' ? ONE_LINE_RULES.ja : ONE_LINE_RULES.en}</p>
-        <ul className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <li>🎯 {L('砲撃：敵の弱点を撃つ', 'Gunner: hit weak points')}</li>
-          <li>🛡 {L('防衛：街を守る', 'Guardian: shield cities')}</li>
-          <li>🔌 {L('電力：エネルギーをつなぐ', 'Router: route energy')}</li>
-          <li>🔧 {L('整備：修理する', 'Engineer: repair')}</li>
+    <section className="hud-auth-grid" data-testid="onboarding">
+      <div className="hud-auth-brief">
+        <span className="hud-label">PILOT AUTHENTICATION</span>
+        <h1>{L('君も、パイロットになろう。', 'Become a pilot.')}</h1>
+        <p className="hud-auth-rules">{locale === 'ja' ? ONE_LINE_RULES.ja : ONE_LINE_RULES.en}</p>
+        <ul className="hud-auth-roles">
+          {ROLES.map((r) => (
+            <li key={r}>
+              <Icon name={ROLE_ICON[r]} size={18} />
+              <b>{L(ROLE_LABELS[r].ja, ROLE_LABELS[r].en)}</b>
+              <span>{L(ROLE_LABELS[r].doJa, ROLE_LABELS[r].doEn)}</span>
+            </li>
+          ))}
         </ul>
       </div>
       <form
-        className="sw-panel flex flex-col gap-3 p-4"
+        className="hud-frame hud-auth-form"
         onSubmit={(e) => {
           e.preventDefault();
           void guest();
         }}
       >
-        <label className="text-sm font-bold" htmlFor="callsign">
+        <span className="hud-frame-label">PILOT ID</span>
+        <label className="hud-label" htmlFor="callsign">
           {L(
             'コールサイン（大画面に出る名前・省略可）',
             'Callsign (optional, may appear on the big screen)',
@@ -285,7 +569,7 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
         </label>
         <input
           id="callsign"
-          className="sw-focus min-h-12 rounded-lg border border-line bg-navy px-3 text-lg"
+          className="hud-input"
           value={callsign}
           onChange={(e) => setCallsign(e.target.value)}
           maxLength={20}
@@ -293,7 +577,7 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
           autoComplete="nickname"
           data-testid="callsign-input"
         />
-        <p className="text-xs text-muted">
+        <p className="hud-hint">
           {L(
             '本名や連絡先は入れないでね。名前は「大画面に表示」を選んだときだけ出ます。',
             'No real names or contacts. Your name shows on screen only if you allow it.',
@@ -302,121 +586,35 @@ function Onboarding({ onLogin }: { onLogin: () => Promise<void> }) {
         {(modes?.guest ?? true) && (
           <button
             type="submit"
-            className="sw-btn bg-amber px-4 text-lg text-navy"
+            className="hud-trigger is-board"
             disabled={busy}
             data-testid="guest-login"
           >
-            🚀 {L('ゲストで搭乗', 'Board as guest')}
+            <Icon name="launch" size={20} />
+            <span className="hud-trigger-word">{L('ゲストで搭乗', 'Board as guest')}</span>
           </button>
         )}
         {modes?.lightning && (
-          <Link
-            className="sw-btn sw-focus flex items-center justify-center bg-navy-3 px-4"
-            href="/auth/lightning?next=/play"
-            data-testid="lightning-login"
-          >
-            ⚡{' '}
+          <Link className="hud-btn" href="/auth/lightning?next=/play" data-testid="lightning-login">
+            <Icon name="energy" size={16} />
             {L(
               'Lightningウォレットでログイン（記録を残す）',
               'Log in with a Lightning wallet (keep records)',
             )}
           </Link>
         )}
+        <p className="hud-hint">
+          {L(
+            'Lightning ログインは鍵の所持証明です。秘密鍵やシードを入力することはありません。',
+            'Lightning login proves you hold a key. You never enter a private key or seed.',
+          )}
+        </p>
         {error && (
-          <p className="text-sm text-danger" role="alert">
+          <p className="hud-error" role="alert">
             {error}
           </p>
         )}
       </form>
     </section>
-  );
-}
-
-function CheerRow() {
-  const { L } = useI18n();
-  const [sent, setSent] = useState<string | null>(null);
-  const cheer = async (emoji: string) => {
-    try {
-      await api('/api/cheer', { body: { emoji } });
-      setSent(emoji);
-      setTimeout(() => setSent(null), 1200);
-    } catch {
-      // cheering is best-effort
-    }
-  };
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-xs text-muted">
-        {L('応援（無料・大画面に出る）', 'Cheer (free, shown on the big screen)')}
-      </p>
-      <div className="grid grid-cols-6 gap-1">
-        {CHEER_EMOJIS.map((e) => (
-          <button
-            key={e}
-            type="button"
-            className={`sw-btn sw-focus bg-navy-3 text-xl ${sent === e ? 'ring-2 ring-teal' : ''}`}
-            onClick={() => void cheer(e)}
-            aria-label={L(`応援 ${e}`, `Cheer ${e}`)}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Settings({ me, onChanged }: { me: MeResponse; onChanged: () => Promise<void> }) {
-  const { L } = useI18n();
-  // Optimistic: the box flips at once; the server copy replaces it after the save.
-  const [local, setLocal] = useState({
-    assistMode: me.pilot.assistMode,
-    showNameOnArena: me.pilot.showNameOnArena,
-  });
-  useEffect(
-    () => setLocal({ assistMode: me.pilot.assistMode, showNameOnArena: me.pilot.showNameOnArena }),
-    [me.pilot.assistMode, me.pilot.showNameOnArena],
-  );
-  const patch = async (body: Partial<typeof local>) => {
-    setLocal((l) => ({ ...l, ...body }));
-    try {
-      await api('/api/me', { method: 'PATCH', body });
-    } finally {
-      await onChanged();
-    }
-  };
-  return (
-    <details className="sw-panel p-3 text-sm">
-      <summary className="cursor-pointer font-bold">⚙ {L('設定', 'Settings')}</summary>
-      <div className="mt-2 flex flex-col gap-2">
-        <label className="flex min-h-11 items-center gap-2">
-          <input
-            type="checkbox"
-            checked={local.assistMode}
-            onChange={(e) => void patch({ assistMode: e.target.checked })}
-          />
-          {L('かんたん操作（的が大きい・ゆっくり）', 'Easy controls (bigger, slower targets)')}
-        </label>
-        <label className="flex min-h-11 items-center gap-2">
-          <input
-            type="checkbox"
-            checked={local.showNameOnArena}
-            onChange={(e) => void patch({ showNameOnArena: e.target.checked })}
-            data-testid="show-name"
-          />
-          {L('大画面にコールサインを表示する', 'Show my callsign on the big screen')}
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Link className="sw-btn sw-focus bg-navy-3 px-3 py-2" href="/passport">
-            🪪 {L('パイロット手帳', 'Passport')}
-          </Link>
-          {!me.pilot.lightningLinked && (
-            <Link className="sw-btn sw-focus bg-navy-3 px-3 py-2" href="/auth/lightning?next=/play">
-              ⚡ {L('ウォレットで記録を保存', 'Save records with a wallet')}
-            </Link>
-          )}
-        </div>
-      </div>
-    </details>
   );
 }

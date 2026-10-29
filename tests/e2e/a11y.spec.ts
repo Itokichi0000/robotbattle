@@ -1,7 +1,16 @@
 import AxeBuilder from '@axe-core/playwright';
 import { type Page, expect, test } from '@playwright/test';
 import { E2E_ADMIN_PASSWORD } from './playwright.config';
-import { admin, adminToken, freshLobby, guestPhone, mobile, playRouter, snapshot } from './helpers';
+import {
+  admin,
+  adminToken,
+  boardAs,
+  freshLobby,
+  guestPhone,
+  mobile,
+  playRouter,
+  snapshot,
+} from './helpers';
 
 /**
  * Automated accessibility audit (axe-core, WCAG 2.1 A/AA rules) of every
@@ -56,7 +65,7 @@ test('phone flow: pass gate, seat select, cockpit, minigame, result', async ({
   await p.reload();
   await expect(p.getByTestId('seat-ROUTER')).toBeVisible();
   await audit(p, 'seat select');
-  await p.getByTestId('seat-ROUTER').click();
+  await boardAs(p, 'ROUTER');
   await expect(p.getByTestId('cockpit-wait')).toBeVisible();
   await audit(p, 'cockpit (waiting)');
   await admin(request, token, { command: 'START' });

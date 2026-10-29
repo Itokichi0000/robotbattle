@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { E2E_ADMIN_PASSWORD } from './playwright.config';
 import {
-  SERVER,
   admin,
   adminToken,
+  boardAs,
   freshLobby,
   guestPhone,
   mobile,
   playGuardian,
+  SERVER,
   snapshot,
 } from './helpers';
 
@@ -16,7 +17,10 @@ test.describe.configure({ mode: 'serial' });
 test('venue raid: paid + sponsored pass, two seats, mission result, name on the big screen, results', async ({
   browser,
   request,
-}) => {
+}, info) => {
+  // Pilot console screenshots for design review (test-results/…).
+  const snap = (pg: import('@playwright/test').Page, name: string) =>
+    pg.screenshot({ path: info.outputPath(`play-${name}.png`) });
   const token = await adminToken(request);
   await freshLobby(request, token);
 
@@ -30,14 +34,17 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   const ctxA = await browser.newContext(mobile);
   const a = await guestPhone(ctxA, 'タロウ');
   await expect(a.getByTestId('pass-gate')).toBeVisible();
+  await snap(a, 'pass-gate');
   await a.getByTestId('buy-pass').click();
   await expect(a.getByTestId('invoice')).toContainText('テストモード');
   await a.getByTestId('mock-pay').click();
-  await a.getByTestId('seat-GUARDIAN').click();
+  await boardAs(a, 'GUARDIAN');
   await expect(a.getByTestId('cockpit-wait')).toBeVisible();
-  // Opt in to showing the callsign on the big screen.
-  await a.getByText('⚙ 設定').click();
+  await snap(a, 'ready');
+  // Opt in to showing the callsign on the big screen (pilot menu).
+  await a.getByTestId('console-menu').click();
   await a.getByTestId('show-name').check();
+  await a.getByTestId('console-menu').click();
 
   // Pilot B uses a sponsored pass code from the staff.
   const codes = (
@@ -53,7 +60,7 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
   await b.getByText('スポンサーパスのコードを持っている').click();
   await b.getByTestId('sponsored-code').fill(codes[0]!);
   await b.getByRole('button', { name: '使う' }).first().click();
-  await b.getByTestId('seat-GUNNER').click();
+  await boardAs(b, 'GUNNER');
   await expect(b.getByTestId('cockpit-wait')).toBeVisible();
 
   await admin(request, token, { command: 'START' });
@@ -61,9 +68,11 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
 
   // A flies a Guardian mission; the server scores the raw input.
   await expect(a.getByTestId('sortie')).toBeEnabled();
+  await snap(a, 'battle');
   await a.getByTestId('sortie').click();
   await playGuardian(a);
   await expect(a.getByTestId('task-result')).toContainText('シールド');
+  await snap(a, 'result');
   await expect(arena.getByTestId('action-popups')).toContainText('タロウ');
 
   // The same pass is good for the whole raid: no second payment, cooldown instead.
@@ -71,6 +80,7 @@ test('venue raid: paid + sponsored pass, two seats, mission result, name on the 
 
   await admin(request, token, { command: 'END' });
   await expect(a.getByTestId('result-card')).toBeVisible();
+  await snap(a, 'debrief');
   await expect(arena.getByTestId('arena-results')).toBeVisible();
   const raidId = (await snapshot(request)).raidId;
 
@@ -119,8 +129,9 @@ test('phone UI: 320px wide without horizontal scroll, English toggle', async ({ 
   await expect(p.getByTestId('pass-gate')).toBeVisible();
   await expect(p.getByTestId('pass-gate')).toContainText('Raid pass');
   expect(await overflow()).toBeLessThanOrEqual(0);
+  await p.getByTestId('practice-toggle').click();
   await p.getByTestId('training').getByRole('tab').nth(2).click();
-  await expect(p.getByTestId('training').locator('.swc-router-svg')).toBeVisible();
+  await expect(p.getByTestId('training').getByTestId('router-board')).toBeVisible();
   expect(await overflow()).toBeLessThanOrEqual(0);
   await ctx.close();
 });

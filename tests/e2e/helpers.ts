@@ -64,6 +64,15 @@ export async function guestPhone(ctx: BrowserContext, callsign: string): Promise
 }
 
 /**
+ * Board a station from the hangar: choose it in the station list, then
+ * confirm (the hangar separates choosing from boarding).
+ */
+export async function boardAs(p: Page, role: 'GUNNER' | 'GUARDIAN' | 'ROUTER' | 'ENGINEER') {
+  await p.getByTestId(`seat-${role}`).click();
+  await p.getByTestId('board-confirm').click();
+}
+
+/**
  * Wait inside the page (every animation frame) until `ready` matches, then act.
  * The timing windows are a few hundred ms; polling from the test runner would
  * react too late on a busy machine.
@@ -87,22 +96,29 @@ async function whenInPage(p: Page, ready: string, act: 'click' | 'space', target
 /** Play the Guardian minigame well: press the attack's direction while the gauge is green. */
 export async function playGuardian(p: Page) {
   await expect(p.getByTestId('minigame')).toBeVisible();
-  await whenInPage(p, '.swc-gauge-fill.is-green', 'click', '.swc-dir.is-threat');
+  await whenInPage(
+    p,
+    '[data-testid="guardian-gauge"][data-window="1"]',
+    'click',
+    'button[data-threat="1"]',
+  );
 }
 
 /** Gunner: fire with the keyboard (Space, the no-touch alternative) when the reticle is in the ring. */
 export async function playGunner(p: Page) {
   await expect(p.getByTestId('gunner-fire')).toBeVisible();
-  await whenInPage(p, '.swc-gunner-reticle.is-in', 'space');
+  await whenInPage(p, '[data-testid="gunner-reticle"][data-locked="1"]', 'space');
 }
 
 /** Router: walk the graph toward a destination (prefers a reachable sink). */
 export async function playRouter(p: Page) {
-  await expect(p.locator('.swc-router-svg')).toBeVisible();
+  await expect(p.getByTestId('router-board')).toBeVisible();
   for (let i = 0; i < 12; i++) {
     if (await p.getByTestId('task-result').isVisible()) return;
-    const sink = p.locator('.swc-node.is-next.is-sink');
-    const next = (await sink.count()) ? sink.first() : p.locator('.swc-node.is-next').first();
+    const sink = p.locator('[data-kind="sink"][data-next="1"]');
+    const next = (await sink.count())
+      ? sink.first()
+      : p.locator('[data-testid^="router-node-"][data-next="1"]').first();
     if (!(await next.count())) return; // dead end: the timer will submit
     await next.click();
   }
@@ -110,7 +126,10 @@ export async function playRouter(p: Page) {
 
 /** Engineer: press the switches in the shown order with letter keys. */
 export async function playEngineer(p: Page) {
-  const order = await p.locator('.swc-order li').allTextContents();
+  const order = await p
+    .getByTestId('engineer-order')
+    .locator('.hud-procedure-sw')
+    .allTextContents();
   expect(order.length).toBeGreaterThan(0);
   for (const letter of order) await p.keyboard.press(letter.trim().toLowerCase());
 }

@@ -40,14 +40,14 @@ export function describeEvent(e: ReplayEvent, L: Lx): { text: string; big: boole
         : null;
     case 'ENEMY_DEFEATED':
       return {
-        text: `💥 ${L(ENEMY_LABELS[e.data.kind].ja, ENEMY_LABELS[e.data.kind].en)} ${L('撃破', 'destroyed')}${e.data.callsign ? ` — ${e.data.callsign}` : ''}`,
+        text: `${L(ENEMY_LABELS[e.data.kind].ja, ENEMY_LABELS[e.data.kind].en)} ${L('撃破', 'destroyed')}${e.data.callsign ? ` — ${e.data.callsign}` : ''}`,
         big: e.data.kind === 'BOSS',
       };
     case 'CITY_DESTROYED':
       return { text: `🔥 ${cityName(e.data.cityId, L)} ${L('陥落', 'fell')}`, big: true };
     case 'CITY_REBUILT':
       return {
-        text: `🏗 ${cityName(e.data.cityId, L)} ${L('再建', 'rebuilt')} — ${e.data.callsign}`,
+        text: `${cityName(e.data.cityId, L)} ${L('再建', 'rebuilt')} — ${e.data.callsign}`,
         big: true,
       };
     case 'SPECIAL_WINDOW_OPENED':
@@ -60,7 +60,7 @@ export function describeEvent(e: ReplayEvent, L: Lx): { text: string; big: boole
     case 'TASK_RESOLVED':
       return e.data.success > 0
         ? {
-            text: `${e.data.assist ? L('補佐AI', 'AI assist') : e.data.callsign} ${ROLE_LABELS[e.data.role].icon} ${effectSentence(e.data.effect, L)}`,
+            text: `${e.data.assist ? L('補佐AI', 'AI assist') : e.data.callsign}・${L(ROLE_LABELS[e.data.role].ja, ROLE_LABELS[e.data.role].en)}：${effectSentence(e.data.effect, L)}`,
             big: false,
           }
         : null;
@@ -69,7 +69,7 @@ export function describeEvent(e: ReplayEvent, L: Lx): { text: string; big: boole
       if (!hit.length)
         return { text: `🛡 ${L('攻撃をシールドで防いだ', 'Shields held the attack')}`, big: false };
       return {
-        text: `⚠ ${hit.map((h) => `${cityName(h.cityId, L)} −${Math.round(h.damage - h.absorbed)}`).join('・')}`,
+        text: `${L('被弾', 'Hit')} ${hit.map((h) => `${cityName(h.cityId, L)} −${Math.round(h.damage - h.absorbed)}`).join('・')}`,
         big: false,
       };
     }

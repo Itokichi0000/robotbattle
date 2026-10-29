@@ -76,7 +76,7 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
         for (const w of ordered) {
           out.push({
             key: `${e.id}-${w}`,
-            label: `${ENEMY_LABELS[e.kind].icon} ${L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en)}・${L(WEAKPOINT_LABELS[w].ja, WEAKPOINT_LABELS[w].en)}`,
+            label: `${L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en)}・${L(WEAKPOINT_LABELS[w].ja, WEAKPOINT_LABELS[w].en)}`,
             hint: L(WEAKPOINT_LABELS[w].hintJa, WEAKPOINT_LABELS[w].hintEn),
             choice: { enemyId: e.id, weakpoint: w },
             danger: e.ai === 'TELEGRAPH',
@@ -87,7 +87,7 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
       if (!out.length && b.config.gunner.chargeEnergy > 0)
         out.push({
           key: 'charge',
-          label: L('⚡ 雷鼓チャージ', '⚡ Charge the thunder drums'),
+          label: L('雷鼓チャージ', 'Charge the thunder drums'),
           hint: L(
             '敵がいない間に雷神へエネルギー（満タンなら予備電源へ）',
             'No enemy yet: energy to Raijin (reserve when full)',
@@ -109,7 +109,7 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
           const secs = Math.max(0, Math.ceil((t.resolvesAt - b.gameMs) / 1000));
           out.push({
             key: `${t.id}-${c}`,
-            label: `🛡 ${cityName(c, L)}`,
+            label: cityName(c, L),
             hint: L(`${secs}秒後に攻撃`, `attack in ${secs}s`),
             choice: { telegraphId: t.id, cityId: c },
             danger: true,
@@ -123,7 +123,7 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
       for (const c of standby.slice(0, 2)) {
         out.push({
           key: `standby-${c}`,
-          label: `🛡 ${cityName(c, L)}`,
+          label: cityName(c, L),
           hint: L('先に守っておく', 'shield in advance'),
           choice: { cityId: c },
         });
@@ -140,7 +140,7 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
       ];
       return sinks.map((s) => ({
         key: s,
-        label: `🔌 ${L(SINK_LABELS[s].ja, SINK_LABELS[s].en)}`,
+        label: L(SINK_LABELS[s].ja, SINK_LABELS[s].en),
         hint: L(SINK_LABELS[s].hintJa, SINK_LABELS[s].hintEn),
         choice: { sink: s },
       }));
@@ -172,14 +172,14 @@ function repairLabel(
 ): { label: string; hint: string; danger?: boolean } {
   if (r.type === 'UNJAM')
     return {
-      label: L('🔧 電力妨害を解除', '🔧 Clear the jam'),
+      label: L('電力妨害を解除', 'Clear the jam'),
       hint: L('電力接続が元に戻る', 'Routing back to normal'),
       danger: true,
     };
   if (r.type === 'ROBOT') {
     const name = r.robot === 'RAIJIN' ? L('雷神', 'Raijin') : L('風神', 'Fujin');
     return {
-      label: `🔧 ${name}`,
+      label: name,
       hint: L(
         `機体 ${Math.round(b.robots[r.robot].health)}%`,
         `hull ${Math.round(b.robots[r.robot].health)}%`,
@@ -188,9 +188,9 @@ function repairLabel(
   }
   const c = b.cities[r.cityId];
   return c.destroyed
-    ? { label: `🏗 ${cityName(r.cityId, L)}`, hint: L('再建する', 'Rebuild'), danger: true }
+    ? { label: cityName(r.cityId, L), hint: L('再建する', 'Rebuild'), danger: true }
     : {
-        label: `🔧 ${cityName(r.cityId, L)}`,
+        label: cityName(r.cityId, L),
         hint: L(`耐久 ${Math.round(c.hp)}`, `HP ${Math.round(c.hp)}`),
       };
 }

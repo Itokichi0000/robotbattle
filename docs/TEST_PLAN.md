@@ -27,6 +27,8 @@
 
 ### E2E（Playwright、サーバーと web を自分で起動、`PASS_MODE=PAID`・`AUTH_MODE=both`・`DEMO_MODE=true`・mock 決済）
 
+席の選択は格納庫のステーション一覧で選んでから「搭乗する」（`boardAs`）。名前表示などの設定はメニュー（`console-menu`）。
+
 `game.spec.ts`
 
 1. **会場レイド**：大画面（2D）にロビーと QR・21 sats → スマホA：ゲスト→パスゲート→請求書→テスト支払い→防衛席、名前表示ON →
@@ -50,11 +52,13 @@
 | `pnpm simulate`                                            | 人数・役割構成・腕前の表（`docs/BALANCE_REPORT.md`）                                     |
 | `pnpm load:matrix --url … --password … --server-pid …`     | 2/10/30/50人＋観客100の負荷（`docs/LOAD_TEST_REPORT.md`）                                |
 | `pnpm smoke --server … --web …`                            | 公開後のスモークテスト（読み取り＋ゲスト1人）                                            |
+| `pnpm solo && pnpm ui:capture`                             | パイロット画面のキャプチャ（格納庫・戦闘6状態・3席）を3サイズで（D-072、仕様 §10）       |
 
 ## 実行結果（2026-10-29、開発コンテナ：4 CPU、GPU なし・SwiftShader）
 
 - `pnpm test`：**140件すべて成功**（engine 32, shared 11, three-game 36＋納品物検査2件 skip, server 52, simulations＋blender 7, solo 2）
-- `pnpm e2e`：**14件すべて成功**（約4分。デモシードの2ルートを含む）
+- `pnpm e2e`：**14件すべて成功**（約5分。デモシードの2ルートを含む。D-072 の新しいパイロット画面で再実行、axe 違反0。
+  メインの会場レイドのテストはパスゲート・READY・戦闘・判定・デブリーフのスマホ画面を `test-results/` に保存）
 - `pnpm lint`：エラー0・警告0 / `pnpm typecheck`：成功 / `pnpm build`：成功（最終確認は PROGRESS）
 - `pnpm demo:seed`：成功ルート SUCCEEDED・神雷風陣 ACTIVATED（7:01）、失敗ルート FAILED・神雷風陣 FAILED（日本陥落 7:56）
 - 負荷・シミュレーション：`docs/LOAD_TEST_REPORT.md`、`docs/BALANCE_SIM_1000.md`

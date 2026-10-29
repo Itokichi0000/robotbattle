@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { ArenaDirector } from './director';
+import { tacticalFloorTexture } from './Grounding';
 import {
   CAMERA_PRESETS,
   CAMERA_SHOTS,
@@ -80,7 +81,9 @@ export function CameraRig({
       target.current.copy(desiredTarget);
       first.current = false;
     } else {
-      const speed = director.camera.preset === 'intro' ? 0.6 : 2.6;
+      // Hangar moves settle in ~0.5 s (spec 2.6: 0.35–0.6 s).
+      const p = director.camera.preset;
+      const speed = p === 'intro' ? 0.6 : p.startsWith('hangar') ? 6 : 2.6;
       const k = 1 - Math.exp(-dt * speed);
       camera.position.lerp(desiredPos, k);
       target.current.lerp(desiredTarget, k);
@@ -95,16 +98,20 @@ export function CameraRig({
   return null;
 }
 
+/**
+ * Spec 3.3.4: a cool key light with direction, a weaker rim from behind to
+ * cut the silhouettes out of the dark, warm and cool accents by each robot.
+ * Fills stay low; the procedural environment (PostFx.tsx) adds reflections.
+ */
 export function LightingRig({ shadows }: { shadows: boolean }) {
   return (
     <>
-      {/* The stage environment (PostFx.tsx) adds reflected light, so the fills stay low. */}
-      <ambientLight intensity={0.22} color="#8FA6D8" />
-      <hemisphereLight args={['#5B7BC0', '#0A0F1C', 0.45]} />
+      <ambientLight intensity={0.16} color="#8FA6D8" />
+      <hemisphereLight args={['#4F6C9E', '#06090F', 0.35]} />
       <directionalLight
-        position={[6, 14, 9]}
-        intensity={1.6}
-        color="#FFF2E0"
+        position={[-7, 14, 10]}
+        intensity={1.55}
+        color="#D9E6FF"
         castShadow={shadows}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
@@ -112,26 +119,33 @@ export function LightingRig({ shadows }: { shadows: boolean }) {
         shadow-camera-right={12}
         shadow-camera-top={12}
         shadow-camera-bottom={-12}
+        shadow-bias={-0.0004}
       />
+      {/* Rim: from behind and above, toward the audience. */}
+      <directionalLight position={[5, 9, -14]} intensity={1.35} color="#A9CBFF" />
       <pointLight
-        position={[ROBOT_HOME.RAIJIN.x - 2, 3.5, 3]}
-        intensity={30}
-        distance={14}
+        position={[ROBOT_HOME.RAIJIN.x - 1.5, 3.2, 2.6]}
+        intensity={20}
+        distance={10}
         color={TEAM_COLORS.RAIJIN}
       />
       <pointLight
-        position={[ROBOT_HOME.FUJIN.x + 2, 3.5, 3]}
-        intensity={30}
-        distance={14}
+        position={[ROBOT_HOME.FUJIN.x + 1.5, 3.2, 2.6]}
+        intensity={20}
+        distance={10}
         color={TEAM_COLORS.FUJIN}
       />
-      <pointLight position={[0, 8, -6]} intensity={25} distance={18} color="#3A7BD5" />
+      <pointLight position={[0, 8, -6]} intensity={16} distance={16} color="#3A7BD5" />
     </>
   );
 }
 
-/** Futuristic arena floor with team-coloured halves and a starfield. */
-/** `floor: false` keeps only the star field (an arena GLB brings its own stage). */
+/**
+ * The arena floor: a dark steel tactical table (deck panels, range rings),
+ * one deck pad under each robot, gate posts and a star field. No team-coloured
+ * halves: Raijin and Fujin stand on the same side.
+ * `floor: false` keeps only the star field (an arena GLB brings its own stage).
+ */
 export function ArenaStage({ stars, floor = true }: { stars: number; floor?: boolean }) {
   const starGeometry = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -147,14 +161,15 @@ export function ArenaStage({ stars, floor = true }: { stars: number; floor?: boo
     g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
     return g;
   }, [stars]);
+  const deck = useMemo(() => tacticalFloorTexture(), []);
   const ringRef = useRef<THREE.Mesh>(null);
   useFrame((_, dt) => {
-    if (ringRef.current) ringRef.current.rotation.z += dt * 0.05;
+    if (ringRef.current) ringRef.current.rotation.z += dt * 0.03;
   });
 
   const starField = stars > 0 && (
     <points geometry={starGeometry}>
-      <pointsMaterial size={0.18} color="#C8D8FF" transparent opacity={0.8} sizeAttenuation />
+      <pointsMaterial size={0.16} color="#C8D8FF" transparent opacity={0.7} sizeAttenuation />
     </points>
   );
   if (!floor) return <group name="arena-stars">{starField}</group>;
@@ -163,31 +178,37 @@ export function ArenaStage({ stars, floor = true }: { stars: number; floor?: boo
     <group name="arena-stage">
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <circleGeometry args={[13, 96]} />
-        <meshStandardMaterial color="#0C1426" metalness={0.75} roughness={0.35} />
+        <meshStandardMaterial
+          color="#9FB2C4"
+          map={deck}
+          metalness={0.7}
+          roughness={0.58}
+          envMapIntensity={0.6}
+        />
       </mesh>
-      {/* Team halves */}
-      <mesh rotation={[-Math.PI / 2, 0, Math.PI / 2]} position={[0, 0.01, 0]}>
-        <circleGeometry args={[7.5, 64, 0, Math.PI]} />
-        <meshBasicMaterial color={TEAM_COLORS.RAIJIN} transparent opacity={0.08} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, -Math.PI / 2]} position={[0, 0.01, 0]}>
-        <circleGeometry args={[7.5, 64, 0, Math.PI]} />
-        <meshBasicMaterial color={TEAM_COLORS.FUJIN} transparent opacity={0.08} />
-      </mesh>
+      {/* A thin rotating range ring and the table edge. */}
       <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[7.4, 7.6, 96, 1, 0, Math.PI * 1.85]} />
-        <meshBasicMaterial color="#3A7BD5" transparent opacity={0.8} />
+        <ringGeometry args={[7.45, 7.52, 128, 1, 0, Math.PI * 1.85]} />
+        <meshBasicMaterial color="#48C8D9" transparent opacity={0.35} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[12.6, 13, 96]} />
-        <meshBasicMaterial color="#1F3B66" />
+        <ringGeometry args={[12.7, 13, 128]} />
+        <meshStandardMaterial color="#22313A" metalness={0.85} roughness={0.35} />
       </mesh>
-      {/* Centre clash mark */}
-      <mesh rotation={[-Math.PI / 2, 0, Math.PI / 4]} position={[0, 0.03, 0.6]}>
-        <ringGeometry args={[0.9, 1.05, 4]} />
-        <meshBasicMaterial color="#EFF5FF" transparent opacity={0.5} />
-      </mesh>
-      {/* Pylons around the ring (abstract gate posts) */}
+      {/* Deck pads under the two machines (raised steel plates). */}
+      {(['RAIJIN', 'FUJIN'] as const).map((t) => (
+        <group key={t} position={[ROBOT_HOME[t].x, 0, ROBOT_HOME[t].z]}>
+          <mesh position={[0, 0.04, 0]} receiveShadow>
+            <cylinderGeometry args={[2.1, 2.2, 0.08, 6]} />
+            <meshStandardMaterial color="#1A242D" metalness={0.85} roughness={0.42} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, Math.PI / 6]} position={[0, 0.085, 0]}>
+            <ringGeometry args={[1.9, 1.96, 6]} />
+            <meshBasicMaterial color={TEAM_COLORS[t]} transparent opacity={0.45} />
+          </mesh>
+        </group>
+      ))}
+      {/* Gate posts around the table: dark steel, a small lamp each. */}
       {Array.from({ length: 10 }, (_, i) => {
         const a = Math.PI * (0.05 + (i / 9) * 0.9);
         const x = Math.cos(a) * 12;
@@ -197,11 +218,11 @@ export function ArenaStage({ stars, floor = true }: { stars: number; floor?: boo
           <group key={i} position={[-x, 0, z]}>
             <mesh position={[0, 1.6, 0]} castShadow>
               <boxGeometry args={[0.45, 3.2, 0.45]} />
-              <meshStandardMaterial color="#121C33" metalness={0.8} roughness={0.4} />
+              <meshStandardMaterial color="#141C24" metalness={0.85} roughness={0.4} />
             </mesh>
-            <mesh position={[0, 3.3, 0]}>
-              <boxGeometry args={[0.9, 0.12, 0.5]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.4} />
+            <mesh position={[0, 3.26, 0]}>
+              <boxGeometry args={[0.5, 0.06, 0.5]} />
+              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.9} />
             </mesh>
           </group>
         );

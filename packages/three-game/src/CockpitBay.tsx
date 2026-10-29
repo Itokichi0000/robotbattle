@@ -223,7 +223,6 @@ export function CockpitBay({
               zIndexRange={[5, 0]}
             >
               <div className="sw-cockpit-group" style={{ borderColor: ROLE_SEAT_COLORS[role] }}>
-                {ROLE_LABELS[role].icon}{' '}
                 {locale === 'ja' ? ROLE_LABELS[role].ja : ROLE_LABELS[role].en}
                 {overflow[role] > 0 && <span className="sw-cockpit-more"> +{overflow[role]}</span>}
               </div>

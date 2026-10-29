@@ -8,6 +8,7 @@ import { ApiError, api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 import { LicenseCard } from './LicenseCard';
 import { NostrLink } from './NostrLink';
+import { Icon, ROLE_ICON } from '@sats-wars/ui';
 
 /**
  * Pilot license + SATS PASSPORT: rank, titles and raid history. Everything
@@ -157,7 +158,8 @@ export function PassportView() {
                 <Link href={`/results/${h.raidId}`} className="block">
                   <div className="text-2xl">{h.outcome === 'SUCCEEDED' ? '🏆' : '🛡'}</div>
                   <div className="font-bold">
-                    {ROLE_LABELS[h.role].icon} {L(ROLE_LABELS[h.role].ja, ROLE_LABELS[h.role].en)}
+                    <Icon name={ROLE_ICON[h.role]} className="mr-1 inline size-4 align-[-0.15em]" />
+                    {L(ROLE_LABELS[h.role].ja, ROLE_LABELS[h.role].en)}
                   </div>
                   <div className="text-xs text-muted">
                     {new Date(h.endedAt).toLocaleDateString()}

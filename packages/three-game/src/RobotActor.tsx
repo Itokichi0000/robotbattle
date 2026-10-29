@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
+import { ContactShadow } from './Grounding';
 import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
 import { applyClip } from './robots/animate';
 import { buildFujin, buildRaijin, damageStageFor, setDamageStage } from './robots/build';
@@ -47,6 +48,7 @@ export function RobotActor({ teamId, director, energyRatio, health = 100 }: Robo
       name={`robot-${teamId}`}
     >
       <primitive object={rig.root} />
+      <ContactShadow root={rig.root} radius={teamId === 'RAIJIN' ? 1.7 : 1.3} />
     </group>
   );
 }

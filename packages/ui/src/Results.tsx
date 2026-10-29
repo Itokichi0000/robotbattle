@@ -1,6 +1,7 @@
 import type { RaidResult } from '@sats-wars/shared';
-import { ROLE_LABELS, SPECIAL_LABELS } from '@sats-wars/shared';
-import { fmtClock } from './Hud';
+import { SPECIAL_LABELS } from '@sats-wars/shared';
+import { Icon, type IconName } from './hud/icons';
+import { fmtClock } from './hud/primitives';
 
 type Lx = (ja: string, en: string) => string;
 
@@ -12,9 +13,12 @@ const REASON: Record<RaidResult['reason'], { ja: string; en: string }> = {
   CANCELLED: { ja: '中止', en: 'Cancelled' },
 };
 
-const MVP_ICON: Record<string, string> = {
-  ...Object.fromEntries(Object.entries(ROLE_LABELS).map(([k, v]) => [k, v.icon])),
-  SYNC: '🤝',
+const MVP_ICON: Record<string, IconName> = {
+  GUNNER: 'gunner',
+  GUARDIAN: 'guardian',
+  ROUTER: 'router',
+  ENGINEER: 'engineer',
+  SYNC: 'sync',
 };
 const MVP_NAME: Record<string, { ja: string; en: string }> = {
   GUNNER: { ja: '最優秀砲撃手', en: 'Top gunner' },
@@ -44,31 +48,32 @@ export function ResultCard({
     [L('ボス撃破', 'Boss defeated'), s.bossDefeat],
   ];
   return (
-    <section className={`swc-resultcard ${won ? 'is-win' : 'is-lose'}`} data-testid="result-card">
-      <h2 className="swc-result-title">
+    <section className={`hud-debrief ${won ? 'is-win' : 'is-lose'}`} data-testid="result-card">
+      <span className="hud-label">MISSION DEBRIEF</span>
+      <h2 className="hud-debrief-title">
         {won
-          ? L('地球防衛 成功！', 'EARTH DEFENDED!')
+          ? L('地球防衛 成功', 'EARTH DEFENDED')
           : result.outcome === 'CANCELLED'
             ? L('作戦中止', 'Raid cancelled')
-            : L('防衛失敗…', 'Defence failed…')}
+            : L('防衛失敗', 'Defence failed')}
       </h2>
-      <p className="swc-muted">
+      <p className="hud-debrief-sub">
         {L(REASON[result.reason].ja, REASON[result.reason].en)}
         {result.clearTimeMs !== null
           ? L(`（${fmtClock(result.clearTimeMs)}で撃破）`, ` (at ${fmtClock(result.clearTimeMs)})`)
           : ''}
-        {' ・ '}
+        {' · '}
         {L(`残った都市 ${result.survivingCities}/8`, `${result.survivingCities}/8 cities left`)}
-        {' ・ '}
+        {' · '}
         {L(SPECIAL_LABELS[result.special].ja, SPECIAL_LABELS[result.special].en)}
       </p>
-      <div className="swc-score">
-        <span className="swc-score-total" data-testid="score-total">
+      <div className="hud-debrief-score">
+        <span className="hud-label">TEAM SCORE</span>
+        <b className="hud-num" data-testid="score-total">
           {Math.round(s.total)}
-        </span>
-        <span className="swc-muted">{L('チームスコア', 'Team score')}</span>
+        </b>
         {bestScore != null && (
-          <span className="swc-muted">
+          <span className="hud-hint">
             {L(
               `同じルールの最高 ${Math.round(bestScore)}`,
               `Best with same rules ${Math.round(bestScore)}`,
@@ -76,27 +81,28 @@ export function ResultCard({
           </span>
         )}
       </div>
-      <dl className="swc-score-rows">
+      <dl className="hud-debrief-rows">
         {rows.map(([k, v]) => (
           <div key={k}>
             <dt>{k}</dt>
-            <dd>{Math.round(v)}</dd>
+            <dd className="hud-num">{Math.round(v)}</dd>
           </div>
         ))}
       </dl>
       {Object.keys(result.mvps).length > 0 && (
-        <ul className="swc-mvps" aria-label="MVP">
+        <ul className="hud-debrief-mvps" aria-label="MVP">
           {Object.entries(result.mvps).map(([k, m]) =>
             m ? (
               <li key={k}>
-                <span aria-hidden="true">{MVP_ICON[k]}</span> {L(MVP_NAME[k]!.ja, MVP_NAME[k]!.en)}
-                ：<b>{m.callsign}</b>
+                <Icon name={MVP_ICON[k] ?? 'pilot'} size={14} />
+                <span>{L(MVP_NAME[k]!.ja, MVP_NAME[k]!.en)}</span>
+                <b>{m.callsign}</b>
               </li>
             ) : null,
           )}
         </ul>
       )}
-      <p className="swc-muted swc-small">
+      <p className="hud-hint">
         {L(`パイロット ${result.pilots}人`, `${result.pilots} pilots`)}
         {result.bots > 0 ? L(`＋デモ機 ${result.bots}`, ` + ${result.bots} demo bots`) : ''}
         {result.assisted ? L('・AI支援あり', ' · AI assist') : ''}

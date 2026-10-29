@@ -1,9 +1,9 @@
 import { type Page, expect, test } from '@playwright/test';
 import { E2E_ADMIN_PASSWORD } from './playwright.config';
 import {
-  SERVER,
   admin,
   adminToken,
+  boardAs,
   freshLobby,
   guestPhone,
   mobile,
@@ -11,6 +11,7 @@ import {
   playGuardian,
   playGunner,
   playRouter,
+  SERVER,
   snapshot,
 } from './helpers';
 
@@ -36,7 +37,7 @@ test('all four seats: each cockpit opens its minigame and gets the server’s ve
   const phones: Page[] = [];
   for (const [i, [role, name]] of seats.entries()) {
     const p = await guestPhone(ctxs[i]!, name);
-    await p.getByTestId(`seat-${role}`).click();
+    await boardAs(p, role);
     await expect(p.getByTestId('cockpit-wait')).toBeVisible();
     phones.push(p);
   }
@@ -64,7 +65,8 @@ test('a phone that reloads or comes back from the wallet keeps its pilot and sea
   await admin(request, token, { command: 'SET_PASS_MODE', mode: 'FREE' });
   const ctx = await browser.newContext(mobile);
   const p = await guestPhone(ctx, 'リロード');
-  await p.getByTestId('seat-ENGINEER').click();
+  await boardAs(p, 'ENGINEER');
+  await expect(p.getByTestId('cockpit-wait')).toBeVisible();
   await admin(request, token, { command: 'START' });
   await expect(p.getByTestId('sortie')).toBeEnabled({ timeout: 15_000 });
 
@@ -148,7 +150,8 @@ test('admin console: open, start, pause, resume, emergency stop, audit log', asy
   const phoneCtx = await browser.newContext(mobile);
   await admin(request, token, { command: 'SET_PASS_MODE', mode: 'FREE' });
   const ph = await guestPhone(phoneCtx, '運営テスト');
-  await ph.getByTestId('seat-GUARDIAN').click();
+  await boardAs(ph, 'GUARDIAN');
+  await expect(ph.getByTestId('cockpit-wait')).toBeVisible();
 
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const p = await ctx.newPage();

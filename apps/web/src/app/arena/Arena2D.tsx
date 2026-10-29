@@ -1,7 +1,7 @@
 'use client';
 import type { PublicRaidSnapshot } from '@sats-wars/shared';
 import { ENEMY_LABELS } from '@sats-wars/shared';
-import { JapanMapMini, type RaidView } from '@sats-wars/ui';
+import { JapanMapMini, type RaidView, Icon, ENEMY_ICON } from '@sats-wars/ui';
 
 /**
  * Fallback when WebGL is unavailable or the GPU context is lost: the same
@@ -33,7 +33,11 @@ export function Arena2D({
               key={e.id}
               className={`rounded-xl px-[0.8vw] py-[0.6vh] ${e.ai === 'TELEGRAPH' ? 'bg-danger/70' : 'bg-navy-3/80'}`}
             >
-              {ENEMY_LABELS[e.kind].icon} {L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en)}
+              <Icon
+                name={ENEMY_ICON[e.kind]}
+                className="mr-[0.3vw] inline size-[1.2vw] align-[-0.15em]"
+              />
+              {L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en)}
               <span className="block h-[0.8vh] overflow-hidden rounded bg-black/40">
                 <span
                   className="block h-full bg-danger"

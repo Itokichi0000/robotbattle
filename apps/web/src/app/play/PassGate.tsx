@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { InvoiceResponse, InvoiceStatusResponse, PublicRaidSnapshot } from '@sats-wars/shared';
 import { SATS_EXPLAINER } from '@sats-wars/shared';
+import { Icon } from '@sats-wars/ui';
 import { Term } from '@/components/Term';
 import { QrCode } from '@/components/QrCode';
 import { ApiError, api } from '@/lib/api';
@@ -119,7 +120,7 @@ export function PassGate({
           }
           data-testid="buy-pass"
         >
-          ⚡{' '}
+          <Icon name="energy" size={18} className="mr-1 inline align-[-0.2em]" />
           {L(
             `${snap.ticketPriceSats} sats で出撃パス`,
             `Get a pass for ${snap.ticketPriceSats} sats`,

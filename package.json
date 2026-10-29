@@ -26,6 +26,7 @@
     "load:matrix": "pnpm --filter @sats-wars/simulations load:matrix",
     "e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "solo": "pnpm --filter @sats-wars/solo build",
+    "ui:capture": "node tools/ui-capture.mjs",
     "admin:user": "node tools/admin-user.mjs",
     "db:backup": "node tools/db-backup.mjs",
     "db:restore": "node tools/db-restore.mjs",

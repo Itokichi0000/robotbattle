@@ -1,6 +1,7 @@
 export * from './director';
 export * from './layout';
 export { ArenaScene, type ArenaSceneProps } from './ArenaScene';
+export type { TargetDesignation } from './Designator';
 export type { CityThreat } from './MapOverlay';
 export type { FrameStats } from './SceneParts';
 export {

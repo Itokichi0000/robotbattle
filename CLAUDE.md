@@ -3,6 +3,7 @@
 作業開始時に必ず読み、続けて `docs/PROGRESS.md`（どこまで動くか）→ `docs/OPEN_ISSUES.md`（未完・環境制約）→
 `docs/ROADMAP.md`（次のタスク）→ `docs/DECISION_LOG.md`（決定事項）を読むこと。
 最新の要件は `SATS_WARS_EARTH_DEFENSE_CLAUDE_CODE_ALL_IN_ONE.md`（リポジトリ直下、オーナー提供）。**これが唯一の最新仕様**。
+画面と 3D の見せ方は `SATS_WARS_CINEMATIC_UI_SPEC.md`（オーナー提供 v1.0、D-072）に従う（ゲームルールは変えない）。
 以前の「雷神 vs 風神」対戦・陣取り・ZAP BATTLE は全廃（D-032）。
 
 ## 固定コンセプト（変更禁止）
@@ -43,7 +44,8 @@ apps/web             Next.js 16 App Router（:3000）。/ /play /arena /admin /a
 apps/solo            オフライン体験版（大画面＋スマホを1ページに。LocalRaid が同じエンジンとBOTを動かす。単一HTML）
 packages/shared      型・Zod・GameConfig・地域/都市/地図・i18n・RaidStore（＝仕様の protocol）
 packages/game-engine 決定的レイドエンジン（純粋 reducer）、ミニゲーム生成/採点/ソルバ、表示用ヒント（＝仕様の game-core）
-packages/ui          スマホ操縦席（席選択・4ミニゲーム・HUD・結果カード）。素のCSS（swc- 接頭辞）。web と solo で共用
+packages/ui          パイロット画面 PilotConsole（格納庫→戦闘→デブリーフ、4席の計器とミニゲーム、テレメトリー・警報・通信）。
+                     素のCSS（hud- 接頭辞、--sw-* トークン、SVG アイコン）。web /play と solo で共用
 packages/three-game  R3F 3Dシーン（ArenaDirector, ロボ, NULL CORE, 8都市ホログラム, エフェクト, カメラ）、Web Audio SE
 tools/simulations    バランスシミュレーター（pnpm simulate / sim:balance）、デモシード・BOTレイドの CLI（demo:seed / demo:raid）、負荷試験（loadtest / load:matrix）
 tools/blender        Blender Python 生成スクリプト（bpy）
@@ -84,7 +86,7 @@ DEMO_MODE は無料パス・モックログイン。レイドはロビー → �
 - 新しいルールを足したら：engine テスト → server 統合テスト → `pnpm simulate` → DECISION_LOG。
 - 群衆で一つの席に集中しても強くならない（`roleScale` の公平配分）。人数で敵HPを調整（`difficultyScale`、少人数は指数1.4で緩和）。
 - コメントは「なぜ」を書く。UI文言は日本語優先＋英語併記（web は `useI18n().L(ja, en)`、ui は `L` 関数）。
-- 色だけに依存しない（アイコン🎯🛡🔌🔧・文字併用）。タップ対象44px以上・キーボード操作可。点滅は2Hz以下、reduced motion 対応。
+- 色だけに依存しない（専用 SVG アイコン＋文字。UI に絵文字を使わない）。角丸カード・グラスモーフィズムを使わない（D-072）。タップ対象44px以上・キーボード操作可。点滅は2Hz以下、reduced motion 対応。
   群衆の連打で演出を飽和させない（ArenaDirector が間引き）。
 - 公開画面の名前：本人が「大画面に表示」を選んだときだけコールサイン、それ以外は `PILOT-xxxxx`。運営は個別/一括で非表示にできる。
 

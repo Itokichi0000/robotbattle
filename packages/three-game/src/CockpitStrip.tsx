@@ -28,7 +28,7 @@ export function CockpitStrip({
         return (
           <div key={role} className="sw-cockpit-row">
             <span className="sw-cockpit-role" style={{ color: ROLE_SEAT_COLORS[role] }}>
-              {ROLE_LABELS[role].icon} {members.length}
+              {locale === 'ja' ? ROLE_LABELS[role].ja : ROLE_LABELS[role].en} {members.length}
             </span>
             <span className="sw-cockpit-dots">
               {members.slice(0, DOTS).map((m) => {

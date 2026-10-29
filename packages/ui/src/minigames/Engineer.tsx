@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { TaskInput, TaskParams } from '@sats-wars/shared';
+import { Key } from '../hud/primitives';
 import { type MinigameProps, useKeys } from './common';
 
 type P = Extract<TaskParams, { role: 'ENGINEER' }>;
@@ -7,7 +8,11 @@ type I = Extract<TaskInput, { role: 'ENGINEER' }>;
 
 const NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
-/** 🔧 Press the repair switches in the order shown (tap or letter keys). */
+/**
+ * The maintenance panel: run the repair procedure by throwing the breakers
+ * in the listed order (tap or letter keys). The sequence is sent when the
+ * procedure is complete; the server scores it.
+ */
 export function EngineerGame({ params, locale, onSubmit, disabled }: MinigameProps<P, I>) {
   const L = (ja: string, en: string) => (locale === 'ja' ? ja : en);
   const [seq, setSeq] = useState<number[]>([]);
@@ -22,33 +27,43 @@ export function EngineerGame({ params, locale, onSubmit, disabled }: MinigamePro
     const i = NAMES.indexOf(e.key.toUpperCase());
     if (i >= 0 && i < params.switchCount) press(i);
   }, !done);
+  const thrown = new Set(seq);
   return (
-    <div className="swc-game swc-engineer">
-      <p className="swc-game-help">
-        {L('光った順番にスイッチを押そう', 'Press the switches in this order')}
+    <div className={`hud-game hud-engineer${done ? ' is-done' : ''}`}>
+      <p className="hud-game-help">
+        {L('手順どおりにブレーカーを入れろ', 'Throw the breakers in procedure order')}
       </p>
-      <ol className="swc-order" aria-label={L('押す順番', 'Order')}>
+      <ol
+        className="hud-procedure"
+        aria-label={L('修理手順', 'Repair procedure')}
+        data-testid="engineer-order"
+      >
         {params.order.map((s, k) => {
           const state =
             k < seq.length ? (seq[k] === s ? 'is-ok' : 'is-bad') : k === seq.length ? 'is-now' : '';
           return (
             <li key={k} className={state}>
-              {NAMES[s]}
+              <span className="hud-procedure-step hud-num">{String(k + 1).padStart(2, '0')}</span>
+              <span className="hud-procedure-sw">{NAMES[s]}</span>
             </li>
           );
         })}
       </ol>
-      <div className="swc-switches">
+      <div className="hud-breakers">
         {Array.from({ length: params.switchCount }, (_, i) => (
           <button
             key={i}
             type="button"
-            className="swc-big-btn swc-switch"
+            className={`hud-breaker${thrown.has(i) ? ' is-thrown' : ''}`}
             onClick={() => press(i)}
             disabled={done || disabled}
             data-testid={`engineer-switch-${i}`}
+            aria-label={L(`ブレーカー ${NAMES[i]}`, `Breaker ${NAMES[i]}`)}
           >
-            {NAMES[i]}
+            <i className="hud-breaker-lamp" aria-hidden="true" />
+            <span className="hud-breaker-lever" aria-hidden="true" />
+            <span className="hud-breaker-name">{NAMES[i]}</span>
+            <Key k={NAMES[i]!} />
           </button>
         ))}
       </div>

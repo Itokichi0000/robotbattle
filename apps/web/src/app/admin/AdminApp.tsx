@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GameConfig, PublicRaidSnapshot } from '@sats-wars/shared';
 import { PHASE_LABELS, ROLES, ROLE_LABELS, STATUS_LABELS } from '@sats-wars/shared';
-import { JapanMapMini, fmtClock, raidView } from '@sats-wars/ui';
+import { JapanMapMini, fmtClock, raidView, Icon, ROLE_ICON } from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
 
@@ -404,7 +404,8 @@ function RaidTab({
         <p className="text-sm">
           {ROLES.map((r) => (
             <span key={r} className="mr-3">
-              {ROLE_LABELS[r].icon} {ov.crew.roles[r] ?? 0}
+              <Icon name={ROLE_ICON[r]} className="mr-1 inline size-4 align-[-0.15em]" />
+              {ov.crew.roles[r] ?? 0}
             </span>
           ))}
           SYNC {snap.sync} · 都市 {view.citiesStanding}/8 · NULL CORE{' '}
@@ -1198,7 +1199,8 @@ function RoleBalance({ roles, total }: { roles: Record<string, number>; total: n
         const share = total ? n / total : 0;
         return (
           <li key={r} className={share > 0.5 ? 'font-bold text-danger' : ''}>
-            {ROLE_LABELS[r].icon} {ROLE_LABELS[r].ja} {n}（{Math.round(share * 100)}%）
+            <Icon name={ROLE_ICON[r]} className="mr-1 inline size-4 align-[-0.15em]" />
+            {ROLE_LABELS[r].ja} {n}（{Math.round(share * 100)}%）
             {share > 0.5 ? ' ⚠ 偏り' : n === 0 && total > 0 ? ' ・空席' : ''}
           </li>
         );

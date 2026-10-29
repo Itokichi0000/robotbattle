@@ -368,5 +368,7 @@ export function applyClip(
   }
   rig.backUnit.rotation.z = pose.backSpin;
   const glow = rig.baseGlow * pose.glow * (1 + energyGlow);
-  for (const m of rig.glowMaterials) m.emissiveIntensity = glow;
+  // Each part keeps its share (core hotter than a weapon slit, veils faint).
+  for (const m of rig.glowMaterials)
+    m.emissiveIntensity = glow * ((m.userData.glowScale as number | undefined) ?? 1);
 }

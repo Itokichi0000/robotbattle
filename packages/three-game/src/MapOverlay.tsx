@@ -253,10 +253,27 @@ function CityLabel({
         style={{ pointerEvents: 'none' }}
       >
         <div className={`sw-map-label is-${state}`} data-state={state}>
-          {threat && <span className="sw-map-label-warn">⚠{Math.ceil(threat.seconds)}s</span>}
+          {threat && (
+            <span className="sw-map-label-warn">
+              {/* Incoming attack: a hollow diamond (filled when it would take the city). */}
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <path d="M5 0.8 L9.2 5 L5 9.2 L0.8 5 Z" />
+              </svg>
+              {String(Math.ceil(threat.seconds)).padStart(2, '0')}s
+            </span>
+          )}
           <span className="sw-map-label-name">{locale === 'ja' ? info.cityJa : info.cityEn}</span>
-          <span className="sw-map-label-hp">{city.destroyed ? '✖' : city.hp}</span>
-          {city.shield > 0 && <span className="sw-map-label-shield">🛡{city.shield}</span>}
+          <span className="sw-map-label-hp">
+            {city.destroyed ? (locale === 'ja' ? '陥落' : 'LOST') : city.hp}
+          </span>
+          {city.shield > 0 && (
+            <span className="sw-map-label-shield">
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <path d="M2 1.5 H8 V5.5 L5 8.8 L2 5.5 Z" />
+              </svg>
+              {city.shield}
+            </span>
+          )}
         </div>
       </Html>
     </group>

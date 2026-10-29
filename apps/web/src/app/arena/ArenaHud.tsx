@@ -9,7 +9,15 @@ import {
 } from '@sats-wars/shared';
 import type { ArenaDirector, Banner, BannerTone, FrameStats } from '@sats-wars/three-game';
 import { CockpitStrip } from '@sats-wars/three-game';
-import { RaidHeader, ResultCard, RobotBars, type RaidView, cityName } from '@sats-wars/ui';
+import {
+  RaidHeader,
+  ResultCard,
+  RobotBars,
+  type RaidView,
+  cityName,
+  Icon,
+  ROLE_ICON,
+} from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
 import type { ConnectionState, RaidConnection } from '@/lib/connection';
@@ -140,7 +148,8 @@ export function ArenaHud({
           role="status"
           data-testid="broadcast"
         >
-          📢 {L(snap.broadcast.messageJa, snap.broadcast.messageEn)}
+          <Icon name="horn" className="mr-[0.5vw] inline size-[1.4vw] align-[-0.15em]" />
+          {L(snap.broadcast.messageJa, snap.broadcast.messageEn)}
         </div>
       )}
 
@@ -159,12 +168,15 @@ export function ArenaHud({
           <div className="grid grid-cols-4 gap-[1vw] text-[1.3vw]">
             {ROLES.map((r) => (
               <div key={r} className="rounded-xl bg-navy-3/80 px-[0.8vw] py-[1vh]">
-                <div className="text-[2.4vw]">{ROLE_LABELS[r].icon}</div>
+                <Icon name={ROLE_ICON[r]} className="mx-auto size-[2.4vw]" />
                 <div className="font-black">{L(ROLE_LABELS[r].ja, ROLE_LABELS[r].en)}</div>
                 <div className="text-[1vw] text-muted">
                   {L(ROLE_LABELS[r].doJa, ROLE_LABELS[r].doEn)}
                 </div>
-                <div className="mt-1 text-[1.1vw]">👥 {view.crewByRole[r]}</div>
+                <div className="mt-1 text-[1.1vw]">
+                  <Icon name="crew" className="mr-1 inline size-[1.1vw] align-[-0.1em]" />
+                  {view.crewByRole[r]}
+                </div>
               </div>
             ))}
           </div>
@@ -197,7 +209,8 @@ export function ArenaHud({
                   className={`rounded-xl px-[1vw] py-[0.6vh] text-[1.35vw] font-bold ${lethal ? 'sw-pulse bg-danger/80' : 'bg-black/55'}`}
                   data-testid="arena-threat"
                 >
-                  ⚠ {e ? L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en) : ''} →{' '}
+                  <Icon name="warning" className="mr-[0.4vw] inline size-[1.3vw] align-[-0.15em]" />
+                  {e ? L(ENEMY_LABELS[e.kind].ja, ENEMY_LABELS[e.kind].en) : ''} →{' '}
                   {t.targets.map((c) => cityName(c, L)).join('・')}{' '}
                   <span className="tabular-nums">{secs}s</span>
                   {lethal && (
@@ -214,7 +227,10 @@ export function ArenaHud({
               data-testid="arena-needed"
             >
               {L('いま必要：', 'Needed now: ')}
-              {ROLE_LABELS[view.needed].icon}{' '}
+              <Icon
+                name={ROLE_ICON[view.needed]}
+                className="mr-[0.3vw] inline size-[1.4vw] align-[-0.15em]"
+              />
               {L(ROLE_LABELS[view.needed].ja, ROLE_LABELS[view.needed].en)}
             </div>
           )}

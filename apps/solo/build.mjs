@@ -8,8 +8,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 process.chdir(here);
 
 /**
- * Builds ONE self-contained HTML file (no server, no external requests except
- * Google Fonts): the game engine, bots, 3D arena and UI are all inlined.
+ * Builds ONE self-contained HTML file (no server, no external requests; system
+ * fonts only, spec 1.5): the game engine, bots, 3D arena and UI are all inlined.
  * Output: dist/sats-wars-solo.html  (open it directly in a browser).
  */
 const result = await build({
@@ -34,9 +34,6 @@ const css =
 const html = `<title>SATS WARS Earth Defense</title>
 <meta name="description" content="SATS WARS — EARTH DEFENSE（雷神×風神の協力レイド）のオフライン体験版">
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
 <style>${css}</style>
 <div id="root"></div>
 <script>${js}</script>

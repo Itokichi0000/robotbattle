@@ -36,13 +36,13 @@ export function ActionPopups({ conn, locale }: { conn: RaidConnection; locale: '
           const d = e.data;
           const who = d.assist ? L('AI支援', 'AI assist') : d.callsign;
           push(
-            `${who} ${ROLE_LABELS[d.role].icon} ${d.success > 0 ? effectSentence(d.effect, L) : L('ミス', 'missed')}`,
+            `${who}・${L(ROLE_LABELS[d.role].ja, ROLE_LABELS[d.role].en)}：${d.success > 0 ? effectSentence(d.effect, L) : L('ミス', 'missed')}`,
             d.success > 0 ? 'good' : 'miss',
           );
         } else if (e.type === 'ENEMY_DEFEATED' && e.data.callsign) {
-          push(L(`💥 ${e.data.callsign} が撃破！`, `💥 ${e.data.callsign} took it down!`), 'big');
+          push(L(`${e.data.callsign} が撃破！`, `${e.data.callsign} took it down!`), 'big');
         } else if (e.type === 'CITY_REBUILT') {
-          push(L(`🏗 ${e.data.callsign} が再建！`, `🏗 ${e.data.callsign} rebuilt it!`), 'big');
+          push(L(`${e.data.callsign} が再建！`, `${e.data.callsign} rebuilt it!`), 'big');
         } else if (e.type === 'PILOT_BOARDED' && !e.data.isBot) {
           push(L(`🚀 ${e.data.callsign} が搭乗`, `🚀 ${e.data.callsign} boarded`), 'cheer');
         }

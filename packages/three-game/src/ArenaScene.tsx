@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { CityState, CrewMember, Enemy, RegionId, TeamId, Telegraph } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
+import { StationHighlight, type TargetDesignation, TargetDesignator } from './Designator';
 import { Effects } from './Effects';
 import { CockpitBay } from './CockpitBay';
 import { Enemies } from './Enemies';
@@ -53,6 +54,10 @@ export interface ArenaSceneProps {
   /** Keep the drawing buffer (replay recording). */
   preserveDrawingBuffer?: boolean;
   onModelError?: (e: unknown) => void;
+  /** The gunner's current target (pilot screens): brackets around it in the world. */
+  designation?: { current: TargetDesignation | null };
+  /** Hangar: the station being chosen; its part of the machine is bracketed. */
+  focusStation?: 'GUNNER' | 'GUARDIAN' | 'ROUTER' | 'ENGINEER' | null;
 }
 
 /**
@@ -154,6 +159,12 @@ export function ArenaScene(props: ArenaSceneProps) {
           reducedMotion={reducedMotion}
           targets={() => live.current}
         />
+        {props.focusStation && (
+          <StationHighlight role={props.focusStation} reducedMotion={reducedMotion} />
+        )}
+        {props.designation && (
+          <TargetDesignator designation={props.designation} reducedMotion={reducedMotion} />
+        )}
         {q.post && <PostFx director={director} config={q.post} reducedMotion={reducedMotion} />}
         <PerformanceProbe onStats={(s: FrameStats) => statsRef.current?.(s)} />
       </Canvas>
