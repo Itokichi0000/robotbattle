@@ -1,5 +1,4 @@
 'use client';
-import './browserSetup';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Locale, UiStringKey } from '@sats-wars/shared';
 import { UI_STRINGS } from '@sats-wars/shared';

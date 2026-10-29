@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './validation';
 import { TITLE_LABELS } from './i18n';
 
 /**

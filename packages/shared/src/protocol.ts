@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './validation';
 import { type CosmeticSlot, equipPatchSchema } from './cosmetics';
 import type { GameConfig } from './config';
 import type { BoardPatch, CrewMember, GameEvent } from './events';
