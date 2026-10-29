@@ -35,7 +35,10 @@
 - 🟠 **アクセシビリティ**：axe-core（WCAG 2.1 A/AA）の自動検査は全画面で違反0（E2E）。スクリーンリーダー（VoiceOver/TalkBack）・
   キーボードだけでの全操作・実機での読みやすさは手動確認が必要。
 - 🟢 英語文言のネイティブチェック。
-- 🟢 Dockerfile / docker-compose.yml は作成済みだが、このコンテナに Docker デーモンがなく**未検証**（D-062）。
+- 🟠 **VPS キット（`deploy/`）**：`deploy.sh`・`rollback.sh` はこの環境で https プロキシ（Caddyfile と同じ振り分け）と `satswars`
+  ユーザーのサービスに対して通しで試験済み。ただし**本物の Caddy・systemd・Let's Encrypt・実 VPS では未実行**
+  （外部バイナリを実行できなかった。`setup-vps.sh` は VPS 上で `caddy validate` してから読み込む）。初回は VPS で一度通して確認する。
+- 🟢 Dockerfile / docker-compose.yml は作成済みだが、このコンテナに Docker デーモンがなく**未検証**（D-062）。公開は VPS キットを使う。
 
 ## 運用（運営の判断が必要）
 

@@ -11,3 +11,4 @@ export * from './time';
 export * from './store';
 export * from './cosmetics';
 export * from './passportCard';
+export * from './browser';

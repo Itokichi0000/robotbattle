@@ -121,11 +121,10 @@ pnpm start                 # server(:4000) + web(:3000)
 
 ### 公開時（HTTPS/WSS 必須、承認後）
 
-詳細な環境差分・見積もり・スモークテスト・ロールバック・運営の確認項目は `docs/PRODUCTION_GUIDE.md`、合否は `docs/RELEASE_GATE.md`。
-
-リバースプロキシ（Caddy / nginx）で TLS 終端：`https://game.example.com → web:3000`、`https://api.game.example.com → server:4000`
-（WebSocket Upgrade を通す）。Web のビルド時に `NEXT_PUBLIC_GAME_SERVER_URL=https://api.game.example.com`。
-サーバーは常駐プロセス（サーバーレスに載せない）、SQLite は永続ボリューム、単一インスタンス。
+**VPS 1台・1ドメイン**で公開する（D-068）。手順とファイル一式は `deploy/README.md`：
+`setup-vps.sh`（初回）→ `deploy.sh`（更新。失敗したら自動で前の版に戻る）→ `rollback.sh`（手動で戻す）。
+Caddy が https を取り、`/api` `/socket.io` をゲームサーバー（127.0.0.1:4000）、それ以外を画面（127.0.0.1:3000）へ振り分ける。
+本番は `PAYMENT_MODE=mock` のあいだ無料イベントのみ。環境差分・見積もり・運営の確認項目は `docs/PRODUCTION_GUIDE.md`、合否は `docs/RELEASE_GATE.md`。
 
 ### 実決済（承認後）
 
