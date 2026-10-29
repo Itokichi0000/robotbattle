@@ -1039,13 +1039,25 @@ export class ArenaDirector {
   }
 
   private setCamera(preset: CameraPresetName): void {
+    if (this.pinnedCamera) preset = this.pinnedCamera;
     if (this.camera.preset !== preset || this.camera.shot)
       this.camera = { preset, since: this.time, shot: null, anchor: null };
   }
 
+  /**
+   * Art review and broadcast framing (`/arena?cam=overview`): hold one preset
+   * and ignore the cues' camera moves. Everything else still plays.
+   */
+  pinCamera(preset: CameraPresetName | null): void {
+    this.pinnedCamera = preset;
+    if (preset) this.camera = { preset, since: this.time, shot: null, anchor: null };
+  }
+
+  private pinnedCamera: CameraPresetName | null = null;
+
   /** Start an authored camera move (never with reduced motion). */
   private setShot(shot: ShotName, anchor: FxTarget | null = null): void {
-    if (this.settings.reducedMotion) return;
+    if (this.settings.reducedMotion || this.pinnedCamera) return;
     this.camera = { ...this.camera, since: this.time, shot, anchor };
   }
 

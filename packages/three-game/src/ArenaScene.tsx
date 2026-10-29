@@ -7,7 +7,15 @@ import { StationHighlight, type TargetDesignation, TargetDesignator } from './De
 import { Effects } from './Effects';
 import { CockpitBay } from './CockpitBay';
 import { Enemies } from './Enemies';
-import { type Quality, QUALITY_SETTINGS, CAMERA_PRESETS, RESERVE_POSITION } from './layout';
+import {
+  applyStage,
+  type Quality,
+  QUALITY_SETTINGS,
+  CAMERA_PRESETS,
+  RESERVE_POSITION,
+  type StageName,
+} from './layout';
+import { Battlefield, BAY_FOG, BAY_FOG_DENSITY } from './Battlefield';
 import { type CityThreat, MapOverlay } from './MapOverlay';
 import { ModelRobotActor } from './GlbRobotActor';
 import { ArenaModel } from './ArenaModel';
@@ -58,15 +66,27 @@ export interface ArenaSceneProps {
   designation?: { current: TargetDesignation | null };
   /** Hangar: the station being chosen; its part of the machine is bracketed. */
   focusStation?: 'GUNNER' | 'GUARDIAN' | 'ROUTER' | 'ENGINEER' | null;
+  /**
+   * `table` (default): the war table with the hologram of Japan. `battlefield`:
+   * the venue's Tokyo Bay defence line (D-073) — the map moves to the HUD.
+   */
+  stage?: StageName;
+  /** Equirectangular .hdr for the battlefield's reflections (procedural if absent). */
+  envMap?: string;
 }
 
 /**
  * Venue 3D scene: RAIJIN and FUJIN side by side in front, the hologram of
- * Japan's 8 defence cities between them, NULL CORE and its escorts beyond.
+ * Japan's 8 defence cities between them (table) or the cities along the
+ * horizon of the bay (battlefield), NULL CORE and its escorts beyond.
  * Pure presentation: everything shown comes from server state + director cues.
  */
 export function ArenaScene(props: ArenaSceneProps) {
   const { director, glow, quality, reducedMotion } = props;
+  const stage = props.stage ?? 'table';
+  // Before any child reads the layout (positions, cameras) during this render.
+  applyStage(stage);
+  const battlefield = stage === 'battlefield';
   const live = useRef({ enemies: props.enemies, telegraphs: props.telegraphs });
   live.current = { enemies: props.enemies, telegraphs: props.telegraphs };
   const q = QUALITY_SETTINGS[quality];
@@ -85,10 +105,16 @@ export function ArenaScene(props: ArenaSceneProps) {
           // Replays keep the frame so the browser recorder can copy it.
           preserveDrawingBuffer: !!props.preserveDrawingBuffer,
         }}
-        camera={{ fov: 42, near: 0.1, far: 200, position: CAMERA_PRESETS.intro.position }}
+        camera={{
+          fov: 42,
+          near: 0.1,
+          // The bay reaches the far shore; the table stays tight for depth precision.
+          far: battlefield ? 1400 : 200,
+          position: CAMERA_PRESETS.intro.position,
+        }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.1;
+          gl.toneMappingExposure = battlefield ? 1.0 : 1.1;
           gl.domElement.addEventListener('webglcontextlost', (e) => {
             e.preventDefault();
             props.onContextLost?.();
@@ -96,32 +122,57 @@ export function ArenaScene(props: ArenaSceneProps) {
         }}
         style={{ position: 'absolute', inset: 0 }}
       >
-        <color attach="background" args={['#070D1A']} />
-        <fog attach="fog" args={['#070D1A', 24, 60]} />
-        <DirectorClock director={director} />
-        <CameraRig director={director} reducedMotion={reducedMotion} targets={() => live.current} />
-        <StageEnvironment intensity={q.envIntensity} />
-        <LightingRig shadows={q.shadows} />
-        {props.arenaModel ? (
+        {battlefield ? (
           <>
-            <ArenaStage stars={q.stars} floor={false} />
-            <ArenaModel
-              url={props.arenaModel}
-              fallback={<ArenaStage stars={0} />}
-              onError={props.onModelError}
-            />
+            <color attach="background" args={[BAY_FOG]} />
+            <fogExp2 attach="fog" args={[BAY_FOG, BAY_FOG_DENSITY]} />
           </>
         ) : (
-          <ArenaStage stars={q.stars} />
+          <>
+            <color attach="background" args={['#070D1A']} />
+            <fog attach="fog" args={['#070D1A', 24, 60]} />
+          </>
         )}
-        <MapOverlay
-          cities={props.cities}
-          threats={props.threats}
-          cityMaxHp={props.cityMaxHp}
-          director={director}
-          reducedMotion={reducedMotion}
-          locale={props.locale}
-        />
+        <DirectorClock director={director} />
+        <CameraRig director={director} reducedMotion={reducedMotion} targets={() => live.current} />
+        {battlefield ? (
+          <Battlefield
+            cities={props.cities}
+            threats={props.threats}
+            cityMaxHp={props.cityMaxHp}
+            director={director}
+            reducedMotion={reducedMotion}
+            shadows={q.shadows}
+            detail={quality}
+            envUrl={props.envMap}
+            envIntensity={q.envIntensity * 1.6}
+          />
+        ) : (
+          <>
+            <StageEnvironment intensity={q.envIntensity} />
+            <LightingRig shadows={q.shadows} />
+            {props.arenaModel ? (
+              <>
+                <ArenaStage stars={q.stars} floor={false} />
+                <ArenaModel
+                  url={props.arenaModel}
+                  fallback={<ArenaStage stars={0} />}
+                  onError={props.onModelError}
+                />
+              </>
+            ) : (
+              <ArenaStage stars={q.stars} />
+            )}
+            <MapOverlay
+              cities={props.cities}
+              threats={props.threats}
+              cityMaxHp={props.cityMaxHp}
+              director={director}
+              reducedMotion={reducedMotion}
+              locale={props.locale}
+            />
+          </>
+        )}
         <Enemies
           enemies={props.enemies}
           telegraphs={props.telegraphs}
@@ -130,7 +181,11 @@ export function ArenaScene(props: ArenaSceneProps) {
           bossModel={props.bossModel}
           bossBarrier={props.bossBarrier}
         />
-        <ReserveReactor level={props.reserve} />
+        {battlefield ? (
+          <ReservePylon level={props.reserve} />
+        ) : (
+          <ReserveReactor level={props.reserve} />
+        )}
         <CockpitBay
           crew={props.crew ?? []}
           director={director}
@@ -223,6 +278,57 @@ function ReserveReactor({ level }: { level: number }) {
           emissive={new THREE.Color('#FFB020')}
           emissiveIntensity={0.6 + level}
         />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Battlefield: the shared reserve as a power pylon on the deck in front of the
+ * machines — three capacitor columns fill up and the core burns brighter as
+ * the routers charge it for the final special.
+ */
+function ReservePylon({ level }: { level: number }) {
+  const lv = Math.max(0, Math.min(1, level));
+  return (
+    <group position={RESERVE_POSITION} name="reserve-reactor">
+      <mesh position={[0, 0.15, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[1.5, 1.75, 0.3, 6]} />
+        <meshStandardMaterial color="#22272E" metalness={0.7} roughness={0.45} />
+      </mesh>
+      {[0, 1, 2].map((i) => {
+        const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
+        return (
+          <group
+            key={i}
+            position={[Math.cos(a) * 0.95, 0, Math.sin(a) * 0.95]}
+            rotation={[0, -a, 0]}
+          >
+            <mesh position={[0, 0.75, 0]} castShadow>
+              <boxGeometry args={[0.3, 1.2, 0.3]} />
+              <meshStandardMaterial color="#2C3138" metalness={0.75} roughness={0.4} />
+            </mesh>
+            <mesh position={[-0.16, 0.2 + lv * 0.5, 0]}>
+              <boxGeometry args={[0.04, 0.02 + lv * 1.0, 0.18]} />
+              <meshStandardMaterial color="#3A2A10" emissive="#FFB020" emissiveIntensity={1.6} />
+            </mesh>
+          </group>
+        );
+      })}
+      <mesh position={[0, 0.9, 0]}>
+        <icosahedronGeometry args={[0.4, 1]} />
+        <meshStandardMaterial
+          color="#3A2A10"
+          emissive="#FFB020"
+          emissiveIntensity={0.2 + lv * 0.9}
+          metalness={0.2}
+          roughness={0.3}
+          flatShading
+        />
+      </mesh>
+      <mesh position={[0, 0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.72, 0.05, 8, 48]} />
+        <meshStandardMaterial color="#B8862E" metalness={1} roughness={0.3} />
       </mesh>
     </group>
   );

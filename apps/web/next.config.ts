@@ -24,7 +24,8 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self' data:",
-  `connect-src 'self' ${gameServerSources()}${isDev ? ' ws: wss:' : ''}`,
+  // blob: the GLB loader decodes embedded textures by fetching blob URLs it created itself.
+  `connect-src 'self' blob: ${gameServerSources()}${isDev ? ' ws: wss:' : ''}`,
   "media-src 'self' blob:",
   "worker-src 'self' blob:",
   "frame-src 'self'",

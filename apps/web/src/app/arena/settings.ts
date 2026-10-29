@@ -13,11 +13,17 @@ export interface ArenaSettings {
   music: boolean;
   showStats: boolean;
   /**
-   * auto = artist GLBs when a manifest exists (none yet), else the code-built models;
+   * auto = artist GLBs when a manifest exists, else the hero set, else the code-built models;
+   * hero = the venue set with baked textures (tools/blender/hero_assets.py, D-073);
    * blender = the headless Blender blockouts (tools/blender/generate_assets.py);
    * procedural = always the code-built models.
    */
-  models: 'auto' | 'blender' | 'procedural';
+  models: 'auto' | 'hero' | 'blender' | 'procedural';
+  /**
+   * battlefield = the Tokyo Bay defence line with the cities on the horizon (D-073);
+   * table = the war table with the hologram of Japan in the middle.
+   */
+  stage: 'battlefield' | 'table';
   /** Lower the 3D quality (and finally switch to 2D) when the FPS stays low. */
   autoQuality: boolean;
 }
@@ -33,6 +39,7 @@ const DEFAULTS: ArenaSettings = {
   music: true,
   showStats: false,
   models: 'auto',
+  stage: 'battlefield',
   autoQuality: true,
 };
 
@@ -60,7 +67,10 @@ export function loadArenaSettings(): ArenaSettings {
     if (q.get('reduced') === '1') s.reducedMotion = true;
     if (q.get('stats') === '1') s.showStats = true;
     const models = q.get('models');
-    if (models === 'auto' || models === 'blender' || models === 'procedural') s.models = models;
+    if (models === 'auto' || models === 'hero' || models === 'blender' || models === 'procedural')
+      s.models = models;
+    const stage = q.get('stage');
+    if (stage === 'battlefield' || stage === 'table') s.stage = stage;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && !saved)
       s.reducedMotion = true;
   }
@@ -90,9 +100,11 @@ export async function loadModels(mode: ArenaSettings['models']): Promise<ModelUr
   const dirs =
     mode === 'blender'
       ? ['/assets/models/blender']
-      : mode === 'auto'
-        ? ['/assets/robots', '/assets/robots/generated']
-        : [];
+      : mode === 'hero'
+        ? ['/assets/models/hero']
+        : mode === 'auto'
+          ? ['/assets/robots', '/assets/models/hero', '/assets/robots/generated']
+          : [];
   for (const dir of dirs) {
     try {
       const r = await fetch(`${dir}/manifest.json`, { cache: 'no-store' });

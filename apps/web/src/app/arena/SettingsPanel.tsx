@@ -64,8 +64,20 @@ export function SettingsPanel({
             onChange={(e) => set('models', e.target.value as ArenaSettings['models'])}
           >
             <option value="auto">GLB（あれば）/ GLB if available</option>
+            <option value="hero">会場用ヒーロー / Venue hero set</option>
             <option value="blender">Blender 試作モデル / Blender blockouts</option>
             <option value="procedural">コード生成 / procedural</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          舞台 / Stage
+          <select
+            className="rounded bg-black/40 p-2"
+            value={settings.stage}
+            onChange={(e) => set('stage', e.target.value as ArenaSettings['stage'])}
+          >
+            <option value="battlefield">東京湾 防衛線 / Tokyo Bay line</option>
+            <option value="table">作戦卓 / War table</option>
           </select>
         </label>
         <label className="flex flex-col gap-1">

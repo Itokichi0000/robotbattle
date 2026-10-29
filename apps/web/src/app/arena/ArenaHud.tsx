@@ -17,6 +17,7 @@ import {
   cityName,
   Icon,
   ROLE_ICON,
+  TacticalMap,
 } from '@sats-wars/ui';
 import { Logo } from '@/components/Logo';
 import { QrCode } from '@/components/QrCode';
@@ -48,6 +49,7 @@ export function ArenaHud({
   contextLost,
   preview = false,
   director,
+  mapInset = false,
 }: {
   snap: PublicRaidSnapshot;
   view: RaidView;
@@ -61,6 +63,8 @@ export function ArenaHud({
   preview?: boolean;
   /** Seat lamps for the cockpit strip (the 3D/2D director). */
   director?: ArenaDirector;
+  /** The 3D shows the bay, not the map: keep a small tactical map on screen (D-073). */
+  mapInset?: boolean;
 }) {
   const { locale, L } = useI18n();
   const playUrl =
@@ -232,6 +236,14 @@ export function ArenaHud({
                 className="mr-[0.3vw] inline size-[1.4vw] align-[-0.15em]"
               />
               {L(ROLE_LABELS[view.needed].ja, ROLE_LABELS[view.needed].en)}
+            </div>
+          )}
+          {mapInset && (
+            <div
+              className="mt-[0.4vh] w-[19vw] bg-black/45 p-[0.4vw]"
+              data-testid="arena-map-inset"
+            >
+              <TacticalMap view={view} locale={locale} maxHp={snap.config.cityMaxHp} labels />
             </div>
           )}
         </div>

@@ -1,10 +1,12 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PublicRaidSnapshot, TeamId } from '@sats-wars/shared';
+import type { Enemy, PublicRaidSnapshot, TeamId } from '@sats-wars/shared';
 import {
   ArenaDirector,
   type Banner,
+  CAMERA_PRESETS,
+  type CameraPresetName,
   type FrameStats,
   QualityGovernor,
   SfxEngine,
@@ -26,6 +28,9 @@ import {
 } from './settings';
 import { PREVIEW_HELP, handlePreviewKey, newPreviewState, playArenaCue } from './preview';
 import { SettingsPanel } from './SettingsPanel';
+
+/** CC0 HDRI (Poly Haven, via the three.js examples) for the battlefield's reflections. */
+const ENV_MAP = '/assets/env/moonless_golf_1k.hdr';
 
 const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
   ssr: false,
@@ -49,6 +54,8 @@ export function ArenaApp() {
   const [models, setModels] = useState<ModelUrls | null>(null);
   const [modelError, setModelError] = useState(false);
   const [preview, setPreview] = useState(false);
+  // ?hud=0: clean feed of the 3D only (broadcast mixers, art review).
+  const [cleanFeed, setCleanFeed] = useState(false);
   const previewState = useRef(newPreviewState());
   const previewRef = useRef(false);
   previewRef.current = preview;
@@ -58,6 +65,14 @@ export function ArenaApp() {
     setWebgl(webglAvailable());
     const q = new URLSearchParams(window.location.search);
     setPreview(q.get('preview') === '1');
+    setCleanFeed(q.get('hud') === '0');
+    const cam = q.get('cam');
+    if (cam && cam in CAMERA_PRESETS) {
+      director.pinCamera(cam as CameraPresetName);
+      // Review mode only: lets a capture script walk the presets without reloading.
+      (window as unknown as { swPinCamera?: (n: CameraPresetName) => void }).swPinCamera = (n) =>
+        director.pinCamera(n);
+    }
     const speed = Number(q.get('speed'));
     if (speed > 0 && speed <= 1) director.timeScale = speed;
   }, [director]);
@@ -257,7 +272,7 @@ export function ArenaApp() {
         <ArenaScene
           director={director}
           cities={snap.cities}
-          enemies={snap.enemies}
+          enemies={preview ? withRehearsalBoss(snap.enemies) : snap.enemies}
           telegraphs={snap.telegraphs}
           threats={threats}
           cityMaxHp={snap.config.cityMaxHp}
@@ -282,22 +297,27 @@ export function ArenaApp() {
           bossBarrier={view.bossBarrier}
           crew={snap.crew}
           onModelError={() => setModelError(true)}
+          stage={settings.stage}
+          envMap={ENV_MAP}
         />
       ) : (
         <Arena2D snap={snap} view={view} locale={locale} />
       )}
-      <ArenaHud
-        snap={snap}
-        conn={conn!}
-        view={view}
-        connState={connState}
-        banner={banner}
-        stats={settings.showStats ? stats : null}
-        renderer={use3d ? 'webgl' : '2d'}
-        contextLost={contextLost}
-        preview={preview}
-        director={director}
-      />
+      {!cleanFeed && (
+        <ArenaHud
+          snap={snap}
+          conn={conn!}
+          view={view}
+          connState={connState}
+          banner={banner}
+          stats={settings.showStats ? stats : null}
+          renderer={use3d ? 'webgl' : '2d'}
+          contextLost={contextLost}
+          preview={preview}
+          director={director}
+          mapInset={use3d && settings.stage === 'battlefield'}
+        />
+      )}
       {!audioOn && !settings.muted && (
         <button
           onClick={enableAudio}
@@ -331,4 +351,29 @@ export function ArenaApp() {
       )}
     </div>
   );
+}
+
+/**
+ * Rehearsal (?preview=1) only: when the live raid has no NULL CORE on the
+ * field, show a stand-in so the boss cues (cannon hits, counter-beams, the
+ * finale) can be checked any time. Display only; the server never sees it.
+ */
+function withRehearsalBoss(enemies: Enemy[]): Enemy[] {
+  if (enemies.some((e) => e.kind === 'BOSS')) return enemies;
+  return [
+    ...enemies,
+    {
+      id: 9999,
+      kind: 'BOSS',
+      hp: 1000,
+      hpMax: 1000,
+      ai: 'IDLE',
+      aiUntil: 0,
+      weaken: 0,
+      lastTargets: [],
+      partHits: { CORE: 0, ARM: 0, LEG: 0 },
+      attacks: 0,
+      training: false,
+    },
+  ];
 }

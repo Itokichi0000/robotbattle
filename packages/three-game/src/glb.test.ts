@@ -19,11 +19,19 @@ const PUBLIC = resolve(dirname(fileURLToPath(import.meta.url)), '../../../apps/w
 const MODELS = resolve(PUBLIC, 'models/blender');
 /** Where an artist's delivered robots go (docs/art/ART_BRIEF.md); checked when present. */
 const ARTIST = resolve(PUBLIC, 'robots');
+/** The venue-screen set with baked textures (tools/blender/hero_assets.py, D-073). */
+const HERO = resolve(PUBLIC, 'models/hero');
 
 function load(file: string, dir = MODELS): Promise<GLTF> {
   const buf = readFileSync(resolve(dir, file));
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  return new Promise((ok, fail) => new GLTFLoader().parse(ab, '', ok, fail));
+  // Node cannot decode the embedded JPEGs: hand back an empty texture that
+  // keeps its slot, so the tests can still see which maps a material uses.
+  const loader = new GLTFLoader().register(() => ({
+    name: 'test_texture_stub',
+    loadTexture: () => Promise.resolve(new THREE.Texture()),
+  }));
+  return new Promise((ok, fail) => loader.parse(ab, '', ok, fail));
 }
 
 /** World position of a node after the mixer evaluated a clip at `t` seconds. */
@@ -92,6 +100,67 @@ describe('Blender GLBs load and play in three.js', () => {
       `artist ${file} (assets/robots): same contract`,
       robotContract(ARTIST, file),
     );
+
+  it.skipIf(!existsSync(resolve(HERO, 'raijin.glb')))(
+    'hero raijin.glb (models/hero): same contract',
+    robotContract(HERO, 'raijin.glb'),
+  );
+
+  it.skipIf(!existsSync(resolve(HERO, 'raijin.glb')))(
+    'hero raijin.glb: one baked PBR material, a cannon with a muzzle, within the venue budget',
+    async () => {
+      const gltf = await load('raijin.glb', HERO);
+      expect(gltf.scene.getObjectByName('Cannon'), 'Cannon').toBeTruthy();
+      expect(gltf.scene.getObjectByName('Muzzle'), 'Muzzle').toBeTruthy();
+      const textured = new Set<THREE.MeshStandardMaterial>();
+      let triangles = 0;
+      gltf.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const g = mesh.geometry;
+        triangles += (g.index ? g.index.count : g.attributes.position!.count) / 3;
+        const m = mesh.material as THREE.MeshStandardMaterial;
+        if (m.map) textured.add(m);
+      });
+      // The armour shares one atlas: base colour, AO/roughness/metal and normal.
+      expect(textured.size).toBe(1);
+      const [paint] = [...textured];
+      for (const slot of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'] as const)
+        expect(paint![slot], slot).toBeTruthy();
+      expect(triangles).toBeLessThan(100_000);
+      expect(readFileSync(resolve(HERO, 'raijin.glb')).byteLength).toBeLessThan(12e6);
+    },
+  );
+
+  it.skipIf(!existsSync(resolve(HERO, 'null_core.glb')))(
+    'hero null_core.glb: weak points, a ring that turns whole and seamless loops',
+    async () => {
+      const gltf = await load('null_core.glb', HERO);
+      for (const n of ['Core', 'Ring', 'weak_core', 'weak_arm', 'weak_leg', 'shard_0'])
+        expect(gltf.scene.getObjectByName(n), n).toBeTruthy();
+      // The game lights each weak point through its own material.
+      for (const n of ['weak_core', 'weak_arm', 'weak_leg']) {
+        const m = (gltf.scene.getObjectByName(n) as THREE.Mesh)
+          .material as THREE.MeshStandardMaterial;
+        expect(m.emissive.getHex(), n).not.toBe(0);
+      }
+      const clips = gltf.animations.map((a) => a.name);
+      expect(clips).toEqual(
+        expect.arrayContaining(['Idle', 'Telegraph', 'Attack', 'HitReact', 'Defeat']),
+      );
+      const a = poseAt(gltf, 'Idle', 0, 'shard_0');
+      const b = poseAt(gltf, 'Idle', 1, 'shard_0');
+      expect(Math.abs(a.y - b.y)).toBeLessThan(0.05);
+      expect(a.distanceTo(b)).toBeGreaterThan(0.3);
+      // Looping clips end where they start (a whole turn), so the loop never jumps.
+      for (const clip of ['Idle', 'Telegraph']) {
+        const dur = gltf.animations.find((c) => c.name === clip)!.duration;
+        const start = poseAt(gltf, clip, 0, 'shard_0');
+        const end = poseAt(gltf, clip, dur - 1e-4, 'shard_0');
+        expect(start.distanceTo(end), clip).toBeLessThan(0.02);
+      }
+    },
+  );
 
   it('Walk moves the legs and Boarding lowers then raises the body', async () => {
     const gltf = await load('raijin.glb');

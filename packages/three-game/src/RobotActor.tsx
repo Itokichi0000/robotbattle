@@ -4,7 +4,7 @@ import type * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import { ContactShadow } from './Grounding';
-import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
+import { advancedPosition, ROBOT_HOME } from './layout';
 import { applyClip } from './robots/animate';
 import { buildFujin, buildRaijin, damageStageFor, setDamageStage } from './robots/build';
 
@@ -37,7 +37,10 @@ export function RobotActor({ teamId, director, energyRatio, health = 100 }: Robo
     const cue = director.robots[teamId];
     applyClip(rig, cue.clip, director.time - cue.start, director.time, energy.current * 0.8);
     advance.current += (cue.advance - advance.current) * Math.min(1, dt * 7);
-    if (outer.current) outer.current.position.x = home.x * (1 - ADVANCE_FRACTION * advance.current);
+    if (outer.current) {
+      const p = advancedPosition(teamId, advance.current);
+      outer.current.position.set(p.x, 0, p.z);
+    }
   });
 
   return (

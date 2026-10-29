@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
 import { type ClipName, LOOPING_CLIPS } from './director';
 import { ContactShadow } from './Grounding';
-import { ADVANCE_FRACTION, ROBOT_HOME } from './layout';
+import { advancedPosition, ROBOT_HOME } from './layout';
 import { RobotActor, type RobotActorProps } from './RobotActor';
 import { applyClip } from './robots/animate';
 import { JOINT_NAMES, type RobotRig, damageStageFor, setDamageStage } from './robots/build';
@@ -36,7 +36,8 @@ function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): RobotRig |
     rest,
     backUnit: scene.getObjectByName('BackUnit') ?? new THREE.Object3D(),
     glowMaterials: glow,
-    baseGlow: glow[0]?.emissiveIntensity ?? 1.5,
+    // Capped: an export's emission strength is tuned for Blender, not for the bloom here.
+    baseGlow: Math.min(glow[0]?.emissiveIntensity ?? 1.5, 2.2),
     height: 4,
     // Blender exports damage parts as nodes named damage1_* / damage2_*.
     damage: { 1: nodesNamed(scene, 'damage1_'), 2: nodesNamed(scene, 'damage2_') },
@@ -105,7 +106,10 @@ function GlbRobot({
       applyClip(rig, cue.clip, t, director.time, energyRatio * 0.8);
     }
     advance.current += (cue.advance - advance.current) * Math.min(1, dt * 7);
-    if (outer.current) outer.current.position.x = home.x * (1 - ADVANCE_FRACTION * advance.current);
+    if (outer.current) {
+      const p = advancedPosition(teamId, advance.current);
+      outer.current.position.set(p.x, 0, p.z);
+    }
   });
 
   return (

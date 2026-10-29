@@ -1,4 +1,4 @@
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { TeamId } from '@sats-wars/shared';
@@ -99,7 +99,38 @@ interface ImpactLight {
  * so a hit-stop freezes the sparks mid-air too.
  */
 export function Effects({ director, budget, reducedMotion, targets }: EffectsProps) {
-  const where = (t: FxTarget | null) => resolveFxTarget(t, targets());
+  const { scene, camera } = useThree();
+  // Hero models carry real anchors (Raijin's cannon muzzle, NULL CORE's eye):
+  // effects start and land there instead of at the layout's stand-in points.
+  const anchors = useRef<Record<string, THREE.Object3D | null>>({});
+  const anchor = (holder: string, node: string): THREE.Vector3 | null => {
+    const key = `${holder}/${node}`;
+    let o = anchors.current[key];
+    if (!o || !o.parent) {
+      o = scene.getObjectByName(holder)?.getObjectByName(node) ?? null;
+      anchors.current[key] = o;
+    }
+    return o ? o.getWorldPosition(new THREE.Vector3()) : null;
+  };
+  const muzzle = (teamId: TeamId) =>
+    teamId === 'RAIJIN' ? anchor('robot-glb-RAIJIN', 'Muzzle') : null;
+  const where = (t: FxTarget | null) => {
+    if (t?.kind === 'enemy') {
+      const e = targets().enemies.find((x) => x.id === t.id);
+      if (!e || e.kind === 'BOSS') {
+        const eye = anchor('null-core-glb', 'weak_core');
+        if (eye) return eye;
+      }
+    }
+    return resolveFxTarget(t, targets());
+  };
+  /**
+   * Effects keep their size on screen: a hit on the boss 40 m out grows, a
+   * pulse on a machine right in front of the lens shrinks (the battlefield
+   * camera stands close behind the robots).
+   */
+  const reach = (at: THREE.Vector3) =>
+    THREE.MathUtils.clamp(at.distanceTo(camera.position) / 16, 0.55, 3.2);
   const glow = useMemo(() => new ParticlePool(budget.glow), [budget.glow]);
   const smoke = useMemo(() => new ParticlePool(budget.smoke), [budget.smoke]);
   const debris = useMemo(() => new DebrisPool(budget.debris), [budget.debris]);
@@ -136,8 +167,15 @@ export function Effects({ director, budget, reducedMotion, targets }: EffectsPro
 
   // Fewer, calmer particles with reduced motion.
   const amount = reducedMotion ? 0.35 : 1;
-  const spark = (o: SpawnOptions, pool: ParticlePool = glow) =>
-    pool.spawn({ ...o, count: Math.ceil(o.count * amount) });
+  const spark = (o: SpawnOptions, pool: ParticlePool = glow) => {
+    const r = reach(new THREE.Vector3(o.origin.x, o.origin.y, o.origin.z));
+    return pool.spawn({
+      ...o,
+      count: Math.ceil(o.count * amount),
+      size: o.size * r,
+      speed: o.speed * r,
+    });
+  };
   const light = (at: THREE.Vector3, color: THREE.Color, peak: number) => {
     const slot = lights.current.reduce<ImpactLight | null>(
       (best, l) => (!best || (l.light?.intensity ?? 0) < (best.light?.intensity ?? 0) ? l : best),
@@ -150,7 +188,16 @@ export function Effects({ director, budget, reducedMotion, targets }: EffectsPro
   };
   /** A hot core that blooms for a moment at the point of impact (local, not full-screen). */
   const flare = (at: THREE.Vector3, color: THREE.Color, size: number, life = 0.16) =>
-    glow.spawn({ count: 1, origin: at, color, intensity: 2.6, speed: 0, life, size, gravity: 0 });
+    glow.spawn({
+      count: 1,
+      origin: at,
+      color,
+      intensity: 2.6,
+      speed: 0,
+      life,
+      size: size * reach(at),
+      gravity: 0,
+    });
 
   useEffect(
     () =>
@@ -422,8 +469,23 @@ export function Effects({ director, budget, reducedMotion, targets }: EffectsPro
                 smoke,
               );
             break;
-          case 'lightning':
+          case 'lightning': {
             add(reducedMotion ? 0.25 : 0.45);
+            // the shot leaves the cannon: a muzzle flash where the bolt starts
+            const gun = e.from?.kind === 'robot' ? muzzle(e.from.id) : null;
+            if (gun) {
+              flare(gun, HOT, 0.8, 0.12);
+              spark({
+                count: 14,
+                origin: gun,
+                color: TEAM.RAIJIN,
+                intensity: 2.4,
+                speed: 4,
+                life: 0.3,
+                size: 0.06,
+                stretch: 0.04,
+              });
+            }
             if (to) {
               flare(to, WHITE, 1.1, 0.14);
               spark({
@@ -439,6 +501,7 @@ export function Effects({ director, budget, reducedMotion, targets }: EffectsPro
               light(to, TEAM.RAIJIN, 26 * k);
             }
             break;
+          }
           case 'wind':
             add(1.0);
             if (to)
@@ -604,16 +667,21 @@ export function Effects({ director, budget, reducedMotion, targets }: EffectsPro
           ? (where(x.to) ?? robotPos('FUJIN'))
           : robotPos('RAIJIN').add(new THREE.Vector3((rng() - 0.5) * 6, -2, (rng() - 0.5) * 4));
       const origin = x.kind === 'lightning' ? where(x.from) : null;
-      const from = origin
-        ? origin.clone().add(new THREE.Vector3(0, 2.5, 0))
-        : target
-            .clone()
-            .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
+      const gun = x.kind === 'lightning' && x.from?.kind === 'robot' ? muzzle(x.from.id) : null;
+      const from = gun
+        ? gun
+        : origin
+          ? origin.clone().add(new THREE.Vector3(0, 2.5, 0))
+          : target
+              .clone()
+              .add(new THREE.Vector3((rng() - 0.5) * 3, 8 + rng() * 3, (rng() - 0.5) * 2));
       const core = i % 3 === 0;
+      // thicker toward a far target so the bolt still reads across the bay
+      const span = Math.min(2.4, Math.max(1, from.distanceTo(target) / 18));
       ribbon.set(
-        boltPoints(from, target, rng, 16, core ? 0.7 : 0.9),
+        boltPoints(from, target, rng, 16, (core ? 0.7 : 0.9) * span),
         eye,
-        (core ? 0.26 : 0.1) * Math.max(0.6, x.intensity),
+        (core ? 0.26 : 0.1) * Math.max(0.6, x.intensity) * span,
         (1 - age / x.duration) * (core ? 1 : 0.6),
       );
     });
