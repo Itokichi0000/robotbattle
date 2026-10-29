@@ -168,7 +168,7 @@ describe('ArenaDirector', () => {
     expect(sounds.filter((s) => s === 'hit').length).toBeLessThanOrEqual(13);
   });
 
-  it('enemy attacks draw beams to each city; absorbed hits show the shield', () => {
+  it('enemy attacks draw beams to each city and the struck robot; absorbed hits show the shield', () => {
     const d = new ArenaDirector();
     const fx: DirectorEffect[] = [];
     d.onEffect((e) => fx.push(e));
@@ -186,7 +186,9 @@ describe('ArenaDirector', () => {
     expect(fx.filter((e) => e.kind === 'beam').map((e) => e.to)).toEqual([
       { kind: 'city', id: 'kanto' },
       { kind: 'city', id: 'kyushu' },
+      { kind: 'robot', id: 'RAIJIN' },
     ]);
+    expect(fx.some((e) => e.kind === 'impact' && e.to?.kind === 'robot')).toBe(true);
     expect(
       fx.some((e) => e.kind === 'shield' && e.to?.kind === 'city' && e.to.id === 'kyushu'),
     ).toBe(true);

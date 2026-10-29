@@ -731,6 +731,13 @@ export class ArenaDirector {
       if (h.damage > 0)
         this.emitEffect('impact', null, null, to, Math.min(1.2, 0.4 + h.damage / 40));
     }
+    // The blow that also struck a machine shows where it came from: a beam
+    // from the attacker into the robot and a burst on its armour.
+    if (cue.robotHit && this.throttle(`robot-hit-${cue.robotHit}`, 0.4)) {
+      const robot: FxTarget = { kind: 'robot', id: cue.robotHit };
+      this.emitEffect('beam', null, from, robot, 1);
+      this.emitEffect('impact', null, null, robot, cue.enemyKind === 'BOSS' ? 1.1 : 0.7);
+    }
     if (cue.robotHit && !this.busy) {
       this.setClip(cue.robotHit, cue.enemyKind === 'BOSS' ? 'HitHeavy' : 'HitReact', 0);
       if (cue.enemyKind === 'BOSS') {

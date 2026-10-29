@@ -109,3 +109,28 @@ Blender 版 `arena.glb`：舞台と外周リング、両機の出撃台（`spawn
    発注用の仕様（クリップの長さとヒットマーカー、予算、納品場所、自動検収）は `docs/art/ART_BRIEF.md`。
 
 有料の3D生成AIは使わない（承認後に選択可）。外部素材を入れる場合は `assets/LICENSES.md` に出所・ライセンス・来歴を記録する。
+
+## 会場用ヒーロー（D-074）
+
+会場の大画面の既定は、Blender で作り直した雷神と NULL CORE（`apps/web/public/assets/models/hero/`、`?models=hero`）。
+骨格・クリップ名・ダメージ段階・弱点の名前は上の契約のまま（検収は `packages/three-game/src/glb.test.ts`）。
+
+- 生成：`tools/blender/hero_kit.py`（面取り・V 溝のパネル線・押し出し装甲・円柱・管・通気口・ボルト・ステンシル、手続き塗装）と
+  `tools/blender/hero_assets.py`（組み立て→UV 展開→Cycles で 2K ベイク→骨ごとの剛体メッシュ→GLB）。ソースは
+  `assets/blender/hero_*.blend` とベイク画像 `assets/blender/hero_textures/`。
+- テクスチャ：基本色（エッジの剥げ・溝の汚れ）、ORM（R=AO・G=粗さ・B=金属）、接空間の法線。JPEG で GLB に埋め込み（雷神 5.7MB）。
+- 雷神の追加ノード：`Cannon`（右肩のレールキャノン、胸の骨に付く）と `Muzzle`（砲口、エフェクトの起点）。
+  攻撃クリップ（AttackHeavy/AttackLight）は肩砲の「構え→照準→反動」。
+- NULL CORE：Idle・Telegraph は輪がちょうど1回転して継ぎ目なくループ（輪は非対称なので部分回転だと跳ねる）。
+  ゲームでは Idle に Telegraph・HitReact を加算レイヤーで重ねる。
+- プレビュー：`docs/art/hero_*.jpg`。
+
+![雷神（作り直し）](art/hero_raijin_three_quarter.jpg) ![NULL CORE（作り直し）](art/hero_null_core_three_quarter.jpg)
+
+## 外部素材
+
+| 素材                                              | 使い道                         | 出典・ライセンス                                                                                      |
+| ------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `apps/web/public/assets/env/moonless_golf_1k.hdr` | 会場の舞台の映り込み（環境光） | Poly Haven「Moonless Golf」（CC0）。three.js リポジトリ `examples/textures/equirectangular/` から取得 |
+
+ほかの形・テクスチャ・音はすべてこのリポジトリのコードで生成したもの。

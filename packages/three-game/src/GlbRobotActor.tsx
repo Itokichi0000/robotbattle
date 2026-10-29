@@ -10,6 +10,8 @@ import { RobotActor, type RobotActorProps } from './RobotActor';
 import { applyClip } from './robots/animate';
 import { JOINT_NAMES, type RobotRig, damageStageFor, setDamageStage } from './robots/build';
 
+const CROSSFADE = 0.12;
+
 /** Rig view over a loaded GLB, so procedural clips can drive it when a clip is missing. */
 function rigFromScene(scene: THREE.Object3D, kind: RobotRig['kind']): RobotRig | null {
   const joints = {} as RobotRig['joints'];
@@ -75,6 +77,8 @@ function GlbRobot({
   }, [gltf.animations, mixer]);
   useEffect(() => () => void mixer.stopAllAction(), [mixer]);
   const current = useRef<string | null>(null);
+  // The outgoing clip, held on its last pose while the new one fades in.
+  const fading = useRef<{ action: THREE.AnimationAction; time: number; from: number } | null>(null);
   const outer = useRef<THREE.Group>(null);
   const advance = useRef(0);
   const home = ROBOT_HOME[teamId];
@@ -85,7 +89,11 @@ function GlbRobot({
     const action = actions.get(cue.clip);
     if (action) {
       if (current.current !== cue.clip) {
-        for (const a of actions.values()) a.stop();
+        const prev = current.current ? actions.get(current.current) : undefined;
+        if (fading.current) fading.current.action.stop();
+        fading.current =
+          prev && prev !== action ? { action: prev, time: prev.time, from: director.time } : null;
+        for (const a of actions.values()) if (a !== action && a !== prev) a.stop();
         action.reset().play();
         action.setLoop(
           LOOPING_CLIPS.has(cue.clip as ClipName) ? THREE.LoopRepeat : THREE.LoopOnce,
@@ -97,12 +105,25 @@ function GlbRobot({
       // Drive time from the director so all screens stay in step.
       const dur = action.getClip().duration;
       action.time = LOOPING_CLIPS.has(cue.clip) ? t % dur : Math.min(t, dur);
+      // A short crossfade (0.12 s) instead of a pose jump between clips.
+      const f = fading.current;
+      const w = f ? Math.min(1, (director.time - f.from) / CROSSFADE) : 1;
+      action.setEffectiveWeight(w);
+      if (f) {
+        f.action.time = f.time;
+        f.action.setEffectiveWeight(1 - w);
+        if (w >= 1) {
+          f.action.stop();
+          fading.current = null;
+        }
+      }
       mixer.update(0);
       for (const m of rig?.glowMaterials ?? [])
         m.emissiveIntensity = (rig?.baseGlow ?? 1.5) * (1 + energyRatio * 0.8);
     } else if (rig) {
       for (const a of actions.values()) a.stop();
       current.current = null;
+      fading.current = null;
       applyClip(rig, cue.clip, t, director.time, energyRatio * 0.8);
     }
     advance.current += (cue.advance - advance.current) * Math.min(1, dt * 7);

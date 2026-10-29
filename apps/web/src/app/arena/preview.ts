@@ -1,4 +1,4 @@
-import type { ArenaPreviewCue, RaidResult, RegionId } from '@sats-wars/shared';
+import type { ArenaPreviewCue, RaidResult, RegionId, Telegraph } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 
@@ -8,7 +8,7 @@ import type { ArenaDirector } from '@sats-wars/three-game';
  * Never sends anything to the server and never changes game state.
  */
 export const PREVIEW_HELP =
-  'PREVIEW: 1 開幕 / 2 砲撃 / 3 シールド / 4 敵の予告 / 5 敵の攻撃 / 6 都市陥落 / 7 神雷風陣 / 8 成功 / 9 失敗 / 0 リセット';
+  'PREVIEW: 1 開幕 / 2 砲撃 / 3 シールド / 4 敵の予告 / 5 敵の攻撃 / 6 都市陥落 / 7 神雷風陣 / 8 成功 / 9 失敗 / B 雷神×NULL CORE 通し / 0 リセット';
 
 interface PreviewState {
   n: number;
@@ -169,4 +169,86 @@ export function playArenaCue(cue: ArenaPreviewCue, director: ArenaDirector): voi
     case 'DEFEAT':
       return director.play({ kind: 'raidEnded', result: fakeResult(cue === 'VICTORY') });
   }
+}
+
+/**
+ * The battle in one take (key B): NULL CORE locks on to two cities, Raijin's
+ * cannon hits its eye and then its arm, NULL CORE answers — one city shielded,
+ * one hit, a beam into Raijin — and the gods finish with 神雷風陣. Timed in
+ * director seconds (follows ?speed). The warning is shown through
+ * `setTelegraphs` (display only); returns a cancel function.
+ */
+export function playBossSlice(
+  director: ArenaDirector,
+  bossId: number,
+  setTelegraphs: (t: Telegraph[]) => void,
+): () => void {
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+  const at = (seconds: number, fn: () => void) =>
+    timers.push(setTimeout(fn, (seconds * 1000) / Math.max(0.05, director.timeScale)));
+  const targets: RegionId[] = ['kanto', 'kinki'];
+  const hit = (weakpoint: 'CORE' | 'ARM', amount: number) =>
+    director.play({
+      kind: 'task',
+      role: 'GUNNER',
+      robot: 'RAIJIN',
+      success: 1,
+      callsign: 'PILOT-0001',
+      assist: false,
+      effect: {
+        kind: 'DAMAGE',
+        enemyId: bossId,
+        enemyKind: 'BOSS',
+        weakpoint,
+        amount,
+        defeated: false,
+        note: null,
+      },
+    });
+  at(0, () => {
+    director.play({ kind: 'telegraph', enemyId: bossId, enemyKind: 'BOSS', targets });
+    setTelegraphs([
+      {
+        id: -1,
+        enemyId: bossId,
+        kind: 'NULL_BEAM',
+        targets,
+        direction: 'UP',
+        startsAt: 0,
+        resolvesAt: 0,
+        damage: 30,
+        delayed: false,
+      },
+    ]);
+  });
+  at(2.2, () => hit('CORE', 48));
+  at(3.6, () => hit('ARM', 30));
+  at(5.2, () => {
+    setTelegraphs([]);
+    director.play({
+      kind: 'attack',
+      enemyId: bossId,
+      enemyKind: 'BOSS',
+      robotHit: 'RAIJIN',
+      jam: false,
+      hits: [
+        { cityId: 'kanto', damage: 0, absorbed: 30, hpAfter: 100, destroyed: false },
+        { cityId: 'kinki', damage: 30, absorbed: 0, hpAfter: 70, destroyed: false },
+      ],
+    });
+  });
+  at(7.6, () => director.play({ kind: 'specialOpen' }));
+  at(9.1, () =>
+    director.play({
+      kind: 'specialResolved',
+      outcome: 'ACTIVATED',
+      damage: 250,
+      bossId,
+      cityHits: [],
+    }),
+  );
+  return () => {
+    for (const t of timers) clearTimeout(t);
+    setTelegraphs([]);
+  };
 }

@@ -140,6 +140,8 @@ export function ArenaScene(props: ArenaSceneProps) {
             cities={props.cities}
             threats={props.threats}
             cityMaxHp={props.cityMaxHp}
+            telegraphs={props.telegraphs}
+            enemies={props.enemies}
             director={director}
             reducedMotion={reducedMotion}
             shadows={q.shadows}

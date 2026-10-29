@@ -1,7 +1,7 @@
 'use client';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Enemy, PublicRaidSnapshot, TeamId } from '@sats-wars/shared';
+import type { Enemy, PublicRaidSnapshot, TeamId, Telegraph } from '@sats-wars/shared';
 import {
   ArenaDirector,
   type Banner,
@@ -26,7 +26,13 @@ import {
   saveArenaSettings,
   webglAvailable,
 } from './settings';
-import { PREVIEW_HELP, handlePreviewKey, newPreviewState, playArenaCue } from './preview';
+import {
+  PREVIEW_HELP,
+  handlePreviewKey,
+  newPreviewState,
+  playArenaCue,
+  playBossSlice,
+} from './preview';
 import { SettingsPanel } from './SettingsPanel';
 
 /** CC0 HDRI (Poly Haven, via the three.js examples) for the battlefield's reflections. */
@@ -57,6 +63,10 @@ export function ArenaApp() {
   // ?hud=0: clean feed of the 3D only (broadcast mixers, art review).
   const [cleanFeed, setCleanFeed] = useState(false);
   const previewState = useRef(newPreviewState());
+  // Rehearsal only: the boss slice's warning (display only) and the boss it targets.
+  const [rehearsalTelegraphs, setRehearsalTelegraphs] = useState<Telegraph[]>([]);
+  const rehearsalBossId = useRef(9999);
+  const cancelSlice = useRef<(() => void) | null>(null);
   const previewRef = useRef(false);
   previewRef.current = preview;
 
@@ -228,7 +238,14 @@ export function ArenaApp() {
           : document.documentElement.requestFullscreen?.());
       if (e.key === 's' || e.key === 'S') setPanelOpen((v) => !v);
       if (e.key === 'm' || e.key === 'M') setSettings((s) => (s ? { ...s, muted: !s.muted } : s));
-      if (preview) handlePreviewKey(e.key, director, previewState.current);
+      if (preview && (e.key === 'b' || e.key === 'B')) {
+        cancelSlice.current?.();
+        cancelSlice.current = playBossSlice(
+          director,
+          rehearsalBossId.current,
+          setRehearsalTelegraphs,
+        );
+      } else if (preview) handlePreviewKey(e.key, director, previewState.current);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -253,6 +270,8 @@ export function ArenaApp() {
 
   const gameNow = conn!.gameNow();
   const view = raidView(snap, gameNow);
+  const sceneEnemies = preview ? withRehearsalBoss(snap.enemies) : snap.enemies;
+  rehearsalBossId.current = sceneEnemies.find((e) => e.kind === 'BOSS')?.id ?? 9999;
   const glow: Record<TeamId, number> = {
     RAIJIN: 0.15 + 0.85 * (snap.robots[0]!.energy / 100),
     FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
@@ -272,8 +291,8 @@ export function ArenaApp() {
         <ArenaScene
           director={director}
           cities={snap.cities}
-          enemies={preview ? withRehearsalBoss(snap.enemies) : snap.enemies}
-          telegraphs={snap.telegraphs}
+          enemies={sceneEnemies}
+          telegraphs={preview ? [...snap.telegraphs, ...rehearsalTelegraphs] : snap.telegraphs}
           threats={threats}
           cityMaxHp={snap.config.cityMaxHp}
           glow={glow}
@@ -333,7 +352,7 @@ export function ArenaApp() {
       >
         ⚙ S
       </button>
-      {preview && (
+      {preview && !cleanFeed && (
         <div
           className="absolute left-1/2 top-[19%] z-30 -translate-x-1/2 rounded bg-yellow-300/90 px-3 py-1 text-sm font-bold text-navy"
           data-testid="preview-banner"

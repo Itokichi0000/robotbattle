@@ -89,6 +89,35 @@ def raijin_materials():
     }
 
 
+# Raijin fights with the rail cannon on its shoulder, not its fists: the two
+# attack clips become "aim and fire" — brace, the right arm thrust out at the
+# target (the hit marker still has the hand forward, as the contract checks),
+# the chest kicking back on the shot and the drum ring turning. The drum ring
+# ends on a multiple of 45 degrees (eight drums), so Idle resumes seamlessly.
+RAIJIN_CANNON_CLIPS = {
+    "AttackHeavy": (20, False, [
+        (7, "Hips", (0, 0, 0), (0, -0.1, 0)), (14, "Hips", (0, 0, 0), (0, -0.08, 0)),
+        (7, "Thigh_L", (-16, 0, 0)), (7, "Shin_L", (22, 0, 0)), (7, "Thigh_R", (10, 0, 0)),
+        (14, "Thigh_L", (-14, 0, 0)), (14, "Shin_L", (20, 0, 0)), (14, "Thigh_R", (8, 0, 0)),
+        (7, "Chest", (2, -8, 0)), (11, "Chest", (-9, -8, 0)), (14, "Chest", (-3, -6, 0)),
+        (7, "UpperArm_R", (-80, 0, -4)), (11, "UpperArm_R", (-90, 0, -4)), (14, "UpperArm_R", (-86, 0, -4)),
+        (7, "Forearm_R", (-6, 0, 0)), (11, "Forearm_R", (0, 0, 0)),
+        (7, "UpperArm_L", (10, 0, 10)), (14, "UpperArm_L", (8, 0, 10)),
+        (11, "Head", (-4, 0, 0)),
+        (11, "BackUnit", (0, 45, 0)), (20, "BackUnit", (0, 90, 0)),
+    ]),
+    "AttackLight": (14, False, [
+        (3, "UpperArm_R", (-70, 0, -4)), (7, "UpperArm_R", (-60, 0, -4)),
+        (3, "Chest", (-5, -6, 0)), (7, "Chest", (-1, -3, 0)),
+        (3, "BackUnit", (0, 20, 0)), (14, "BackUnit", (0, 45, 0)),
+    ]),
+}
+
+
+def raijin_clips():
+    return with_aliases({**robot_clips(True), **RAIJIN_CANNON_CLIPS})
+
+
 def mirrored(prof, sx):
     """Profile for the side sx (+1 robot left, -1 right) with a consistent winding."""
     out = [(sx * u, v) for u, v in prof]
@@ -804,7 +833,7 @@ def make_raijin(out_root, preview_dir, hdri, stage):
     socket(arm, "Muzzle", "Chest", (-0.78, -1.6, 4.08))
     dmg_plate = surface("raijin_damage_plate", (0.80, 0.25, 0.014), 0.0, 0.4)
     add_damage(arm, M["glow"], dmg_plate, -0.66, 3.3, 0.8, (1.42, 3.6, -0.5))
-    add_actions(arm, with_aliases(robot_clips(True)))
+    add_actions(arm, raijin_clips())
     finish("raijin", out_root, preview_dir, hdri, (0, 0, 2.45), 9.5, views)
 
 

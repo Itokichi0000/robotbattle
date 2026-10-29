@@ -2,13 +2,15 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
-import type { CityState, RegionId } from '@sats-wars/shared';
+import type { CityState, Enemy, RegionId, Telegraph } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from './director';
 import {
   BOSS_POSITION,
   CORRUPT_RED,
+  enemyWorldPosition,
   horizonCityPosition,
+  regionWorldPosition,
   ROBOT_HOME,
   SEA_LEVEL,
   TEAM_COLORS,
@@ -26,6 +28,9 @@ export interface BattlefieldProps {
   cities: CityState[];
   threats: Partial<Record<RegionId, CityThreat>>;
   cityMaxHp: number;
+  /** Live attack warnings: a targeting laser from each attacker to its cities. */
+  telegraphs: Telegraph[];
+  enemies: Enemy[];
   director: ArenaDirector;
   reducedMotion: boolean;
   shadows: boolean;
@@ -56,6 +61,12 @@ export function Battlefield(props: BattlefieldProps) {
         cities={props.cities}
         threats={props.threats}
         cityMaxHp={props.cityMaxHp}
+        director={props.director}
+        reducedMotion={props.reducedMotion}
+      />
+      <TargetLasers
+        telegraphs={props.telegraphs}
+        enemies={props.enemies}
         director={props.director}
         reducedMotion={props.reducedMotion}
       />
@@ -281,7 +292,8 @@ function Sea() {
     const time = { value: 0 };
     const mat = new THREE.MeshStandardMaterial({
       color: '#060C18',
-      roughness: 0.12,
+      // a little rough so a strong light breaks into glints, not one white column
+      roughness: 0.26,
       metalness: 0.0,
       normalMap: tex,
       normalScale: new THREE.Vector2(0.55, 0.55),
@@ -599,10 +611,10 @@ function BattleLighting({ shadows }: { shadows: boolean }) {
         shadow-normalBias={0.02}
       />
       {/* the horizon burning behind the boss: warm rim on everything facing the sea */}
-      <directionalLight position={[6, 4, -40]} intensity={0.8} color="#FF8A4C" />
+      <directionalLight position={[6, 4, -40]} intensity={0.45} color="#FF8A4C" />
       <pointLight
         position={[BOSS_POSITION.x, BOSS_POSITION.y, BOSS_POSITION.z + 6]}
-        intensity={70}
+        intensity={28}
         distance={0}
         decay={2}
         color="#FF1030"
@@ -712,7 +724,7 @@ function Floodlights({ shafts }: { shafts: boolean }) {
           </mesh>
           <mesh position={t.head} onUpdate={(m) => m.lookAt(t.aim)} castShadow>
             <boxGeometry args={[2.2, 1.0, 0.5]} />
-            <meshStandardMaterial color="#1A1D22" emissive="#FFE8C0" emissiveIntensity={1.4} />
+            <meshStandardMaterial color="#1A1D22" emissive="#FFE8C0" emissiveIntensity={0.85} />
           </mesh>
           {t.lit && (
             <spotLight
@@ -1029,5 +1041,90 @@ function Embers({ reducedMotion }: { reducedMotion: boolean }) {
         blending={THREE.AdditiveBlending}
       />
     </points>
+  );
+}
+
+const MAX_LASERS = 12;
+
+/**
+ * The warning before a blow (spec: always telegraphed): a thin red laser from
+ * the attacker — NULL CORE's eye or the escort — to every city it is about to
+ * strike, brightening as the moment nears (slow breathing, never flashing).
+ */
+function TargetLasers({
+  telegraphs,
+  enemies,
+  director,
+  reducedMotion,
+}: {
+  telegraphs: Telegraph[];
+  enemies: Enemy[];
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
+  const { scene } = useThree();
+  const mats = useMemo(
+    () => Array.from({ length: MAX_LASERS }, () => shaftMaterial(CORRUPT_RED, 0.6)),
+    [],
+  );
+  useEffect(() => () => mats.forEach((m) => m.dispose()), [mats]);
+  const refs = useRef<Array<THREE.Mesh | null>>([]);
+  const eyeRef = useRef<THREE.Object3D | null>(null);
+  const live = useRef({ telegraphs, enemies });
+  live.current = { telegraphs, enemies };
+  const tmp = useMemo(
+    () => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), up: new THREE.Vector3(0, -1, 0) }),
+    [],
+  );
+
+  useFrame(() => {
+    const { telegraphs: tgs, enemies: es } = live.current;
+    const escorts = es.filter((e) => e.kind !== 'BOSS');
+    if (!eyeRef.current?.parent)
+      eyeRef.current = scene.getObjectByName('null-core-glb')?.getObjectByName('weak_core') ?? null;
+    let n = 0;
+    for (const tg of tgs) {
+      const e = es.find((x) => x.id === tg.enemyId);
+      if (!e) continue;
+      if (e.kind === 'BOSS') {
+        if (eyeRef.current) eyeRef.current.getWorldPosition(tmp.a);
+        else tmp.a.copy(BOSS_POSITION);
+      } else tmp.a.copy(enemyWorldPosition(e, tgs, escorts.indexOf(e)));
+      for (const city of tg.targets) {
+        const m = refs.current[n];
+        if (!m) break;
+        tmp.b.copy(regionWorldPosition(city));
+        const len = tmp.a.distanceTo(tmp.b);
+        m.visible = true;
+        m.position.copy(tmp.a).lerp(tmp.b, 0.5);
+        m.quaternion.setFromUnitVectors(tmp.up, tmp.b.clone().sub(tmp.a).normalize());
+        m.scale.set(1, len, 1);
+        const breathe = reducedMotion ? 1 : 0.75 + 0.25 * Math.sin(director.time * Math.PI * 1.4);
+        (m.material as THREE.ShaderMaterial).uniforms.uOpacity!.value =
+          (e.kind === 'BOSS' ? 0.95 : 0.6) * breathe;
+        n++;
+      }
+    }
+    for (let i = n; i < MAX_LASERS; i++) if (refs.current[i]) refs.current[i]!.visible = false;
+  });
+
+  return (
+    <group name="bay-target-lasers">
+      {mats.map((m, i) => (
+        <mesh
+          key={i}
+          ref={(r) => {
+            refs.current[i] = r;
+          }}
+          material={m}
+          visible={false}
+          renderOrder={6}
+          frustumCulled={false}
+        >
+          {/* unit length along Y; uv.y = 1 (brightest) at the attacker's end */}
+          <cylinderGeometry args={[0.14, 3.2, 1, 8, 1, true]} />
+        </mesh>
+      ))}
+    </group>
   );
 }

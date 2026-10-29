@@ -21,3 +21,6 @@ next-env.d.ts
 apps/web/public/assets/robots/generated/
 __pycache__/
 apps/web/public/demo/
+
+# Blender (bpy) virtualenv for tools/blender
+.venv-bpy/

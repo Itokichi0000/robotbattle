@@ -132,10 +132,25 @@ function GlbNullCore({
   const gltf = useGLTF(url);
   const root = useRef<THREE.Group>(null);
   const mixer = useMemo(() => new THREE.AnimationMixer(gltf.scene), [gltf.scene]);
-  const clips = useMemo(
-    () => new Map(gltf.animations.map((c) => [c.name, mixer.clipAction(c)])),
-    [gltf.animations, mixer],
-  );
+  // Idle always runs; Telegraph and HitReact play on top of it as additive
+  // layers, so the ring keeps turning where it was instead of snapping back
+  // to its rest angle whenever NULL CORE charges or takes a hit.
+  const layers = useMemo(() => {
+    const find = (name: string) => gltf.animations.find((c) => c.name === name);
+    const idleClip = find('Idle');
+    const additive = (name: string) => {
+      const c = find(name);
+      if (!c) return null;
+      const a = mixer.clipAction(THREE.AnimationUtils.makeClipAdditive(c.clone()));
+      a.blendMode = THREE.AdditiveAnimationBlendMode;
+      a.play();
+      a.setEffectiveWeight(0);
+      return a;
+    };
+    const idle = idleClip ? mixer.clipAction(idleClip) : null;
+    idle?.play();
+    return { idle, telegraph: additive('Telegraph'), hit: additive('HitReact') };
+  }, [gltf.animations, mixer]);
   // Each weak point gets its own material so hits can light it up separately.
   const weak = useMemo(() => {
     const out: Partial<Record<keyof typeof WEAK_POINTS, THREE.MeshStandardMaterial>> = {};
@@ -151,25 +166,38 @@ function GlbNullCore({
     return out;
   }, [gltf.scene]);
   useEffect(() => () => void mixer.stopAllAction(), [mixer]);
-  const playing = useRef<string | null>(null);
-  useFrame(() => {
+  // Raijin's hits on NULL CORE make it flinch (director time of the last one).
+  const hitAt = useRef(-10);
+  useEffect(
+    () =>
+      director.onEffect((e) => {
+        if (e.kind === 'impact' && e.to?.kind === 'enemy' && e.to.id === boss.id)
+          hitAt.current = director.time;
+      }),
+    [director, boss.id],
+  );
+  const charge = useRef(0);
+  useFrame((_, dt) => {
     const t = director.time;
     if (root.current) {
       root.current.position.copy(BOSS_POSITION);
       root.current.position.y += reducedMotion ? 0 : Math.sin(t * 0.6) * 0.4;
     }
-    const want = charging ? 'Telegraph' : 'Idle';
-    const action = clips.get(want);
-    if (action && playing.current !== want) {
-      for (const a of clips.values()) a.stop();
-      action.reset().play();
-      playing.current = want;
-    }
     // Director time keeps every screen in step; reduced motion holds the pose.
-    if (action) {
-      action.time = reducedMotion ? 0 : t % action.getClip().duration;
-      mixer.update(0);
+    const { idle, telegraph, hit } = layers;
+    if (idle) idle.time = reducedMotion ? 0 : t % idle.getClip().duration;
+    charge.current += ((charging ? 1 : 0) - charge.current) * Math.min(1, dt * 4);
+    if (telegraph) {
+      telegraph.time = reducedMotion ? 0 : t % telegraph.getClip().duration;
+      telegraph.setEffectiveWeight(charge.current);
     }
+    if (hit) {
+      const since = t - hitAt.current;
+      const dur = hit.getClip().duration;
+      hit.time = Math.min(since, dur);
+      hit.setEffectiveWeight(!reducedMotion && since < dur ? 1 : 0);
+    }
+    mixer.update(0);
     for (const [k, m] of Object.entries(weak) as Array<
       [keyof typeof WEAK_POINTS, THREE.MeshStandardMaterial]
     >) {
