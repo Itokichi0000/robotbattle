@@ -38,8 +38,20 @@ fi
 step "Source $REF"
 git -C "$APP/repo" fetch --quiet --prune origin
 SHA=$(git -C "$APP/repo" rev-parse --verify "$REF^{commit}")
+# Carry on with the deploy scripts of the commit being deployed: move the checkout
+# in repo/ there and start again, so fixes to deploy.sh and rollback.sh reach the
+# VPS by themselves. (bash has read this whole block before checkout rewrites the file.)
+if [ "${SATS_WARS_DEPLOY_SHA:-}" != "$SHA" ]; then
+  git -C "$APP/repo" checkout --quiet --detach "$SHA"
+  SATS_WARS_DEPLOY_SHA=$SHA exec bash "$APP/repo/deploy/deploy.sh" "$SHA"
+fi
 REL="$APP/releases/$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:7}"
 mkdir -p "$REL"
+# Until the new release has run healthy, any failure (build, start, smoke test)
+# deletes it, so releases/ only holds releases that worked and rollback.sh never
+# picks a broken one. A failed first deploy is kept: it is what is running.
+healthy_rel=0
+trap '[ "$healthy_rel" = 1 ] || [ "$(readlink -f "$APP/current" 2>/dev/null)" = "$REL" ] || rm -rf "$REL"' EXIT
 git -C "$APP/repo" archive "$SHA" | tar -x -C "$REL"
 echo "$SHA" >"$REL/REVISION"
 
@@ -100,10 +112,12 @@ if ! healthy || ! smoke; then
   echo "Logs: journalctl -u sats-wars-server -u sats-wars-web -n 100" >&2
   exit 1
 fi
+healthy_rel=1
 
 step "Clean up old releases (keeping $KEEP)"
 cur=$(readlink -f "$APP/current")
-ls -1dt "$APP"/releases/*/ 2>/dev/null | sed 's:/$::' | tail -n +$((KEEP + 1)) |
+# Newest first by name (it starts with the UTC time; directory times change as the site runs).
+ls -1d "$APP"/releases/*/ 2>/dev/null | sed 's:/$::' | sort -r | tail -n +$((KEEP + 1)) |
   while read -r old; do
     [ "$old" = "$cur" ] || [ "$old" = "$PREV" ] || rm -rf "$old"
   done

@@ -34,7 +34,10 @@ export default tseslint.config(
   {
     // Browser bundles take Zod from shared/validation so its eval-free mode is set before any
     // schema is built (production CSP has no 'unsafe-eval', D-069).
-    files: ['packages/{shared,ui,three-game}/src/**/*.{ts,tsx}', 'apps/{web,solo}/src/**/*.{ts,tsx}'],
+    files: [
+      'packages/{shared,ui,three-game}/src/**/*.{ts,tsx}',
+      'apps/{web,solo}/src/**/*.{ts,tsx}',
+    ],
     ignores: ['packages/shared/src/validation.ts', '**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
@@ -43,7 +46,8 @@ export default tseslint.config(
           paths: [
             {
               name: 'zod',
-              message: "Import z from packages/shared/src/validation (browsers need Zod's jitless mode, D-069).",
+              message:
+                "Import z from packages/shared/src/validation (browsers need Zod's jitless mode, D-069).",
             },
           ],
         },

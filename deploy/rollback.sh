@@ -2,6 +2,7 @@
 # Switch back to the previous release (or a named one) and restart (run as root on the VPS).
 #
 #   sudo bash /opt/sats-wars/repo/deploy/rollback.sh                 # the release before the current one
+#                                                                    # (again: one further back)
 #   sudo bash /opt/sats-wars/repo/deploy/rollback.sh 20261029T0400Z-abc1234
 #
 # The code changes; the database stays as it is. Schema migrations only add
@@ -21,7 +22,9 @@ cur=$(readlink -f "$APP/current")
 if [ $# -ge 1 ]; then
   target="$APP/releases/$1"
 else
-  target=$(ls -1dt "$APP"/releases/*/ | sed 's:/$::' | grep -vx "$cur" | head -n1 || true)
+  # The newest release older than the current one. Names start with the UTC time
+  # of the build; directory times change as the site runs, so sort by name.
+  target=$(ls -1d "$APP"/releases/*/ | sed 's:/$::' | sort -r | awk -v cur="$cur" 'seen { print; exit } $0 == cur { seen = 1 }')
 fi
 [ -n "$target" ] && [ -d "$target" ] || { echo "no release to roll back to" >&2; ls -1t "$APP/releases" >&2; exit 1; }
 

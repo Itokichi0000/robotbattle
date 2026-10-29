@@ -11,6 +11,6 @@ import { z } from 'zod';
  * schema modules depend on this file. A call from app start-up ran too late (D-069).
  * The game server keeps the compiled parsers.
  */
-if (typeof window !== 'undefined') z.config({ jitless: true });
+if ('window' in globalThis) z.config({ jitless: true });
 
 export { z };
