@@ -1,5 +1,5 @@
-import type { GameConfig, RaidResult, RaidState, Role } from '@sats-wars/shared';
-import { makeGameConfig } from '@sats-wars/shared';
+import type { GameConfig, GameEvent, RaidResult, RaidState, Role } from '@sats-wars/shared';
+import { ROLES, makeGameConfig } from '@sats-wars/shared';
 import {
   type EngineCommand,
   createRaidState,
@@ -14,7 +14,8 @@ import {
  * default (recommended) mission of their seat, plays the minigame with a given
  * skill and submits. Hypothesis check, not proof: venue playtests decide.
  */
-export type RoleMix = 'spread' | 'gunners' | 'no-support';
+/** spread = balanced seats, random = everyone picks a seat at random (crowd-like skew). */
+export type RoleMix = 'spread' | 'gunners' | 'no-support' | 'random';
 
 export interface RaidSimOptions {
   pilots: number;
@@ -23,6 +24,8 @@ export interface RaidSimOptions {
   skill: number;
   seed: number;
   config?: Partial<GameConfig>;
+  /** Every batch of engine events (demo:raid logs them). */
+  onEvents?: (events: GameEvent[], state: RaidState) => void;
 }
 
 export interface RaidSim {
@@ -47,6 +50,10 @@ export interface RaidSim {
   gunnerIdle: number;
   /** Seconds into the raid when 神雷風陣 (or its fallback) resolved, if it did. */
   specialAtSeconds: number | null;
+  /** Successful minigames (the "effective actions" the raid took). */
+  successes: number;
+  /** Most crowded seat's share of the crew minus 1/4 (0 = perfectly balanced). */
+  roleSkew: number;
 }
 
 const SPREAD: Role[] = [
@@ -63,8 +70,9 @@ const SPREAD: Role[] = [
 ];
 const NO_SUPPORT: Role[] = ['GUNNER', 'GUARDIAN'];
 
-export function roleFor(mix: RoleMix, i: number): Role {
+export function roleFor(mix: RoleMix, i: number, rand: () => number = Math.random): Role {
   if (mix === 'gunners') return 'GUNNER';
+  if (mix === 'random') return ROLES[Math.floor(rand() * ROLES.length)]!;
   const list = mix === 'spread' ? SPREAD : NO_SUPPORT;
   return list[i % list.length]!;
 }
@@ -81,6 +89,7 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
   const run = (cmd: EngineCommand) => {
     const r = reduce(state, cmd);
     state = r.state;
+    if (r.events.length) o.onEvents?.(r.events, state);
     for (const ev of r.events) {
       if (ev.type === 'ENEMY_TELEGRAPH') {
         const e = state.enemies.find((x) => x.id === ev.data.telegraph.enemyId);
@@ -100,7 +109,7 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
       t: 0,
       pilotId: `p${i}`,
       callsign: `P${i}`,
-      role: roleFor(o.mix, i),
+      role: roleFor(o.mix, i, rand),
       isBot: true,
     });
   run({ type: 'OPEN_LOBBY', t: 0 });
@@ -192,7 +201,15 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
     gunnerRequests,
     gunnerIdle,
     specialAtSeconds,
+    successes: r.stats.successes,
+    roleSkew: roleSkew(Object.values(state.pilots).map((p) => p.role)),
   };
+}
+
+export function roleSkew(roles: Role[]): number {
+  if (!roles.length) return 0;
+  const most = Math.max(...ROLES.map((r) => roles.filter((x) => x === r).length));
+  return most / roles.length - 1 / ROLES.length;
 }
 
 export interface Aggregate {

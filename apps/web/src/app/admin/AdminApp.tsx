@@ -21,6 +21,10 @@ interface Overview {
     timeScale: number;
     demoBots: number;
     demoBotSkill: number;
+    scenario: {
+      active: { id: string; route: 'success' | 'failure' } | null;
+      available: Array<{ id: string; titleJa: string; titleEn: string }>;
+    } | null;
     eventId: string;
     event: { eventId: string; venueName: string; arenaLocale: 'ja' | 'en' };
   };
@@ -512,7 +516,7 @@ function RaidTab({
       </section>
       <NextRaidPanel ov={ov} token={token} onSaved={onSaved} />
       <ArenaDisplayPanel ov={ov} cmd={cmd} />
-      {s.demoMode && <RehearsalPanel cmd={cmd} />}
+      {s.demoMode && <RehearsalPanel cmd={cmd} scenario={s.scenario} />}
       <section
         className="sw-panel flex flex-col gap-2 p-4 md:col-span-2"
         data-testid="broadcast-panel"
@@ -771,13 +775,63 @@ function ArenaDisplayPanel({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
 }
 
 /** DEMO only: rehearse enemies and the finale without waiting for the raid to get there. */
-function RehearsalPanel({ cmd }: { cmd: Cmd }) {
+function RehearsalPanel({
+  cmd,
+  scenario,
+}: {
+  cmd: Cmd;
+  scenario: Overview['settings']['scenario'];
+}) {
+  const [route, setRoute] = useState<'success' | 'failure'>('success');
   return (
     <section
       className="sw-panel flex flex-col gap-2 p-4 text-sm md:col-span-2"
       data-testid="rehearsal-panel"
     >
       <h2 className="font-black">リハーサル（DEMOのみ）</h2>
+      {scenario && scenario.available.length > 0 && (
+        <div
+          className="flex flex-col gap-2 rounded-lg border border-line p-3"
+          data-testid="scenario-panel"
+        >
+          <h3 className="font-bold">デモシナリオ（台本どおりに再生）</h3>
+          <p className="text-xs text-muted">
+            待機中のレイドを台本つきのデモに差し替えます。デモ機4体が決まった時刻に動き、人が5人目として搭乗できます。
+            成功ルート＝神雷風陣が発動して撃破、失敗ルート＝5:00以降だれも操作せず合体技失敗→防衛失敗。
+            進行中のレイドは先に終了してください。
+          </p>
+          {scenario.active && (
+            <p className="text-xs text-amber" data-testid="scenario-active">
+              再生中：{scenario.active.id}（
+              {scenario.active.route === 'success' ? '成功ルート' : '失敗ルート'}）
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1">
+              <span>ルート</span>
+              <select
+                className="rounded bg-navy-3 px-2 py-2"
+                value={route}
+                onChange={(e) => setRoute(e.target.value as 'success' | 'failure')}
+                data-testid="scenario-route"
+              >
+                <option value="success">成功ルート / success</option>
+                <option value="failure">失敗ルート / failure</option>
+              </select>
+            </label>
+            {scenario.available.map((x) => (
+              <button
+                key={x.id}
+                className="sw-btn bg-amber px-3 text-navy"
+                onClick={() => void cmd({ command: 'DEMO_SCENARIO', scenario: x.id, route })}
+                data-testid={`scenario-play-${x.id}`}
+              >
+                ▶ {x.titleJa}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-xs text-muted">
         敵の出現はゲームに実際に作用します（このレイドはランキング対象外になります）。演出テストは会場画面で再生するだけで、ゲームには作用しません。
       </p>

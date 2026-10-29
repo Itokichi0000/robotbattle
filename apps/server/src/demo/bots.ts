@@ -1,8 +1,15 @@
 import type { Role, TaskInput } from '@sats-wars/shared';
-import { mulberry32, solveTask } from '@sats-wars/game-engine';
+import {
+  type CommandOutcome,
+  mulberry32,
+  SCENARIOS,
+  ScenarioDriver,
+  solveTask,
+} from '@sats-wars/game-engine';
 import type { WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 import type { RaidManager } from '../raid/manager';
+import type { RaidRuntime } from '../raid/runtime';
 
 const BOT_NAMES = [
   '雷丸',
@@ -46,6 +53,8 @@ interface Bot {
 export class DemoBots {
   private bots: Bot[] = [];
   private rng = mulberry32(Date.now() & 0xffffffff);
+  /** Demo seed raids: the scenario's own scripted bots (the regular ones sit out). */
+  private scenario: { raidId: string; driver: ScenarioDriver } | null = null;
   skill = 0.65;
 
   constructor(
@@ -88,8 +97,13 @@ export class DemoBots {
 
   /** Called from the server tick loop. */
   step(): void {
-    if (this.bots.length === 0) return;
     const rt = this.manager.current();
+    const pick = this.manager.activeScenario;
+    if (pick) {
+      this.stepScenario(rt, pick);
+      return;
+    }
+    if (this.bots.length === 0) return;
     const s = rt.state;
     // Game time, not wall time: with the demo time scale the raid runs faster,
     // and bots must play (and meet mission deadlines) at the raid's pace.
@@ -144,5 +158,28 @@ export class DemoBots {
         bot.nextAt = now + (r.outcome.code === 'COOLDOWN' ? 1500 : 3000);
       }
     }
+  }
+
+  private stepScenario(rt: RaidRuntime, pick: { id: string; route: 'success' | 'failure' }): void {
+    const scenario = SCENARIOS[pick.id];
+    if (!scenario) return;
+    if (this.scenario?.raidId !== rt.raidId)
+      this.scenario = {
+        raidId: rt.raidId,
+        driver: new ScenarioDriver(scenario, pick.route, 'scn'),
+      };
+    const none: CommandOutcome = { kind: 'none' };
+    this.scenario.driver.step(rt.state, rt.nowGameMs(), (cmd) => {
+      if (cmd.type === 'BOARD') {
+        if (!this.manager.joinOpen()) return none;
+        const r = rt.dispatch(cmd);
+        rt.botsAboard = Math.max(
+          rt.botsAboard,
+          Object.values(rt.state.pilots).filter((p) => p.isBot).length,
+        );
+        return r.outcome;
+      }
+      return rt.dispatch(cmd).outcome;
+    });
   }
 }

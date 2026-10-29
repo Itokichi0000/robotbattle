@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ENEMY_KINDS } from './state';
+import { REGION_IDS } from './regions';
 
 /**
  * Every rule number of SATS WARS: EARTH DEFENSE (8-minute co-op raid).
@@ -88,6 +89,21 @@ export const gameConfigSchema = z
     spawns: z
       .array(z.object({ atSeconds: z.number().int().min(0), kind: z.enum(ENEMY_KINDS) }))
       .min(1),
+    /**
+     * Scripted demos only (the `earth-defense-opening` demo seed): the first
+     * non-training attack aimed at or after `atSeconds` targets these cities
+     * (if standing), one entry per attack, in order. Absent in normal raids,
+     * so it never changes their config hash.
+     */
+    scriptedTargets: z
+      .array(
+        z.object({
+          atSeconds: z.number().int().min(0),
+          targets: z.array(z.enum(REGION_IDS)).min(1).max(3),
+        }),
+      )
+      .max(50)
+      .optional(),
     /** INTRO_TRAINING attacks deal this share of their damage (no fatal blows while learning). */
     trainingDamageRatio: z.number().min(0).max(1),
 

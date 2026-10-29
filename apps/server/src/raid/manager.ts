@@ -17,6 +17,7 @@ import {
   applyDifficultyPreset,
   gameConfigSchema,
 } from '@sats-wars/shared';
+import { SCENARIOS, type ScenarioRoute, scenarioConfig } from '@sats-wars/game-engine';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 import { AppError } from '../errors';
@@ -494,16 +495,57 @@ export class RaidManager {
   }
 
   private createRuntime(): RaidRuntime {
+    // DEMO only: a queued demo seed fixes this one raid's config and seed (spec I1).
+    const pick = this.opts.demoMode
+      ? this.setting<ScenarioPick | null>('nextScenario', null)
+      : null;
+    const scenario = pick ? SCENARIOS[pick.id] : undefined;
+    const raidId = newId('raid');
     const rt = RaidRuntime.create(
       this.repo,
-      newId('raid'),
+      raidId,
       this.eventInfo.eventId,
-      this.nextConfig,
-      randomInt(1, 2 ** 31 - 1),
+      scenario
+        ? scenarioConfig(scenario, {
+            maxPilots: this.nextConfig.maxPilots,
+            ticketPriceSats: this.nextConfig.ticketPriceSats,
+          })
+        : this.nextConfig,
+      scenario?.seed ?? randomInt(1, 2 ** 31 - 1),
       this.clock,
       this.opts.wall,
     );
+    if (pick) {
+      this.repo.setSetting('nextScenario', null);
+      if (scenario) this.repo.setSetting('activeScenario', { ...pick, raidId });
+    }
     return rt;
+  }
+
+  // ---- demo seed (DEMO_MODE only) ---------------------------------------------
+
+  /** The demo seed this raid plays, if any (its bots are run by DemoBots). */
+  get activeScenario(): ScenarioPick | null {
+    if (!this.opts.demoMode) return null;
+    const a = this.setting<(ScenarioPick & { raidId: string }) | null>('activeScenario', null);
+    return a && a.raidId === this.runtime.raidId ? { id: a.id, route: a.route } : null;
+  }
+
+  /**
+   * Replace the waiting raid with a demo seed (spec I1: replayable on demand).
+   * A running raid must be ended first, like NEXT_RAID.
+   */
+  playScenario(pick: ScenarioPick, actor: string): void {
+    if (!this.opts.demoMode) throw new AppError('FORBIDDEN', 'DEMO_MODE only');
+    if (!SCENARIOS[pick.id]) throw new AppError('INVALID_COMMAND', 'unknown scenario');
+    const status = this.runtime.state.status;
+    if (status === 'LIVE' || status === 'PAUSED')
+      throw new AppError(
+        'INVALID_COMMAND',
+        '進行中の作戦を先に終了または中止してください / End or cancel the running raid first',
+      );
+    this.set('nextScenario', pick, actor, 'DEMO_SCENARIO');
+    this.command('NEXT_RAID', actor);
   }
 
   private bind(rt: RaidRuntime): void {
@@ -523,6 +565,11 @@ export class RaidManager {
     });
     for (const l of this.raidListeners) l(rt);
   }
+}
+
+export interface ScenarioPick {
+  id: string;
+  route: ScenarioRoute;
 }
 
 /** Venue names are shown on public screens: plain text, no markup, no control characters. */

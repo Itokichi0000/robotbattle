@@ -175,6 +175,7 @@ export function createRaidState(raidId: string, config: GameConfig, seed = 1): R
     bossId: null,
     nextId: 1,
     spawnIndex: 0,
+    scriptCursor: 0,
     sync: 0,
     syncWindow: { index: -1, roles: {}, pilots: [] },
     nextDecayAt: ms(config.phaseStartsSeconds.WAVE_1),
@@ -583,6 +584,15 @@ function pickTargets(ctx: Ctx, e: Enemy, count: number): RegionId[] {
   return out;
 }
 
+/** Demo seed: the next scripted target list once its time has come (null otherwise). */
+function scriptedTargets(s: RaidState, e: Enemy): RegionId[] | null {
+  const next = s.config.scriptedTargets?.[s.scriptCursor];
+  if (!next || e.training || s.gameMs < ms(next.atSeconds)) return null;
+  s.scriptCursor += 1;
+  const standing = next.targets.filter((id) => !s.cities[id].destroyed);
+  return standing.length ? standing : null;
+}
+
 /** Aim the next attack. Returns false when there is no city left to target. */
 function telegraphFor(ctx: Ctx, e: Enemy): boolean {
   const s = ctx.state;
@@ -620,7 +630,7 @@ function telegraphFor(ctx: Ctx, e: Enemy): boolean {
   // Radar and jammer buy reaction time while their cities stand.
   const bonus = (facilityActive(s, 'RADAR') ? 1000 : 0) + (facilityActive(s, 'JAMMER') ? 1000 : 0);
   const duration = ctx.between(cfg.telegraphMs as [number, number]) + bonus;
-  const targets = pickTargets(ctx, e, count);
+  const targets = scriptedTargets(s, e) ?? pickTargets(ctx, e, count);
   if (!targets.length) return false;
   const tg: Telegraph = {
     id: s.nextId++,

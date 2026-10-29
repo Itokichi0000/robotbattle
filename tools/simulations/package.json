@@ -6,7 +6,10 @@
   "scripts": {
     "simulate": "tsx src/run.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:seed": "tsx src/cli/demoSeed.ts",
+    "demo:raid": "tsx src/cli/demoRaid.ts",
+    "sim:balance": "tsx src/cli/simBalance.ts"
   },
   "dependencies": {
     "@sats-wars/game-engine": "workspace:*",

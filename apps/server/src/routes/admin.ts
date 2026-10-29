@@ -8,6 +8,7 @@ import {
   arenaDisplaySchema,
   nextRaidSettingsSchema,
 } from '@sats-wars/shared';
+import { SCENARIOS } from '@sats-wars/game-engine';
 import { type AdminRole, roleAllows } from '../auth/admin';
 import { extractBearer } from '../auth/tokens';
 import { AppError } from '../errors';
@@ -78,6 +79,12 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('DEMO_SPAWN'), kind: z.enum(ENEMY_KINDS) }),
   /** DEMO only: play a finale/boss effect on the venue screens without touching the raid. */
   z.object({ command: z.literal('DEMO_ARENA_CUE'), cue: z.enum(ARENA_PREVIEW_CUES) }),
+  /** DEMO only: replace the waiting raid with a scripted demo seed (spec I1). */
+  z.object({
+    command: z.literal('DEMO_SCENARIO'),
+    scenario: z.string().max(64),
+    route: z.enum(['success', 'failure']).default('success'),
+  }),
 ]);
 
 export function registerAdminRoutes(
@@ -177,6 +184,16 @@ export function registerAdminRoutes(
         timeScale: manager.clock.speed,
         demoBots: bots.enabledCount,
         demoBotSkill: bots.skill,
+        scenario: env.DEMO_MODE
+          ? {
+              active: manager.activeScenario,
+              available: Object.values(SCENARIOS).map((x) => ({
+                id: x.id,
+                titleJa: x.titleJa,
+                titleEn: x.titleEn,
+              })),
+            }
+          : null,
         eventId: manager.eventId,
         event: manager.eventInfo,
       },
@@ -280,6 +297,9 @@ export function registerAdminRoutes(
         repo.audit(actor, 'DEMO_SPAWN', rt.raidId, { kind: cmd.kind }, wall.now());
         break;
       }
+      case 'DEMO_SCENARIO':
+        manager.playScenario({ id: cmd.scenario, route: cmd.route }, actor);
+        break;
       case 'DEMO_ARENA_CUE':
         if (!env.DEMO_MODE) throw new AppError('FORBIDDEN', 'DEMO_MODE only');
         deps.arenaCue?.(cmd.cue);

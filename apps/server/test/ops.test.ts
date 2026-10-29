@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mulberry32, solveTask } from '@sats-wars/game-engine';
+import {
+  EARTH_DEFENSE_OPENING,
+  mulberry32,
+  scenarioConfig,
+  solveTask,
+} from '@sats-wars/game-engine';
+import { configHash } from '@sats-wars/shared';
 import type { Task } from '@sats-wars/shared';
 import {
   type PilotHandle,
@@ -177,6 +183,64 @@ describe('operators: next raid, venue screen, rehearsal', () => {
       payload: { command: 'DEMO_SPAWN', kind: 'SCOUT' },
     });
     expect(refused.statusCode).toBe(403);
+  });
+});
+
+describe('demo seed earth-defense-opening on the live server (spec I1)', () => {
+  it('replaces the waiting raid, its bots board and play the script to 神雷風陣', async () => {
+    s = await makeServer({ env: DEMO });
+    const token = await s.adminToken();
+    const before = s.services.manager.current().raidId;
+    await admin(s, token, {
+      command: 'DEMO_SCENARIO',
+      scenario: 'earth-defense-opening',
+      route: 'success',
+    });
+    const rt = s.services.manager.current();
+    expect(rt.raidId).not.toBe(before);
+    expect(rt.state.seed).toBe(EARTH_DEFENSE_OPENING.seed);
+    expect(rt.state.configHash).toBe(configHash(scenarioConfig(EARTH_DEFENSE_OPENING)));
+    expect(s.services.manager.activeScenario).toEqual({
+      id: 'earth-defense-opening',
+      route: 'success',
+    });
+    await s.advance(500);
+    expect(Object.values(rt.state.pilots).filter((p) => p.isBot)).toHaveLength(4);
+    await startRaid(s);
+    await s.advance(EARTH_DEFENSE_OPENING.config.special!.availableAfterSeconds * 1000 + 40_000);
+    const result = s.services.manager.current().state.result;
+    expect(result).toMatchObject({ outcome: 'SUCCEEDED', special: 'ACTIVATED' });
+    // A one-off: the raid after it is a normal one again.
+    await admin(s, token, { command: 'NEXT_RAID' });
+    expect(s.services.manager.activeScenario).toBeNull();
+    expect(s.services.manager.current().state.config.scriptedTargets).toBeUndefined();
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json();
+    expect(JSON.stringify(audit)).toContain('DEMO_SCENARIO');
+  }, 60_000); // a whole raid in 100 ms server steps
+
+  it('is DEMO_MODE only and never replaces a running raid', async () => {
+    s = await makeServer({ env: {} });
+    const t = await s.adminToken();
+    const refused = await s.inject({
+      method: 'POST',
+      url: '/api/admin/command',
+      headers: auth(t),
+      payload: { command: 'DEMO_SCENARIO', scenario: 'earth-defense-opening' },
+    });
+    expect(refused.statusCode).toBe(403);
+    await s.close();
+    s = await makeServer({ env: DEMO });
+    const token = await s.adminToken();
+    const a = await guest(s);
+    await board(s, a, 'GUNNER');
+    await startRaid(s);
+    const busy = await s.inject({
+      method: 'POST',
+      url: '/api/admin/command',
+      headers: auth(token),
+      payload: { command: 'DEMO_SCENARIO', scenario: 'earth-defense-opening' },
+    });
+    expect(busy.statusCode).toBe(409);
   });
 });
 

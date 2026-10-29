@@ -361,6 +361,8 @@ export interface RaidState {
   nextId: number;
   /** Index into the spawn schedule. */
   spawnIndex: number;
+  /** Next unused entry of `config.scriptedTargets` (demo seed only). */
+  scriptCursor: number;
   sync: number;
   syncWindow: SyncWindowState;
   nextDecayAt: number;
