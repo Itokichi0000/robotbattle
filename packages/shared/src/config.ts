@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from './validation';
 import { ENEMY_KINDS } from './state';
 import { REGION_IDS } from './regions';
 

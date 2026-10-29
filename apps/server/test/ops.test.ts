@@ -281,6 +281,51 @@ describe('sponsored passes (spec H2): expiry, damaged codes, simultaneous use, q
   });
 });
 
+describe('behind a reverse proxy (single VPS with Caddy)', () => {
+  const signup = (srv: TestServer, remoteAddress: string, forwardedFor: string) =>
+    srv.inject({
+      method: 'POST',
+      url: '/api/auth/guest',
+      payload: {},
+      remoteAddress,
+      headers: { 'x-forwarded-for': forwardedFor },
+    });
+
+  it('trusts X-Forwarded-For only from the local proxy, so clients cannot dodge rate limits', async () => {
+    s = await makeServer({ env: { GUEST_SIGNUPS_PER_MINUTE: '2' } });
+    // Through Caddy on the same host: each phone keeps its own allowance.
+    for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3'])
+      expect((await signup(s, '127.0.0.1', ip)).statusCode).toBe(200);
+    // Straight from the internet: a forged header does not change who you are.
+    const direct = [];
+    for (const fake of ['10.0.0.1', '10.0.0.2', '10.0.0.3'])
+      direct.push((await signup(s, '203.0.113.9', fake)).statusCode);
+    expect(direct).toEqual([200, 200, 429]);
+  });
+
+  it('a production server with mock payments keeps passes free (no public test-payment button)', async () => {
+    const prod = {
+      NODE_ENV: 'production',
+      AUTH_MODE: 'lnurl',
+      SERVER_PUBLIC_URL: 'https://game.example',
+      ALLOWED_ORIGINS: 'https://game.example',
+    };
+    await expect(makeServer({ env: { ...prod, PASS_MODE: 'PAID' } })).rejects.toThrow(
+      /PASS_MODE=PAID needs real payments/,
+    );
+    s = await makeServer({ env: { ...prod, PASS_MODE: 'FREE' } });
+    const token = await s.adminToken();
+    const r = await s.inject({
+      method: 'POST',
+      url: '/api/admin/command',
+      headers: auth(token),
+      payload: { command: 'SET_PASS_MODE', mode: 'PAID' },
+    });
+    expect(r.statusCode).toBe(409);
+    expect(s.services.manager.passMode).toBe('FREE');
+  });
+});
+
 describe('trouble: the database stops accepting writes (spec G5)', () => {
   it('requests fail cleanly, the raid does not move ahead of its log, then resumes', async () => {
     s = await makeServer({ env: DEMO });

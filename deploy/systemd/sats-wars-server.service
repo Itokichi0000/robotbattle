@@ -1,0 +1,36 @@
+# Game server (Fastify + Socket.IO + SQLite). Installed by deploy/setup-vps.sh.
+[Unit]
+Description=SATS WARS game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=satswars
+Group=satswars
+EnvironmentFile=/etc/sats-wars/server.env
+WorkingDirectory=/opt/sats-wars/current/apps/server
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning dist/index.js
+# A restart mid-raid is safe: the raid is rebuilt from its command log, paused
+# and resumed by itself. Give in-flight writes a moment on stop.
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+
+# Hardening: read-only system and code, writable data directory only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/sats-wars
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# AF_NETLINK: Node reads network interfaces (os.networkInterfaces) at startup.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

@@ -48,7 +48,7 @@ Lightning ログインの体験：`AUTH_MODE=both` → `/auth/lightning` →「�
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `pnpm dev`                                                                               | 開発起動（ホットリロード、`.env` を読む）                                                |
 | `pnpm build` / `pnpm start`                                                              | 本番ビルド / 本番起動                                                                    |
-| `pnpm test`                                                                              | ユニット・統合テスト（vitest、125件）                                                    |
+| `pnpm test`                                                                              | ユニット・統合テスト（vitest、128件）                                                    |
 | `pnpm lint` / `pnpm typecheck`                                                           | ESLint / TypeScript                                                                      |
 | `pnpm e2e`                                                                               | Playwright E2E 14件（a11y 監査込み。サーバーとwebを自分で起動。既存の dev は止めてから） |
 | `pnpm solo`                                                                              | オフライン体験版（単一HTML）                                                             |
@@ -82,7 +82,7 @@ docs/                設計・運用ドキュメント
 
 - ルール [docs/GAME_RULES.md](docs/GAME_RULES.md) / アート [docs/ART_PIPELINE.md](docs/ART_PIPELINE.md)
 - 設計 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / API [docs/API.md](docs/API.md) / セキュリティ [docs/SECURITY.md](docs/SECURITY.md)
-- 運営ランブック・起動 [docs/EVENT_RUNBOOK.md](docs/EVENT_RUNBOOK.md) / 本番設定 [docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md) / 公開前チェック [docs/RELEASE_GATE.md](docs/RELEASE_GATE.md)
+- 運営ランブック・起動 [docs/EVENT_RUNBOOK.md](docs/EVENT_RUNBOOK.md) / 本番設定 [docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md) / **VPS で公開する手順 [deploy/README.md](deploy/README.md)** / 公開前チェック [docs/RELEASE_GATE.md](docs/RELEASE_GATE.md)
 - テスト [docs/TEST_PLAN.md](docs/TEST_PLAN.md) / バランス [docs/BALANCE_REPORT.md](docs/BALANCE_REPORT.md)・[1000回](docs/BALANCE_SIM_1000.md) / 負荷 [docs/LOAD_TEST_REPORT.md](docs/LOAD_TEST_REPORT.md)
 - 進捗 [docs/PROGRESS.md](docs/PROGRESS.md) / 未完 [docs/OPEN_ISSUES.md](docs/OPEN_ISSUES.md) / 予定 [docs/ROADMAP.md](docs/ROADMAP.md) / 判断記録 [docs/DECISION_LOG.md](docs/DECISION_LOG.md)
 - 開発エージェント向け [CLAUDE.md](CLAUDE.md)、元の仕様書 [SATS_WARS_EARTH_DEFENSE_CLAUDE_CODE_ALL_IN_ONE.md](SATS_WARS_EARTH_DEFENSE_CLAUDE_CODE_ALL_IN_ONE.md)
