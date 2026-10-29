@@ -17,15 +17,25 @@
 - [ ] 出撃パスの値段（既定 21 sats）・支払先・使途・返金なしの文言確定（`PAYEE_DESCRIPTION`、トップの利用条件雛形）
 - [ ] 無料イベントにするか（`PASS_MODE=FREE`）有料パスか（`PAID`）を決める。当日 `/admin` でも切替可
 - [ ] `.env` 作成：`ADMIN_PASSWORD`（12文字以上）、`ALLOWED_ORIGINS`、`PUBLIC_PARTICIPANT_URL`（QRに載る**正しい**URL）、`EVENT_ID`
+- [ ] スタッフ用の管理アカウント：`pnpm admin:user` で `ADMIN_USERS` の行を作る（受付係は viewer/operator、責任者は owner、TOTP 推奨）。
+      個別アカウントができたら `ADMIN_SHARED_LOGIN=false`
 - [ ] 決済：mock で通しリハーサル。実決済を使う場合は下の「実決済（承認後）」（オーナー承認必須）
 - [ ] スポンサーパスを発行・印刷（`/admin` → パス・決済 → 発行。コードは発行時に1回だけ表示されるので、その場で保存）
-- [ ] `pnpm build && pnpm start` で本番モード起動確認、`pnpm test` と `pnpm e2e` 全通過
+- [ ] `pnpm build && pnpm start` で本番モード起動確認、`pnpm test` と `pnpm e2e` 全通過、`pnpm smoke` が全 PASS
+- [ ] `/admin` →「次のレイド」で難度（EASY/NORMAL/HARD）・価格・定員・イベントID・会場名・会場画面の言語を設定
+- [ ] バックアップ先（`BACKUP_DIR`）が永続ディスクにあり、`pnpm db:backup` → `pnpm db:restore` を一度試した
 
 ## 演出リハーサル
 
 `/arena?preview=1` で演出だけを再生（サーバーには何も送らない）：
 1 開幕 / 2 砲撃 / 3 シールド / 4 敵の予告 / 5 敵の攻撃 / 6 都市陥落 / 7 神雷風陣 / 8 成功 / 9 失敗 / 0 リセット。
 通しリハーサルは `DEMO_MODE=true DEMO_BOTS=6` で8分間を最後まで（BOTは名前に BOT、決済に触れない）。
+
+**デモシード（台本どおりの見本レイド、仕様 I1）**：DEMO_MODE の `/admin` → リハーサル →「デモシナリオ」→ ルート（成功／失敗）を選んで ▶。
+待機中のレイドが台本つきのレイドに差し替わり、デモ機4体が決まった時刻に動く（0:30 札幌の予告と防衛、1:20 腕への命中、2:30 東京と大阪の同時危機、
+3:20 送電、4:20 風神の修理、4:40 NULL CORE、6:50 神雷風陣のチャンス）。人は5人目として搭乗できる。成功ルートは神雷風陣で撃破、
+失敗ルートは5:00以降だれも操作せず合体技が失敗して防衛失敗。同じ流れは `pnpm demo:seed` で事前に確認できる。
+同じ画面の「敵を出す」「演出」ボタンで敵の出現や神雷風陣・勝敗の演出だけを会場画面で試せる（演出はゲームに作用しない）。
 
 ## 当日の起動（開場前チェック）
 
@@ -73,7 +83,8 @@
 ## 終了後
 
 - `/results/:raidId`、`/leaderboard` で記録を確認。`/admin` 監査ログ・パス集計を保存（会計用）。
-- バックアップ：サーバーを止めて `DATABASE_PATH` の SQLite ファイル（`-wal` `-shm` も）をコピー。起動中なら `sqlite3 db ".backup out.db"`。
+- バックアップ：自動（レイド終了ごと・`BACKUP_INTERVAL_MINUTES` ごと、`BACKUP_KEEP` 世代）。会期終了時に `/admin`（owner）または
+  `pnpm db:backup` で最終コピーを取り、`BACKUP_DIR` ごと別の場所へ保管。復元はサーバー停止中に `pnpm db:restore <ファイル>`。
 - 支払いデータ（BOLT11）は24時間後に自動で消去される。アクセスログの保持期間はホスティング側で設定。
 
 ---
@@ -110,6 +121,8 @@ pnpm start                 # server(:4000) + web(:3000)
 
 ### 公開時（HTTPS/WSS 必須、承認後）
 
+詳細な環境差分・見積もり・スモークテスト・ロールバック・運営の確認項目は `docs/PRODUCTION_GUIDE.md`、合否は `docs/RELEASE_GATE.md`。
+
 リバースプロキシ（Caddy / nginx）で TLS 終端：`https://game.example.com → web:3000`、`https://api.game.example.com → server:4000`
 （WebSocket Upgrade を通す）。Web のビルド時に `NEXT_PUBLIC_GAME_SERVER_URL=https://api.game.example.com`。
 サーバーは常駐プロセス（サーバーレスに載せない）、SQLite は永続ボリューム、単一インスタンス。
@@ -124,8 +137,10 @@ pnpm start                 # server(:4000) + web(:3000)
 
 ### 監視
 
-`/health`, `/ready`。`/admin` の「監視」（ソケット数、イベントループ遅延、tick遅延、メモリ、会場画面のFPS）。ログは pino（JSON）、`LOG_LEVEL`。
+`/health`, `/ready`。`/admin` の「監視」（ソケット数、イベントループ遅延、tick遅延、メモリ、会場画面のFPS）、`GET /api/admin/metrics`。
+ログは pino（JSON）、`LOG_LEVEL`。負荷の目安は `docs/LOAD_TEST_REPORT.md`。
 
 ### Docker
 
-未作成（外部DB不要のため。D-037）。必要なら OPEN_ISSUES の項目。
+`Dockerfile` と `docker-compose.yml` は用意したが、このコンテナに Docker デーモンがなく**未検証**（D-062）。SQLite とバックアップは
+ボリュームに置く。通常は `pnpm start` で足りる（外部DB不要、D-037）。

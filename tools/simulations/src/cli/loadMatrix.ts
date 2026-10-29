@@ -3,12 +3,13 @@
  *
  *   pnpm load:matrix --url http://localhost:4000 --password <ADMIN_PASSWORD> \
  *     [--pilots 2,10,30,50] [--spectators 100] [--duration 60000] [--out docs/LOAD_TEST_REPORT.md]
+ *     [--server-pid <pid>]   # same machine only: also sample the server's CPU
  *
  * Runs src/loadtest.ts once per crew size against a RUNNING server in
  * PAYMENT_MODE=mock (it refuses otherwise) and writes a Markdown report.
  */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { num, outPath, parseArgs, str } from './args';
@@ -22,8 +23,21 @@ const spectators = Math.round(num(args, 'spectators', 100));
 const duration = Math.round(num(args, 'duration', 60_000));
 const out = str(args, 'out', '');
 const script = fileURLToPath(new URL('../loadtest.ts', import.meta.url));
+const serverPid = args.get('server-pid');
+
+/** CPU seconds used by a local process so far (Linux /proc; null elsewhere). */
+function cpuSeconds(pid: string): number | null {
+  try {
+    const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]!.split(' ');
+    // utime and stime are fields 14 and 15 (1-based) of the whole line, in clock ticks (100/s).
+    return (Number(fields[11]) + Number(fields[12])) / 100;
+  } catch {
+    return null;
+  }
+}
 
 type Run = {
+  serverCpuPct?: number | null;
   pilots: number;
   spectatorsConnected: string;
   boardAllMs: number;
@@ -43,6 +57,8 @@ type Run = {
 const runs: Run[] = [];
 for (const pilots of crews) {
   process.stderr.write(`load: ${pilots} pilots + ${spectators} spectators, ${duration / 1000}s…\n`);
+  const cpu0 = typeof serverPid === 'string' ? cpuSeconds(serverPid) : null;
+  const wall0 = performance.now();
   const text = execFileSync(
     process.execPath,
     [
@@ -62,7 +78,13 @@ for (const pilots of crews) {
     ],
     { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
   );
-  runs.push(JSON.parse(text.slice(text.indexOf('{'))) as Run);
+  const run = JSON.parse(text.slice(text.indexOf('{'))) as Run;
+  const cpu1 = typeof serverPid === 'string' ? cpuSeconds(serverPid) : null;
+  run.serverCpuPct =
+    cpu0 !== null && cpu1 !== null
+      ? Math.round(((cpu1 - cpu0) / ((performance.now() - wall0) / 1000)) * 100)
+      : null;
+  runs.push(run);
 }
 
 const lines = [
@@ -72,14 +94,14 @@ const lines = [
   '',
   'Each pilot loops: request a mission → play it (solver, 70 % clean runs) → submit → cooldown. Spectators are Socket.IO clients subscribed to the raid; the fan-out column is the time from a submit until EVERY spectator socket has the resulting TASK_RESOLVED event.',
   '',
-  '| pilots | spectators connected | missions | ok | refused | errors | 429 | mission p50/p95 | submit p50/p95/max | submit → all spectators p50/p95/max | event-loop lag | tick lag | server RSS |',
-  '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+  '| pilots | spectators connected | missions | ok | refused | errors | 429 | mission p50/p95 | submit p50/p95/max | submit → all spectators p50/p95/max | event-loop lag | tick lag | server CPU | server RSS |',
+  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ...runs.map(
     (r) =>
-      `| ${r.pilots} | ${r.spectatorsConnected} | ${r.counts.tasks} | ${r.counts.successes} | ${r.counts.refused} | ${r.counts.errors} | ${r.counts.rateLimited} | ${r.requestMissionMs.p50}/${r.requestMissionMs.p95} ms | ${r.submitMs.p50}/${r.submitMs.p95}/${r.submitMs.max} ms | ${r.submitToAllSpectatorsMs.p50}/${r.submitToAllSpectatorsMs.p95}/${r.submitToAllSpectatorsMs.max} ms (${r.submitToAllSpectatorsMs.samples}) | ${r.server?.eventLoopLagMs ?? '—'} ms | ${r.server?.tickLagMs ?? '—'} ms | ${r.server?.memoryMb ?? '—'} MB |`,
+      `| ${r.pilots} | ${r.spectatorsConnected} | ${r.counts.tasks} | ${r.counts.successes} | ${r.counts.refused} | ${r.counts.errors} | ${r.counts.rateLimited} | ${r.requestMissionMs.p50}/${r.requestMissionMs.p95} ms | ${r.submitMs.p50}/${r.submitMs.p95}/${r.submitMs.max} ms | ${r.submitToAllSpectatorsMs.p50}/${r.submitToAllSpectatorsMs.p95}/${r.submitToAllSpectatorsMs.max} ms (${r.submitToAllSpectatorsMs.samples}) | ${r.server?.eventLoopLagMs ?? '—'} ms | ${r.server?.tickLagMs ?? '—'} ms | ${r.serverCpuPct ?? '—'}% | ${r.server?.memoryMb ?? '—'} MB |`,
   ),
   '',
-  '"refused" are mission requests the engine answered without a mission (cooldown, nothing to do for that seat) — expected, not failures. The spec sets no numeric latency target; our working target for a venue LAN is mission/submit p95 < 300 ms, fan-out p95 < 500 ms and no errors. Event-loop lag is sampled at 20 ms resolution, so "20 ms" means "at the floor of the measurement".',
+  '"refused" are mission requests the engine answered without a mission (cooldown, nothing to do for that seat) — expected, not failures. Spec target (PART H, PHASE 6): important state changes reach the venue screen within 3 s at p95 — the fan-out column measures exactly that path (server → every subscribed socket); it depends on the network, so the venue measurement must be published too. Server CPU is the share of one core over the run (boarding included). Event-loop lag is sampled at 20 ms resolution, so "20 ms" means "at the floor of the measurement".',
   '',
   'Not covered here (needs the venue): real Wi-Fi, phones on a shared access point, 30-second network cuts and a server restart mid-raid with people. See docs/OPEN_ISSUES.md.',
   '',

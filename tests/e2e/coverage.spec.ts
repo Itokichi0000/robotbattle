@@ -172,8 +172,12 @@ test('admin console: open, start, pause, resume, emergency stop, audit log', asy
   expect(pub.snapshot.joinOpen).toBe(false);
   await expect(p.getByTestId('sw-payments')).toContainText('OFF');
 
+  // Owner: a database copy on demand (e.g. before the venue closes).
+  await p.getByTestId('backup-now').click();
+  await expect(p.getByTestId('backup-panel')).toContainText('保存しました');
+
   await p.getByTestId('tab-audit').click();
-  for (const action of ['START', 'PAUSE', 'RESUME', 'EMERGENCY_STOP'])
+  for (const action of ['START', 'PAUSE', 'RESUME', 'EMERGENCY_STOP', 'BACKUP'])
     await expect(p.getByTestId('audit-tab')).toContainText(action);
 
   // Back to normal for the next tests.

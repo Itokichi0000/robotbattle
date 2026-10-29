@@ -244,6 +244,43 @@ describe('demo seed earth-defense-opening on the live server (spec I1)', () => {
   });
 });
 
+describe('sponsored passes (spec H2): expiry, damaged codes, simultaneous use, quantity cap', () => {
+  it('only one of two phones redeeming the same code wins; expired and damaged codes fail', async () => {
+    s = await makeServer({ env: { PASS_MODE: 'PAID' } });
+    const token = await s.adminToken();
+    const issue = (payload: Record<string, unknown>) =>
+      s!.inject({
+        method: 'POST',
+        url: '/api/admin/sponsored-passes',
+        headers: auth(token),
+        payload,
+      });
+    expect((await issue({ count: 501 })).statusCode).toBe(400); // quantity cap
+    const [code, short] = (await issue({ count: 2 })).json().codes as string[];
+    const [expiring] = (await issue({ count: 1, expiresInMinutes: 5 })).json().codes as string[];
+    const redeem = (p: PilotHandle, c: string) =>
+      s!.inject({
+        method: 'POST',
+        url: '/api/raids/current/pass/sponsored',
+        headers: auth(p.token),
+        payload: { code: c },
+      });
+    const a = await guest(s);
+    const b = await guest(s);
+    const both = await Promise.all([redeem(a, code!), redeem(b, code!)]);
+    expect(both.map((r) => r.statusCode).sort()).toEqual([200, 400]);
+    // A damaged code (one character changed) is just invalid.
+    const c = await guest(s);
+    const damaged = short!.slice(0, -1) + (short!.endsWith('A') ? 'B' : 'A');
+    expect((await redeem(c, damaged)).json().error).toBe('INVALID_PASS');
+    // Expired after its time, even though never used.
+    s.clock.advance(6 * 60_000);
+    expect((await redeem(c, expiring!)).json().error).toBe('INVALID_PASS');
+    const audit = (await s.inject({ url: '/api/admin/audit', headers: auth(token) })).json();
+    expect(JSON.stringify(audit)).toContain('ISSUE_SPONSORED_PASSES');
+  });
+});
+
 describe('trouble: the database stops accepting writes (spec G5)', () => {
   it('requests fail cleanly, the raid does not move ahead of its log, then resumes', async () => {
     s = await makeServer({ env: DEMO });

@@ -521,6 +521,7 @@ function RaidTab({
         <JapanMapMini view={view} locale="ja" maxHp={snap.config.cityMaxHp} />
       </section>
       <NextRaidPanel ov={ov} token={token} onSaved={onSaved} />
+      {ov.me?.role === 'owner' && <BackupPanel token={token} />}
       <ArenaDisplayPanel ov={ov} cmd={cmd} />
       {s.demoMode && <RehearsalPanel cmd={cmd} scenario={s.scenario} />}
       <section
@@ -590,6 +591,64 @@ function RaidTab({
 }
 
 /** Spec E4 作戦作成: what the next raid will be (the running raid never changes). */
+/** Owner: database copies (automatic after each raid and on a timer; one now before closing). */
+function BackupPanel({ token }: { token: string }) {
+  const [list, setList] = useState<Array<{ file: string; bytes: number; createdAt: number }>>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const r = await api<{ backups: typeof list }>('/api/admin/backups', { token });
+    setList(r.backups);
+  }, [token]);
+  useEffect(() => {
+    void load().catch(() => undefined);
+  }, [load]);
+  const now = async () => {
+    setMsg(null);
+    try {
+      const r = await api<{ backup: { file: string } | null }>('/api/admin/backups', {
+        method: 'POST',
+        token,
+        body: {},
+      });
+      setMsg(r.backup ? `保存しました：${r.backup.file}` : 'バックアップは無効です（BACKUP_DIR）');
+      await load();
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <section className="sw-panel flex flex-col gap-2 p-4 text-sm" data-testid="backup-panel">
+      <h2 className="font-black">データベースのバックアップ（owner）</h2>
+      <p className="text-xs text-muted">
+        レイド終了ごと・一定間隔で自動保存。閉場前に1回押して、保存先のフォルダごと別の場所へ移してください。復元はサーバー停止中に
+        <code> pnpm db:restore</code>。
+      </p>
+      <button
+        type="button"
+        className="sw-btn self-start bg-navy-3 px-3"
+        onClick={() => void now()}
+        data-testid="backup-now"
+      >
+        今すぐバックアップ
+      </button>
+      {msg && (
+        <p className="text-xs" role="status">
+          {msg}
+        </p>
+      )}
+      <ul className="text-xs text-muted">
+        {list.slice(0, 5).map((b) => (
+          <li key={b.file}>
+            {new Date(b.createdAt).toLocaleString('ja-JP')} ・ {b.file} ・{' '}
+            {Math.round(b.bytes / 1024)} KB
+          </li>
+        ))}
+        {list.length === 0 && <li>まだバックアップはありません</li>}
+      </ul>
+    </section>
+  );
+}
+
 function NextRaidPanel({
   ov,
   token,

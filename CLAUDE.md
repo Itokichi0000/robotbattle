@@ -45,9 +45,9 @@ packages/shared      型・Zod・GameConfig・地域/都市/地図・i18n・Raid
 packages/game-engine 決定的レイドエンジン（純粋 reducer）、ミニゲーム生成/採点/ソルバ、表示用ヒント（＝仕様の game-core）
 packages/ui          スマホ操縦席（席選択・4ミニゲーム・HUD・結果カード）。素のCSS（swc- 接頭辞）。web と solo で共用
 packages/three-game  R3F 3Dシーン（ArenaDirector, ロボ, NULL CORE, 8都市ホログラム, エフェクト, カメラ）、Web Audio SE
-tools/simulations    バランスシミュレーター（pnpm simulate → docs/BALANCE_REPORT.md）、負荷試験 loadtest.ts
+tools/simulations    バランスシミュレーター（pnpm simulate / sim:balance）、デモシード・BOTレイドの CLI（demo:seed / demo:raid）、負荷試験（loadtest / load:matrix）
 tools/blender        Blender Python 生成スクリプト（bpy）
-tests/e2e            Playwright E2E（サーバーとwebを自分で起動）
+tests/e2e            Playwright E2E と axe アクセシビリティ監査（サーバーとwebを自分で起動）
 docs/                設計・ルール・API・セキュリティ・運用・進捗
 ```
 
@@ -62,6 +62,8 @@ pnpm typecheck          # tsc --noEmit 全パッケージ
 pnpm build              # server を esbuild、web を next build、solo を単一HTML
 pnpm e2e                # Playwright E2E（:3000/:4000 を自分で起動するので既存devは止めること）
 pnpm simulate           # バランスレポート生成 → docs/BALANCE_REPORT.md（数分）
+pnpm demo:seed          # デモシード earth-defense-opening の成功/失敗ルートを再生して検証
+pnpm sim:balance --runs 1000 --pilots 2,10,30,50   # クリア率などの統計（約10分）
 ```
 
 デモ：`ADMIN_PASSWORD=xxx DEMO_MODE=true DEMO_BOTS=5 pnpm dev` → `/arena`（大画面）と `/play`（スマホ）を開く。
