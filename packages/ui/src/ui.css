@@ -546,6 +546,12 @@
 .swc-tone-white .swc-meter-bar > span {
   background: var(--swc-text);
 }
+.swc-barrier {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.85em;
+  color: #c9a7ff;
+}
 .swc-special {
   margin: 0;
   font-weight: 800;

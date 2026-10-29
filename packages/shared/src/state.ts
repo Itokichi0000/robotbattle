@@ -173,6 +173,8 @@ export type RepairTarget =
 
 export type TaskTarget =
   | { kind: 'ENEMY'; enemyId: number; weakpoint: Weakpoint }
+  /** GUNNER with no enemy on the field: charge Raijin's thunder drums (D-053). */
+  | { kind: 'CHARGE' }
   | { kind: 'TELEGRAPH'; telegraphId: number; cityId: RegionId }
   | { kind: 'CITY_STANDBY'; cityId: RegionId }
   | { kind: 'ENERGY'; sink: EnergySink }
@@ -250,7 +252,8 @@ export type TaskEffect =
       weakpoint: Weakpoint;
       amount: number;
       defeated: boolean;
-      note: 'WEAKEN' | 'DELAY' | null;
+      /** BARRIER: the boss's core barrier held (before FINAL_WAVE it cannot fall below its floor). */
+      note: 'WEAKEN' | 'DELAY' | 'BARRIER' | null;
     }
   | { kind: 'SHIELD'; cityId: RegionId; amount: number }
   | { kind: 'ENERGY'; sink: EnergySink; amount: number }
@@ -364,6 +367,8 @@ export interface RaidState {
   nextAssistAt: number;
   special: SpecialState;
   pilots: Record<string, Pilot>;
+  /** Recent minigame outcomes [gameMs, success] for adaptive difficulty (pruned to its window). */
+  recentSuccess: Array<[number, number]>;
   stats: RaidStats;
   result: RaidResult | null;
   seq: number;

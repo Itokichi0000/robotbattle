@@ -1,6 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { ROLES } from '@sats-wars/shared';
+import {
+  ARENA_PREVIEW_CUES,
+  type ArenaPreviewCue,
+  ENEMY_KINDS,
+  ROLES,
+  arenaDisplaySchema,
+  nextRaidSettingsSchema,
+} from '@sats-wars/shared';
 import { extractBearer } from '../auth/tokens';
 import { AppError } from '../errors';
 import { ADMIN_LIFECYCLE_COMMANDS } from '../raid/manager';
@@ -64,6 +71,12 @@ const commandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('BROADCAST_CLEAR') }),
   /** Emergency stop: pause the raid, stop boarding and paid invoices, stop auto-loop — one click. */
   z.object({ command: z.literal('EMERGENCY_STOP') }),
+  /** Venue screen display for every arena PC (2D/3D, quality, volume, QR). */
+  arenaDisplaySchema.extend({ command: z.literal('SET_ARENA_DISPLAY') }),
+  /** DEMO only: an enemy enters now (enemy behaviour rehearsal; raid leaves the leaderboard). */
+  z.object({ command: z.literal('DEMO_SPAWN'), kind: z.enum(ENEMY_KINDS) }),
+  /** DEMO only: play a finale/boss effect on the venue screens without touching the raid. */
+  z.object({ command: z.literal('DEMO_ARENA_CUE'), cue: z.enum(ARENA_PREVIEW_CUES) }),
 ]);
 
 export function registerAdminRoutes(
@@ -73,6 +86,7 @@ export function registerAdminRoutes(
     isAllowedOrigin: (o: string | undefined) => boolean;
     realtimeStats: () => RealtimeStats;
     onSettingsChanged: () => void;
+    arenaCue?: (cue: ArenaPreviewCue) => void;
   },
 ): void {
   const { manager, passes, repo, adminAuth, bots, wall, env, pilots } = services;
@@ -134,7 +148,8 @@ export function registerAdminRoutes(
         timeScale: manager.clock.speed,
         demoBots: bots.enabledCount,
         demoBotSkill: bots.skill,
-        eventId: env.EVENT_ID,
+        eventId: manager.eventId,
+        event: manager.eventInfo,
       },
       crew: {
         total: Object.keys(s.pilots).length,
@@ -214,6 +229,27 @@ export function registerAdminRoutes(
         repo.audit(actor, 'EMERGENCY_STOP', manager.current().raidId, null, wall.now());
         break;
       }
+      case 'SET_ARENA_DISPLAY': {
+        const { command: _c, ...display } = cmd;
+        manager.setArenaDisplay(display, actor);
+        break;
+      }
+      case 'DEMO_SPAWN': {
+        if (!env.DEMO_MODE) throw new AppError('FORBIDDEN', 'DEMO_MODE only');
+        const rt = manager.current();
+        const r = rt.dispatch({ type: 'DEBUG_SPAWN', kind: cmd.kind });
+        if (r.outcome.kind === 'rejected') throw new AppError('INVALID_COMMAND', r.outcome.reason);
+        // A rehearsed raid is not comparable: keep it off the leaderboard like bot raids.
+        rt.botsAboard = Math.max(rt.botsAboard, 1);
+        rt.persistProjection();
+        repo.audit(actor, 'DEMO_SPAWN', rt.raidId, { kind: cmd.kind }, wall.now());
+        break;
+      }
+      case 'DEMO_ARENA_CUE':
+        if (!env.DEMO_MODE) throw new AppError('FORBIDDEN', 'DEMO_MODE only');
+        deps.arenaCue?.(cmd.cue);
+        repo.audit(actor, 'DEMO_ARENA_CUE', null, { cue: cmd.cue }, wall.now());
+        break;
       default:
         manager.command(cmd.command, actor, cmd.reason ?? 'ADMIN');
     }
@@ -230,6 +266,15 @@ export function registerAdminRoutes(
     const actor = requireAdmin(req);
     const body = z.object({ config: z.unknown() }).parse(req.body ?? {});
     return { config: manager.setNextConfig(body.config, actor) };
+  });
+
+  /** Next raid setup (spec E4): difficulty version, price, capacity, event, venue, language. */
+  app.put('/api/admin/next-raid', async (req) => {
+    const actor = requireAdmin(req);
+    const body = nextRaidSettingsSchema.parse(req.body ?? {});
+    const out = manager.setNextRaid(body, actor);
+    deps.onSettingsChanged();
+    return out;
   });
 
   app.get('/api/admin/pilots', async (req) => {

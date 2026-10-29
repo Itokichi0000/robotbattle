@@ -1,14 +1,22 @@
 import { randomInt } from 'node:crypto';
 import type {
+  ArenaDisplay,
   Broadcast,
+  EventInfo,
   GameConfig,
+  NextRaidSettings,
   GameEvent,
   PassMode,
   PaymentMode,
   PublicRaidSnapshot,
   RaidState,
 } from '@sats-wars/shared';
-import { DEFAULT_GAME_CONFIG, gameConfigSchema } from '@sats-wars/shared';
+import {
+  DEFAULT_ARENA_DISPLAY,
+  DEFAULT_GAME_CONFIG,
+  applyDifficultyPreset,
+  gameConfigSchema,
+} from '@sats-wars/shared';
 import type { MonoClock, WallClock } from '../clock';
 import type { Repo } from '../db/repo';
 import { AppError } from '../errors';
@@ -123,8 +131,58 @@ export class RaidManager {
     return this.runtime;
   }
 
+  /** Event of the current raid (stored on the raid row when it was created). */
   get eventId(): string {
-    return this.opts.eventId;
+    const id = this.runtime.raidId;
+    if (this.eventCache?.raidId !== id)
+      this.eventCache = {
+        raidId: id,
+        eventId: this.repo.getRaid(id)?.event_id ?? this.eventInfo.eventId,
+      };
+    return this.eventCache.eventId;
+  }
+  private eventCache: { raidId: string; eventId: string } | null = null;
+  /** Event settings for the next raids (operators change them in /admin). */
+  get eventInfo(): EventInfo {
+    return this.setting<EventInfo>('eventInfo', {
+      eventId: this.opts.eventId,
+      venueName: '',
+      arenaLocale: 'ja',
+    });
+  }
+  /**
+   * Next raid setup (spec E4): difficulty version, pass price, capacity,
+   * event id, venue name and screen language. Takes effect at the next raid;
+   * a preset rebuilds the numbers from the defaults so presets never compound.
+   */
+  setNextRaid(input: NextRaidSettings, actor: string): { config: GameConfig; event: EventInfo } {
+    let config = this.nextConfig;
+    if (input.preset)
+      config = applyDifficultyPreset(
+        gameConfigSchema.parse({
+          ...structuredClone(DEFAULT_GAME_CONFIG),
+          ...this.opts.configOverrides,
+        }),
+        input.preset,
+      );
+    if (input.ticketPriceSats !== undefined)
+      config = { ...config, ticketPriceSats: input.ticketPriceSats };
+    if (input.maxPilots !== undefined) config = { ...config, maxPilots: input.maxPilots };
+    if (input.preset || input.ticketPriceSats !== undefined || input.maxPilots !== undefined)
+      config = this.setNextConfig(config, actor);
+    const event: EventInfo = {
+      ...this.eventInfo,
+      ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+      ...(input.venueName !== undefined ? { venueName: sanitizeVenue(input.venueName) } : {}),
+      ...(input.arenaLocale !== undefined ? { arenaLocale: input.arenaLocale } : {}),
+    };
+    if (
+      input.eventId !== undefined ||
+      input.venueName !== undefined ||
+      input.arenaLocale !== undefined
+    )
+      this.set('eventInfo', event, actor, 'SET_EVENT_INFO');
+    return { config, event };
   }
   get demoMode(): boolean {
     return this.opts.demoMode;
@@ -176,6 +234,13 @@ export class RaidManager {
   }
   setPassMode(v: PassMode, actor: string): void {
     this.set('passMode', v, actor, 'SET_PASS_MODE');
+  }
+  /** Venue screen display pushed from /admin (2D/3D, quality, volume, QR). */
+  get arenaDisplay(): ArenaDisplay {
+    return { ...DEFAULT_ARENA_DISPLAY, ...this.setting<Partial<ArenaDisplay>>('arenaDisplay', {}) };
+  }
+  setArenaDisplay(d: Omit<ArenaDisplay, 'rev'>, actor: string): void {
+    this.set('arenaDisplay', { ...d, rev: this.opts.wall.now() }, actor, 'SET_ARENA_DISPLAY');
   }
   get broadcast(): Broadcast | null {
     const b = this.repo.getSetting<Broadcast>('broadcast');
@@ -354,7 +419,10 @@ export class RaidManager {
       paymentsEnabled: this.paymentsEnabled,
       paymentMode: this.opts.paymentMode,
       playUrl: this.opts.playUrl,
-      eventId: this.opts.eventId,
+      eventId: this.eventId,
+      venueName: this.eventInfo.venueName,
+      arenaLocale: this.eventInfo.arenaLocale,
+      arenaDisplay: this.arenaDisplay,
       broadcast: this.broadcast,
       namesHidden: this.namesHidden,
       demoMode: this.opts.demoMode,
@@ -429,7 +497,7 @@ export class RaidManager {
     const rt = RaidRuntime.create(
       this.repo,
       newId('raid'),
-      this.opts.eventId,
+      this.eventInfo.eventId,
       this.nextConfig,
       randomInt(1, 2 ** 31 - 1),
       this.clock,
@@ -455,4 +523,16 @@ export class RaidManager {
     });
     for (const l of this.raidListeners) l(rt);
   }
+}
+
+/** Venue names are shown on public screens: plain text, no markup, no control characters. */
+function sanitizeVenue(v: string): string {
+  return (
+    v
+      .normalize('NFKC')
+      // eslint-disable-next-line no-control-regex -- control characters are exactly what we remove
+      .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>&"'`]/g, '')
+      .trim()
+      .slice(0, 40)
+  );
 }

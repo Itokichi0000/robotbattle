@@ -39,6 +39,8 @@ export interface ArenaSceneProps {
   robotModels?: Partial<Record<TeamId, string>>;
   /** Optional NULL CORE GLB; the procedural boss otherwise. */
   bossModel?: string;
+  /** NULL CORE's core barrier holds (shown as a shell). */
+  bossBarrier?: boolean;
   onModelError?: (e: unknown) => void;
 }
 
@@ -95,6 +97,7 @@ export function ArenaScene(props: ArenaSceneProps) {
         director={director}
         reducedMotion={reducedMotion}
         bossModel={props.bossModel}
+        bossBarrier={props.bossBarrier}
       />
       <ReserveReactor level={props.reserve} />
       <ModelRobotActor

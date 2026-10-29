@@ -268,6 +268,7 @@ function Game({ options, onSettings }: { options: SoloOptions; onSettings: () =>
               FUJIN: 0.15 + 0.85 * (snap.robots[1]!.energy / 100),
             }}
             reserve={snap.reserveEnergy / 100}
+            bossBarrier={view.bossBarrier}
             quality="medium"
             reducedMotion={reducedMotion}
             locale="ja"

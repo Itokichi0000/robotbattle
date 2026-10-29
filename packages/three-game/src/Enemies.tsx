@@ -14,6 +14,8 @@ export interface EnemiesProps {
   reducedMotion: boolean;
   /** Optional NULL CORE GLB (tools/blender/generate_assets.py); procedural otherwise. */
   bossModel?: string;
+  /** NULL CORE's core barrier holds (before FINAL_WAVE, at its HP floor). */
+  bossBarrier?: boolean;
 }
 
 /**
@@ -22,7 +24,14 @@ export interface EnemiesProps {
  * legs — that crack open as pilots hit them. Escorts glide to the city they
  * are about to attack. Pure presentation of server state.
  */
-export function Enemies({ enemies, telegraphs, director, reducedMotion, bossModel }: EnemiesProps) {
+export function Enemies({
+  enemies,
+  telegraphs,
+  director,
+  reducedMotion,
+  bossModel,
+  bossBarrier,
+}: EnemiesProps) {
   const boss = enemies.find((e) => e.kind === 'BOSS');
   const escorts = enemies.filter((e) => e.kind !== 'BOSS');
   return (
@@ -36,6 +45,7 @@ export function Enemies({ enemies, telegraphs, director, reducedMotion, bossMode
           url={bossModel}
         />
       )}
+      {boss && bossBarrier && <BarrierShell director={director} reducedMotion={reducedMotion} />}
       {escorts.map((e, i) => (
         <Escort
           key={e.id}
@@ -47,6 +57,46 @@ export function Enemies({ enemies, telegraphs, director, reducedMotion, bossMode
         />
       ))}
     </group>
+  );
+}
+
+/**
+ * The core barrier as a slowly turning violet shell: tells the room why the
+ * boss bar stopped moving (aim at arms and legs until the finale).
+ */
+function BarrierShell({
+  director,
+  reducedMotion,
+}: {
+  director: ArenaDirector;
+  reducedMotion: boolean;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  const mat = useRef<THREE.MeshStandardMaterial>(null);
+  useFrame(() => {
+    const t = director.time;
+    if (ref.current) {
+      ref.current.position.copy(BOSS_POSITION);
+      ref.current.rotation.y = reducedMotion ? 0 : t * 0.2;
+    }
+    // ≤0.5 Hz breathing, no strobe.
+    if (mat.current)
+      mat.current.opacity = reducedMotion ? 0.2 : 0.16 + 0.06 * Math.sin(t * Math.PI);
+  });
+  return (
+    <mesh ref={ref} scale={BOSS_SCALE * 1.55} name="null-core-barrier">
+      <icosahedronGeometry args={[1, 2]} />
+      <meshStandardMaterial
+        ref={mat}
+        color={ALIEN_COLOR}
+        emissive={new THREE.Color(ALIEN_COLOR)}
+        emissiveIntensity={0.8}
+        transparent
+        opacity={0.2}
+        wireframe
+        depthWrite={false}
+      />
+    </mesh>
   );
 }
 

@@ -111,9 +111,44 @@ export function upcomingTelegraphs(b: Pick<Board, 'telegraphs'>): Telegraph[] {
   return [...b.telegraphs].sort((a, z) => a.resolvesAt - z.resolvesAt || a.id - z.id);
 }
 
-/** Damage each city would take from the pending telegraphs (after current shields). */
+/**
+ * Work other pilots have already promised with their open missions (server
+ * side only: tasks are private). The seat recommendations subtract it, so a
+ * crowd spreads over the threats instead of herding onto the first one.
+ * Expected values (×0.7), not guarantees: a miss leaves the threat open.
+ */
+export interface Claims {
+  shield: Partial<Record<RegionId, number>>;
+  damage: Partial<Record<number, number>>;
+}
+
+const CLAIM_SUCCESS = 0.7;
+
+export function claimsOf(
+  s: Pick<RaidState, 'pilots' | 'gameMs' | 'config'>,
+  exceptPilotId?: string,
+): Claims {
+  const out: Claims = { shield: {}, damage: {} };
+  for (const p of Object.values(s.pilots)) {
+    const t = p.task;
+    if (!t || t.deadline < s.gameMs || p.pilotId === exceptPilotId) continue;
+    if (t.target.kind === 'TELEGRAPH' || t.target.kind === 'CITY_STANDBY') {
+      const id = t.target.cityId;
+      out.shield[id] = (out.shield[id] ?? 0) + s.config.guardian.shield * CLAIM_SUCCESS;
+    }
+    if (t.target.kind === 'ENEMY') {
+      const id = t.target.enemyId;
+      out.damage[id] =
+        (out.damage[id] ?? 0) + s.config.gunner.damage[t.target.weakpoint] * CLAIM_SUCCESS;
+    }
+  }
+  return out;
+}
+
+/** Damage each city would take from the pending telegraphs (after current and claimed shields). */
 export function pendingCityDamage(
   b: Pick<Board, 'telegraphs' | 'cities' | 'enemies'>,
+  claims?: Claims,
 ): Partial<Record<RegionId, number>> {
   const raw: Partial<Record<RegionId, number>> = {};
   for (const t of b.telegraphs) {
@@ -123,7 +158,7 @@ export function pendingCityDamage(
   }
   const out: Partial<Record<RegionId, number>> = {};
   for (const id of REGION_IDS) {
-    const d = (raw[id] ?? 0) - b.cities[id].shield;
+    const d = (raw[id] ?? 0) - b.cities[id].shield - (claims?.shield[id] ?? 0);
     if (d > 0 && !b.cities[id].destroyed) out[id] = d;
   }
   return out;
@@ -133,24 +168,59 @@ export function pendingCityDamage(
 // Recommendations ("今の緊急ミッション") — also the default target of a seat
 // ---------------------------------------------------------------------------
 
-export function recommendGunnerTarget(b: Board): { enemyId: number; weakpoint: Weakpoint } | null {
+/**
+ * HP the boss cannot fall below right now: its core barrier holds until
+ * FINAL_WAVE (D-053), so the finale and 神雷風陣 always happen. 0 = no floor.
+ */
+export function bossBarrierFloor(b: Pick<Board, 'config' | 'phase' | 'bossId'>, e: Enemy): number {
+  const ratio = b.config.boss.barrierFloorRatio;
+  if (e.id !== b.bossId || ratio <= 0 || b.phase === 'FINAL_WAVE') return 0;
+  return Math.ceil(e.hpMax * ratio);
+}
+
+/** True when the boss's barrier is up and its core takes no more damage. */
+export function bossBarrierUp(b: Pick<Board, 'config' | 'phase' | 'bossId' | 'enemies'>): boolean {
+  const boss = b.enemies.find((e) => e.id === b.bossId);
+  if (!boss) return false;
+  const floor = bossBarrierFloor(b, boss);
+  return floor > 0 && boss.hp <= floor;
+}
+
+export function recommendGunnerTarget(
+  b: Board,
+  claims?: Claims,
+): { enemyId: number; weakpoint: Weakpoint } | null {
   const enemies = liveEnemies(b);
   if (!enemies.length) return null;
   const boss = enemies.find((e) => e.id === b.bossId);
-  const pending = pendingCityDamage(b);
+  const pending = pendingCityDamage(b, claims);
   const lethal = (t: Telegraph) => t.targets.some((id) => (pending[id] ?? 0) >= b.cities[id].hp);
+  // An escort other gunners are already about to finish needs no more shots.
+  const open = (id: number) => enemies.some((e) => e.id === id && e.hp > (claims?.damage[id] ?? 0));
   // Stop an escort whose attack would destroy a city; otherwise the boss is the job.
   const urgent = upcomingTelegraphs(b).find(
-    (t) => t.enemyId !== b.bossId && lethal(t) && enemies.some((e) => e.id === t.enemyId),
+    (t) => t.enemyId !== b.bossId && lethal(t) && open(t.enemyId),
   );
   if (urgent) return { enemyId: urgent.enemyId, weakpoint: 'CORE' };
-  if (boss)
+  if (boss) {
+    // Behind the barrier the core is pointless: weaken the arms, then slow the legs.
+    if (bossBarrierUp(b)) {
+      const tg = b.telegraphs.find((t) => t.enemyId === boss.id);
+      return {
+        enemyId: boss.id,
+        weakpoint:
+          boss.weaken < b.config.gunner.armWeakenMax ? 'ARM' : tg && !tg.delayed ? 'LEG' : 'ARM',
+      };
+    }
     return {
       enemyId: boss.id,
       weakpoint:
         boss.weaken < b.config.gunner.armWeakenMax && boss.partHits.ARM < 2 ? 'ARM' : 'CORE',
     };
-  const next = upcomingTelegraphs(b).find((t) => enemies.some((e) => e.id === t.enemyId));
+  }
+  const next =
+    upcomingTelegraphs(b).find((t) => open(t.enemyId)) ??
+    upcomingTelegraphs(b).find((t) => enemies.some((e) => e.id === t.enemyId));
   if (next) return { enemyId: next.enemyId, weakpoint: 'CORE' };
   return {
     enemyId: [...enemies].sort((a, z) => a.hp - z.hp || a.id - z.id)[0]!.id,
@@ -161,8 +231,9 @@ export function recommendGunnerTarget(b: Board): { enemyId: number; weakpoint: W
 /** The threat a GUARDIAN should cover: soonest one that would really hurt. */
 export function recommendGuardianTarget(
   b: Board,
+  claims?: Claims,
 ): { telegraphId: number; cityId: RegionId } | { cityId: RegionId } {
-  const pending = pendingCityDamage(b);
+  const pending = pendingCityDamage(b, claims);
   for (const t of upcomingTelegraphs(b)) {
     const city = t.targets.find((id) => (pending[id] ?? 0) > 0);
     if (city) return { telegraphId: t.id, cityId: city };
@@ -170,9 +241,8 @@ export function recommendGuardianTarget(
   const first = upcomingTelegraphs(b)[0];
   if (first) return { telegraphId: first.id, cityId: first.targets[0]! };
   // No threat: pre-shield the weakest standing city.
-  const standing = standingCities(b.cities).sort(
-    (a, z) => b.cities[a].hp + b.cities[a].shield - (b.cities[z].hp + b.cities[z].shield),
-  );
+  const cover = (id: RegionId) => b.cities[id].hp + b.cities[id].shield + (claims?.shield[id] ?? 0);
+  const standing = standingCities(b.cities).sort((a, z) => cover(a) - cover(z));
   return { cityId: standing[0] ?? 'kanto' };
 }
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type CosmeticSlot, equipPatchSchema } from './cosmetics';
 import type { GameConfig } from './config';
 import type { BoardPatch, CrewMember, GameEvent } from './events';
 import type {
@@ -76,7 +77,14 @@ export interface PublicRaidSnapshot {
   paymentsEnabled: boolean;
   paymentMode: PaymentMode;
   playUrl: string;
+  /** Event of this raid (venue-limited cosmetics, leaderboard grouping). */
   eventId: string;
+  /** Venue name set by the operators (shown on the arena and license card). */
+  venueName: string;
+  /** Default language of the venue screen (viewers can still switch). */
+  arenaLocale: 'ja' | 'en';
+  /** Venue screen display pushed by the operators (applied when `rev` changes). */
+  arenaDisplay: ArenaDisplay;
   broadcast: Broadcast | null;
   /** Operators hid all pilot names on the venue screen. */
   namesHidden: boolean;
@@ -121,12 +129,18 @@ export const profilePatchSchema = z.object({
   locale: z.enum(['ja', 'en']).optional(),
   reducedMotion: z.boolean().optional(),
   assistMode: z.boolean().optional(),
+  /** Show my avatar decorations in the venue cockpit (names are a separate choice). */
+  showAvatarOnArena: z.boolean().optional(),
+  /** Equip unlocked cosmetics (slot → item id); locked items are refused. */
+  equip: equipPatchSchema.optional(),
 });
 export type ProfilePatch = z.infer<typeof profilePatchSchema>;
 
 export interface PilotProfile {
   pilotId: string;
   callsign: string;
+  /** Public pseudonym (PILOT-xxxxx) used when the callsign is not shown. */
+  pseudonym: string;
   avatar: AvatarPreset;
   authType: AuthType;
   /** Lightning key linked (LNURL-auth). Not an identity check. */
@@ -136,10 +150,15 @@ export interface PilotProfile {
   victories: number;
   titles: string[];
   showNameOnArena: boolean;
+  showAvatarOnArena: boolean;
   locale: 'ja' | 'en';
   reducedMotion: boolean;
   assistMode: boolean;
   createdAt: number;
+  cosmetics: {
+    unlocked: string[];
+    equipped: Record<CosmeticSlot, string>;
+  };
 }
 
 export interface SessionResponse {
@@ -178,6 +197,23 @@ export interface PassportEntry {
   score: number;
   titles: string[];
   endedAt: number;
+}
+
+export interface AchievementsResponse {
+  titles: Array<{ code: string; ja: string; en: string }>;
+  cosmetics: Array<{
+    id: string;
+    slot: CosmeticSlot;
+    ja: string;
+    en: string;
+    color: string;
+    accent: string;
+    rarity: 'BASIC' | 'RARE' | 'EVENT';
+    unlocked: boolean;
+    unlockedAt: number | null;
+    equipped: boolean;
+    hint: string;
+  }>;
 }
 
 export interface PassportResponse {
@@ -336,6 +372,8 @@ export const arenaStatusSchema = z.object({
   frameMs: z.number().min(0).max(10_000),
   renderer: z.enum(['webgl', '2d']),
   quality: z.enum(['low', 'medium', 'high']),
+  /** The automatic quality reduction changed the level. */
+  autoQuality: z.boolean().optional(),
 });
 export type ArenaStatus = z.infer<typeof arenaStatusSchema>;
 
@@ -366,6 +404,8 @@ export interface ServerToClientEvents {
   'raid:presence': (pilotsOnline: number) => void;
   'pilot:entitlement': (e: EntitlementPush) => void;
   'server:notice': (notice: ServerNotice) => void;
+  /** Rehearsal cue for venue screens only (DEMO): plays an effect, changes no state. */
+  'arena:cue': (cue: ArenaPreviewCue) => void;
 }
 
 export interface ClientToServerEvents {
@@ -377,3 +417,53 @@ export interface ClientToServerEvents {
   'time:sync': (clientSentAt: number, ack: (serverTime: number) => void) => void;
   'arena:status': (status: ArenaStatus) => void;
 }
+
+// ---------------------------------------------------------------------------
+// Operators: next raid (spec E4 作戦作成)
+// ---------------------------------------------------------------------------
+
+export const EVENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+export const nextRaidSettingsSchema = z.object({
+  /** Rebuild the next config from the defaults with this difficulty version. */
+  preset: z.enum(['EASY', 'NORMAL', 'HARD']).optional(),
+  ticketPriceSats: z.number().int().min(0).max(100_000).optional(),
+  maxPilots: z.number().int().min(1).max(1000).optional(),
+  eventId: z.string().regex(EVENT_ID_PATTERN).optional(),
+  venueName: z.string().max(40).optional(),
+  arenaLocale: z.enum(['ja', 'en']).optional(),
+});
+export type NextRaidSettings = z.infer<typeof nextRaidSettingsSchema>;
+
+export interface EventInfo {
+  eventId: string;
+  venueName: string;
+  arenaLocale: 'ja' | 'en';
+}
+
+export const ARENA_PREVIEW_CUES = [
+  'RAID_START',
+  'BOSS_ENTRANCE',
+  'SPECIAL_ACTIVATED',
+  'SPECIAL_FALLBACK',
+  'SPECIAL_FAILED',
+  'VICTORY',
+  'DEFEAT',
+] as const;
+export type ArenaPreviewCue = (typeof ARENA_PREVIEW_CUES)[number];
+
+export const arenaDisplaySchema = z.object({
+  renderer: z.enum(['auto', '3d', '2d']),
+  quality: z.enum(['auto', 'low', 'medium', 'high']),
+  volume: z.number().min(0).max(1),
+  showQr: z.boolean(),
+});
+export type ArenaDisplay = z.infer<typeof arenaDisplaySchema> & { rev: number };
+
+export const DEFAULT_ARENA_DISPLAY: ArenaDisplay = {
+  renderer: 'auto',
+  quality: 'auto',
+  volume: 0.7,
+  showQr: true,
+  rev: 0,
+};

@@ -51,6 +51,16 @@ export const gameConfigSchema = z
     bossBaseHp: z.number().int().min(1),
     /** Escorts (not the boss, not training) need at least this many gunner CORE hits: big crews must not erase them before they telegraph. 0 = off. */
     escortMinHits: z.number().min(0).max(10),
+    /**
+     * Crowd pressure by numbers, not only HP (D-053): every escort spawn
+     * becomes a wing of 1 + floor(active / extraEveryPilots) enemies (up to
+     * `max`) that split the scaled HP and aim at different cities, so a big
+     * crew has several countdowns to race at once. extraEveryPilots 0 = off.
+     */
+    escortWing: z.object({
+      extraEveryPilots: z.number().int().min(0),
+      max: z.number().int().min(1).max(4),
+    }),
     scout: enemySchema,
     siege: enemySchema,
     saboteur: enemySchema.extend({
@@ -63,9 +73,16 @@ export const gameConfigSchema = z
       sweepDamage: z.number().int().min(0),
       /**
        * In FINAL_WAVE the core hardens: gunner damage to the boss is multiplied
-       * by this until 神雷風陣 lands. Cooperation, not raw clicking, finishes it.
+       * by this until 神雷風陣 resolves (any outcome). Cooperation, not raw
+       * clicking, decides the finale; the last seconds stay winnable.
        */
       finalArmorFactor: z.number().min(0).max(1),
+      /**
+       * Before FINAL_WAVE the boss cannot fall below this share of its HP
+       * (its core barrier): gunners still weaken arms and slow legs, and the
+       * finale with 神雷風陣 always happens, even with 100 pilots. 0 = off.
+       */
+      barrierFloorRatio: z.number().min(0).max(0.9),
     }),
     /** When each enemy enters (game seconds). The boss is the BOSS entry. */
     spawns: z
@@ -96,8 +113,22 @@ export const gameConfigSchema = z
       /** LEG hit: the current telegraph resolves this much later (once per telegraph). */
       legDelaySeconds: z.number().int().min(0),
       energyPerHit: z.number().int().min(0),
+      /**
+       * With no enemy on the field the gunner seat charges Raijin's thunder
+       * drums instead of idling (energy to Raijin, then to the reserve).
+       * 0 = off (the seat reports NO_TARGET as before).
+       */
+      chargeEnergy: z.number().int().min(0),
     }),
-    guardian: z.object({ shield: z.number().int().min(0), standbyRatio: z.number().min(0).max(1) }),
+    guardian: z.object({
+      shield: z.number().int().min(0),
+      standbyRatio: z.number().min(0).max(1),
+      /**
+       * Wind barriers fade: every SYNC decay tick each city loses this much
+       * shield. A big crew cannot blanket Japan once and stop reacting (D-053).
+       */
+      shieldFade: z.number().int().min(0),
+    }),
     router: z.object({ energy: z.number().int().min(0) }),
     engineer: z.object({
       repairCity: z.number().int().min(0),
@@ -135,12 +166,30 @@ export const gameConfigSchema = z
     }),
 
     // ---- difficulty & assist ----
+    /** Label of the preset these numbers came from (`applyDifficultyPreset`). Part of the config hash. */
+    difficultyPreset: z.enum(['EASY', 'NORMAL', 'HARD']),
+    /**
+     * Gentle adjustment of new enemies' HP from the crew's recent minigame
+     * success (spec C5): 1 + clamp((mean success − target) × gain, ±maxAdjust).
+     * Deterministic (state only). maxAdjust 0 = off.
+     */
+    adaptive: z.object({
+      windowSeconds: z.number().int().min(10),
+      targetSuccess: z.number().min(0).max(1),
+      gain: z.number().min(0).max(2),
+      maxAdjust: z.number().min(0).max(0.5),
+    }),
     /** Enemy HP scales with active pilots / this (clamped to [min,max]). */
     difficultyReferencePilots: z.number().int().min(1),
     /** Below the reference crew, enemy HP shrinks faster than linearly: small crews also cover fewer seats. */
     difficultySmallCrewExponent: z.number().min(1).max(3),
+    /**
+     * Above the reference crew, enemy attack damage also grows with the
+     * crowd: × scale^this (shields scale with the crowd too). 0 = off (D-053).
+     */
+    difficultyDamageExponent: z.number().min(0).max(1),
     difficultyMinScale: z.number().min(0.05).max(1),
-    difficultyMaxScale: z.number().min(1).max(10),
+    difficultyMaxScale: z.number().min(1).max(20),
     /** Below this many active pilots an assist AI fills empty seats (recorded in results). */
     assistBelowPilots: z.number().int().min(0),
     assistIntervalSeconds: z.number().int().min(1),
@@ -165,7 +214,7 @@ export type GameConfig = z.infer<typeof gameConfigSchema>;
 export type EnemyConfig = z.infer<typeof enemySchema>;
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {
-  version: 'raid-1',
+  version: 'raid-2',
   matchSeconds: 480,
   lobbySeconds: 60,
   cutoffForPaidJoinAtSeconds: 240,
@@ -181,8 +230,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   cityRebuildHp: 25,
   cityRebuildCooldownSeconds: 30,
 
-  bossBaseHp: 900,
+  bossBaseHp: 750,
   escortMinHits: 0,
+  escortWing: { extraEveryPilots: 12, max: 3 },
   scout: { hp: 60, damage: 18, telegraphMs: [8000, 12000], recoveryMs: [4000, 7000] },
   siege: { hp: 140, damage: 36, telegraphMs: [12000, 18000], recoveryMs: [6000, 9000] },
   saboteur: {
@@ -200,6 +250,7 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     sweepBelowHpRatio: 0.6,
     sweepDamage: 14,
     finalArmorFactor: 0.6,
+    barrierFloorRatio: 0.15,
   },
   spawns: [
     { atSeconds: 5, kind: 'SCOUT' },
@@ -232,8 +283,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     armWeakenMax: 0.3,
     legDelaySeconds: 3,
     energyPerHit: 8,
+    chargeEnergy: 12,
   },
-  guardian: { shield: 45, standbyRatio: 0.5 },
+  guardian: { shield: 45, standbyRatio: 0.5, shieldFade: 8 },
   router: { energy: 18 },
   engineer: { repairCity: 15, repairRobot: 25 },
   energyBoostMax: 0.5,
@@ -261,10 +313,13 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     failBeamDamage: 25,
   },
 
+  difficultyPreset: 'NORMAL',
+  adaptive: { windowSeconds: 60, targetSuccess: 0.65, gain: 0.5, maxAdjust: 0.15 },
   difficultyReferencePilots: 9,
   difficultySmallCrewExponent: 1.4,
+  difficultyDamageExponent: 0.6,
   difficultyMinScale: 0.25,
-  difficultyMaxScale: 6,
+  difficultyMaxScale: 12,
   assistBelowPilots: 5,
   assistIntervalSeconds: 12,
   assistSuccess: 0.6,
@@ -273,6 +328,38 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
   invoiceTtlMs: 10 * 60_000,
   cheerCooldownMs: 1000,
 };
+
+export const DIFFICULTY_PRESETS = ['EASY', 'NORMAL', 'HARD'] as const;
+export type DifficultyPreset = (typeof DIFFICULTY_PRESETS)[number];
+
+/**
+ * Operator-facing difficulty versions (spec C6 `difficultyPreset`). A preset
+ * rewrites the numbers of a base config; the label travels in the config so
+ * results and leaderboards (compared by config hash) never mix versions.
+ * HARD never shortens a telegraph below 6 s: no unreactable attacks.
+ */
+export function applyDifficultyPreset(base: GameConfig, preset: DifficultyPreset): GameConfig {
+  const c = structuredClone(base);
+  c.difficultyPreset = preset;
+  if (preset === 'NORMAL') return gameConfigSchema.parse(c);
+  const hp = preset === 'EASY' ? 0.8 : 1.2;
+  const dmg = preset === 'EASY' ? 0.8 : 1.2;
+  const tele = preset === 'EASY' ? 2000 : -1000;
+  const shift = ([a, b]: [number, number]): [number, number] => [
+    Math.max(6000, a + tele),
+    Math.max(6000, b + tele),
+  ];
+  for (const k of ['scout', 'siege', 'saboteur'] as const) {
+    c[k].hp = Math.max(1, Math.round(c[k].hp * hp));
+    c[k].damage = Math.round(c[k].damage * dmg);
+    c[k].telegraphMs = shift(c[k].telegraphMs as [number, number]);
+  }
+  c.bossBaseHp = Math.max(1, Math.round(c.bossBaseHp * hp));
+  c.boss.damage = Math.round(c.boss.damage * dmg);
+  c.boss.sweepDamage = Math.round(c.boss.sweepDamage * dmg);
+  c.boss.telegraphMs = shift(c.boss.telegraphMs as [number, number]);
+  return gameConfigSchema.parse(c);
+}
 
 export function parseGameConfig(input: unknown): GameConfig {
   return gameConfigSchema.parse(input);

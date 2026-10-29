@@ -211,6 +211,18 @@ const MIGRATIONS: string[] = [
     value_json TEXT NOT NULL
   );
   `,
+  `
+  -- Cosmetics (spec C10/F4 PilotCosmetic): unlock record + what is equipped.
+  ALTER TABLE pilots ADD COLUMN equipped_json TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE pilots ADD COLUMN show_avatar INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE pilot_cosmetics (
+    pilot_id TEXT NOT NULL REFERENCES pilots(id),
+    cosmetic_id TEXT NOT NULL,
+    unlocked_at INTEGER NOT NULL,
+    raid_id TEXT,
+    PRIMARY KEY (pilot_id, cosmetic_id)
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;

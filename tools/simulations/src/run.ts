@@ -26,10 +26,10 @@ function run(pilots: number, mix: RoleMix, skill: number): Aggregate {
 }
 
 const row = (label: string, a: Aggregate) =>
-  `| ${label} | ${pct(a.winRate)} | ${pct(a.citiesLostRate)} | ${pct(a.timeoutRate)} | ${n1(a.survivingMean)} | ${pct(a.bossLeftMean)} | ${a.clearMean === null ? '—' : `${Math.round(a.clearMean)}s`} | ${Math.round(a.scoreMean)} | ${Math.round(a.syncMean)} | ${pct(a.specialActivated)}/${pct(a.specialFallback)}/${pct(a.specialFailed)} | ${Math.round(a.assistMean)} | ${Math.round(a.cityDamageMean)} / ${Math.round(a.shieldAbsorbedMean)} |`;
+  `| ${label} | ${pct(a.winRate)} | ${pct(a.citiesLostRate)} | ${pct(a.timeoutRate)} | ${n1(a.survivingMean)} | ${pct(a.bossLeftMean)} | ${a.clearMean === null ? '—' : `${Math.round(a.clearMean)}s`} | ${Math.round(a.scoreMean)} | ${Math.round(a.syncMean)} | ${pct(a.specialActivated)}/${pct(a.specialFallback)}/${pct(a.specialFailed)} | ${Math.round(a.assistMean)} | ${Math.round(a.cityDamageMean)} / ${Math.round(a.shieldAbsorbedMean)} | ${pct(a.escortLandRate)} | ${pct(a.gunnerIdleRate)} |`;
 
 const HEAD =
-  '| crew | win | Japan fell | timeout | cities left | boss HP left | clear time | score | SYNC avg | special ok/fallback/fail | assist acts | city dmg / shielded |\n|---|---|---|---|---|---|---|---|---|---|---|---|';
+  '| crew | win | Japan fell | timeout | cities left | boss HP left | clear time | score | SYNC avg | special ok/fallback/fail | assist acts | city dmg / shielded | escort attacks fired | gunner idle |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|';
 
 const started = Date.now();
 const out: string[] = [];
@@ -54,7 +54,7 @@ out.push('');
 out.push('## 1. Crew size (balanced seats, skill 0.65)');
 out.push('');
 out.push(HEAD);
-for (const p of [1, 3, 5, 9, 16, 30, 60, 100]) out.push(row(`${p} pilots`, run(p, 'spread', 0.65)));
+for (const p of [1, 2, 3, 5, 9, 10, 16, 30, 50, 60, 100]) out.push(row(`${p} pilots`, run(p, 'spread', 0.65)));
 out.push('');
 
 out.push('## 2. Role mix matters more than head count (skill 0.65)');
@@ -76,10 +76,19 @@ out.push('');
 out.push('## Reading the table');
 out.push('');
 out.push(
-  '- "city dmg / shielded": damage that reached cities vs. damage Fujin\'s shields absorbed, per raid. Large',
+  '- "city dmg / shielded": damage that reached cities vs. damage Fujin\'s shields absorbed, per raid.',
 );
 out.push(
-  '  crews kill escorts inside the telegraph window, so most pressure comes from NULL CORE (see OPEN_ISSUES).',
+  '- "escort attacks fired": share of escort countdowns that actually fired (0% = every escort died first).',
+);
+out.push(
+  '  "gunner idle": share of gunner mission requests with nothing to do (the seat charges Raijin instead, D-053).',
+);
+out.push(
+  '- Crowd pressure (D-053): escort spawns become wings for 12+ pilots, enemy damage grows with the crowd',
+);
+out.push(
+  '  (scale^0.6), shields fade, and NULL CORE keeps a 15% barrier until FINAL_WAVE so the finale always happens.',
 );
 out.push('');
 out.push(

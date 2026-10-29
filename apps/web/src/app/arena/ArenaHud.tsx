@@ -72,6 +72,11 @@ export function ArenaHud({
           <div className="origin-top-left scale-[0.9]">
             <Logo size="md" />
           </div>
+          {snap.venueName && (
+            <span className="text-[1vw] font-bold text-muted" data-testid="arena-venue">
+              📍 {snap.venueName}
+            </span>
+          )}
           {connState !== 'connected' && (
             <span className="rounded bg-danger/80 px-2 py-1 text-[1vw] font-bold" role="status">
               {connState === 'offline'
@@ -86,14 +91,17 @@ export function ArenaHud({
             </div>
           )}
         </div>
-        <JoinCard
-          url={playUrl}
-          lobby={lobby}
-          joinOpen={snap.joinOpen}
-          passMode={snap.passMode}
-          price={snap.ticketPriceSats}
-          demo={snap.demoMode}
-        />
+        {/* Always on (spec E3); operators can hide it only on purpose (photo shoots). */}
+        {snap.arenaDisplay?.showQr !== false && (
+          <JoinCard
+            url={playUrl}
+            lobby={lobby}
+            joinOpen={snap.joinOpen}
+            passMode={snap.passMode}
+            price={snap.ticketPriceSats}
+            demo={snap.demoMode}
+          />
+        )}
       </div>
 
       {/* banner */}

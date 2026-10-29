@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { GameConfig, GameEvent, RaidState, Role, TaskInput } from '@sats-wars/shared';
-import { DEFAULT_GAME_CONFIG, REGION_IDS, makeGameConfig } from '@sats-wars/shared';
+import {
+  DEFAULT_GAME_CONFIG,
+  REGION_IDS,
+  applyDifficultyPreset,
+  makeGameConfig,
+} from '@sats-wars/shared';
 import {
   type EngineCommand,
   type ReduceResult,
   type TaskChoice,
+  adaptiveFactor,
   createRaidState,
   reduce,
   replay,
+  wingSize,
 } from './engine';
+import { bossBarrierUp, recommendGunnerTarget } from './rules';
 import { mulberry32 } from './random';
 import { evaluateTask, reticleAt, routerParams, shortestHops, solveTask } from './tasks';
 
@@ -83,7 +91,8 @@ class Sim {
 
 describe('raid timeline', () => {
   it('lobby → intro → waves → final; the boss enters at 4:30; timeout at 8:00 fails', () => {
-    const sim = new Sim();
+    // Sturdy cities: nobody plays, and the timeline must still be observable up to 8:00.
+    const sim = new Sim(makeGameConfig({ cityMaxHp: 2000 }));
     sim.board('a', 'GUNNER');
     sim.board('b', 'GUARDIAN');
     expect(sim.state.status).toBe('CREATED');
@@ -324,27 +333,42 @@ describe('cockpit seats', () => {
 });
 
 describe('cooperation', () => {
-  it('a crowd piling onto one seat is normalised: 9 gunners do not hit 3× harder than 3', () => {
-    const totalDamage = (n: number) => {
+  it('a crowd piling onto one seat is normalised: 9 gunners are no stronger than 3 gunners + 6 others', () => {
+    const totalDamage = (gunners: number, others: number) => {
+      // The boss holds its beam so Raijin's health (robot power) does not add noise.
       const sim = new Sim(
-        makeGameConfig({ difficultyMaxScale: 1, difficultyMinScale: 1, bossBaseHp: 100_000 }),
+        makeGameConfig({
+          difficultyMaxScale: 1,
+          difficultyMinScale: 1,
+          bossBaseHp: 100_000,
+          boss: { ...DEFAULT_GAME_CONFIG.boss, telegraphMs: [600_000, 600_000] },
+          // Only the boss: idle escorts would wreck the cities before 4:30.
+          spawns: [{ atSeconds: 270, kind: 'BOSS' }],
+        }),
       );
-      for (let i = 0; i < n; i++) sim.board(`g${i}`, 'GUNNER');
+      for (let i = 0; i < gunners; i++) sim.board(`g${i}`, 'GUNNER');
+      for (let i = 0; i < others; i++) sim.board(`d${i}`, 'GUARDIAN');
       sim.start();
       sim.to(272);
       const bossId = sim.state.bossId!;
       const before = sim.state.enemies.find((e) => e.id === bossId)!.hp;
-      // Four sustained rounds of everyone firing at the boss.
+      // Four sustained rounds of everyone playing their seat.
       for (let round = 0; round < 4; round++) {
-        for (let i = 0; i < n; i++) sim.play(`g${i}`, { enemyId: bossId, weakpoint: 'CORE' }, 1);
+        for (let i = 0; i < others; i++) sim.play(`d${i}`);
+        for (let i = 0; i < gunners; i++)
+          sim.play(`g${i}`, { enemyId: bossId, weakpoint: 'CORE' }, 1);
         sim.wait(11 * S);
       }
       return before - sim.state.enemies.find((e) => e.id === bossId)!.hp;
     };
-    const three = totalDamage(3);
-    const nine = totalDamage(9);
-    expect(nine).toBeGreaterThan(three);
-    expect(nine).toBeLessThan(three * 1.6);
+    const spread = totalDamage(3, 6);
+    const piled = totalDamage(9, 0);
+    expect(spread).toBeGreaterThan(0);
+    // Piling everyone onto one seat adds nothing beyond that seat's fair share
+    // (up to per-hit rounding: nine small hits round up more often than three big ones).
+    expect(piled).toBeLessThanOrEqual(spread * 1.1);
+    // A lone crew of 3 gunners is not 3× weaker than 9 gunners either.
+    expect(piled).toBeLessThan(totalDamage(3, 0) * 3);
   });
 
   it('SYNC: different seats in one window add 8 / +7 / +10; one pilot counts once', () => {
@@ -383,8 +407,17 @@ describe('cooperation', () => {
     const solo = new Sim();
     solo.board('a', 'GUNNER');
     solo.start();
-    solo.to(150);
+    for (let s = 10; s < 150; s += 12) {
+      solo.to(s);
+      solo.play('a', {}, 0.5);
+    }
     expect(solo.state.stats.assistActions).toBeGreaterThan(0);
+    // Nobody playing: the AI does not run the raid on its own.
+    const idle = new Sim();
+    idle.board('a', 'GUNNER');
+    idle.start();
+    idle.to(150);
+    expect(idle.state.stats.assistActions).toBe(0);
     expect(solo.of('TASK_RESOLVED').some((e) => e.data.assist)).toBe(true);
     const crowd = new Sim();
     for (let i = 0; i < 6; i++) crowd.board(`p${i}`, 'GUNNER');
@@ -462,7 +495,14 @@ describe('神雷風陣 and outcomes', () => {
 
   it('defeating NULL CORE wins with a 1000-point scale score and role MVPs', () => {
     const sim = new Sim(
-      makeGameConfig({ bossBaseHp: 60, difficultyMinScale: 1, difficultyMaxScale: 1 }),
+      makeGameConfig({
+        bossBaseHp: 60,
+        difficultyMinScale: 1,
+        difficultyMaxScale: 1,
+        // Early KO is still a rule; the default barrier is covered below.
+        boss: { ...DEFAULT_GAME_CONFIG.boss, barrierFloorRatio: 0 },
+        spawns: [{ atSeconds: 270, kind: 'BOSS' }],
+      }),
     );
     sim.board('g', 'GUNNER');
     sim.board('d', 'GUARDIAN');
@@ -484,6 +524,178 @@ describe('神雷風陣 and outcomes', () => {
     );
     expect(r.mvps.GUNNER?.pilotId).toBe('g');
     expect(r.clearTimeMs).toBe(r.endedAtGameMs);
+  });
+});
+
+describe('crowd pressure and pacing (D-053)', () => {
+  it('an escort spawn becomes a wing for big crews: split HP, different cities, staggered countdowns', () => {
+    const sim = new Sim(
+      makeGameConfig({
+        spawns: [
+          { atSeconds: 70, kind: 'SCOUT' },
+          { atSeconds: 270, kind: 'BOSS' },
+        ],
+      }),
+    );
+    for (let i = 0; i < 30; i++) sim.board(`p${i}`, i % 2 ? 'GUARDIAN' : 'ROUTER');
+    sim.start();
+    sim.to(65);
+    // Keep the crew active (presence = asking for missions).
+    for (let i = 0; i < 30; i++) sim.request(`p${i}`);
+    expect(wingSize(sim.state, 'SCOUT')).toBe(3);
+    expect(wingSize(sim.state, 'BOSS')).toBe(1);
+    sim.to(75);
+    const wing = sim.state.enemies.filter((e) => e.kind === 'SCOUT');
+    expect(wing).toHaveLength(3);
+    const solo = new Sim(
+      makeGameConfig({
+        spawns: [
+          { atSeconds: 70, kind: 'SCOUT' },
+          { atSeconds: 270, kind: 'BOSS' },
+        ],
+      }),
+    );
+    for (let i = 0; i < 30; i++) solo.board(`p${i}`, 'ROUTER');
+    solo.start();
+    solo.to(65);
+    for (let i = 0; i < 30; i++) solo.request(`p${i}`);
+    solo.state.config.escortWing.extraEveryPilots = 0;
+    solo.to(75);
+    const single = solo.state.enemies.filter((e) => e.kind === 'SCOUT');
+    expect(single).toHaveLength(1);
+    // Same total work for the crew, split over the wing.
+    const total = wing.reduce((a, e) => a + e.hpMax, 0);
+    expect(Math.abs(total - single[0]!.hpMax)).toBeLessThanOrEqual(3);
+    sim.to(80);
+    const targets = sim.state.telegraphs.map((t) => t.targets[0]);
+    expect(new Set(targets).size).toBe(targets.length);
+    const lands = sim.state.telegraphs.map((t) => t.resolvesAt).sort((a, z) => a - z);
+    expect(lands.length).toBe(3);
+  });
+
+  it('small crews get one escort per spawn', () => {
+    const sim = new Sim();
+    for (let i = 0; i < 5; i++) sim.board(`p${i}`, 'GUNNER');
+    sim.start();
+    sim.to(59);
+    for (let i = 0; i < 5; i++) sim.request(`p${i}`);
+    expect(wingSize(sim.state, 'SCOUT')).toBe(1);
+  });
+
+  it('with nothing to shoot, the gunner seat charges Raijin (then the reserve) instead of idling', () => {
+    const sim = new Sim();
+    sim.board('g', 'GUNNER');
+    sim.start();
+    sim.to(55); // the training scout is gone or not yet: clear the field
+    sim.state.enemies = [];
+    sim.state.telegraphs = [];
+    sim.state.robots.RAIJIN.energy = 95;
+    const first = sim.play('g', {}, 1);
+    expect(first.code).toBe('OK');
+    expect(first.result!.effect).toEqual({ kind: 'ENERGY', sink: 'RAIJIN', amount: 5 });
+    sim.wait(11 * S);
+    sim.state.enemies = [];
+    sim.state.telegraphs = [];
+    const second = sim.play('g', {}, 1);
+    expect(second.result!.effect).toMatchObject({ kind: 'ENERGY', sink: 'RESERVE' });
+    expect(sim.state.reserveEnergy).toBeGreaterThan(0);
+    // Off switch: NO_TARGET as before.
+    const off = new Sim(
+      makeGameConfig({ gunner: { ...DEFAULT_GAME_CONFIG.gunner, chargeEnergy: 0 } }),
+    );
+    off.board('g', 'GUNNER');
+    off.start();
+    off.to(55);
+    off.state.enemies = [];
+    expect(off.request('g').code).toBe('NO_TARGET');
+  });
+
+  it("NULL CORE's barrier holds before FINAL_WAVE: arms and legs still work, the finale can finish it", () => {
+    const sim = new Sim(
+      makeGameConfig({
+        bossBaseHp: 100,
+        difficultyMinScale: 1,
+        difficultyMaxScale: 1,
+        spawns: [{ atSeconds: 270, kind: 'BOSS' }],
+        boss: { ...DEFAULT_GAME_CONFIG.boss, finalArmorFactor: 1 },
+      }),
+    );
+    sim.board('g', 'GUNNER');
+    sim.board('d', 'GUARDIAN');
+    sim.start();
+    sim.to(272);
+    const bossId = sim.state.bossId!;
+    for (let i = 0; i < 8; i++) {
+      sim.play('g', { enemyId: bossId, weakpoint: 'CORE' }, 1);
+      sim.play('d');
+      sim.wait(10 * S);
+    }
+    const boss = () => sim.state.enemies.find((e) => e.id === bossId)!;
+    expect(sim.state.status).toBe('LIVE');
+    expect(boss().hp).toBe(15);
+    expect(bossBarrierUp(sim.state)).toBe(true);
+    expect(recommendGunnerTarget(sim.state)!.weakpoint).not.toBe('CORE');
+    const blocked = sim
+      .of('TASK_RESOLVED')
+      .filter((e) => e.data.pilotId === 'g')
+      .at(-1)!;
+    expect(blocked.data.effect).toMatchObject({ kind: 'DAMAGE', amount: 0, note: 'BARRIER' });
+    const arm = sim.play('g', { enemyId: bossId, weakpoint: 'ARM' }, 1);
+    expect(arm.result!.effect).toMatchObject({ note: 'WEAKEN' });
+    expect(boss().weaken).toBeGreaterThan(0);
+    sim.to(391);
+    expect(sim.state.phase).toBe('FINAL_WAVE');
+    expect(bossBarrierUp(sim.state)).toBe(false);
+    let guard = 0;
+    while (sim.state.status === 'LIVE' && guard++ < 10) {
+      sim.play('g', { enemyId: bossId, weakpoint: 'CORE' }, 1);
+      sim.wait(10 * S);
+    }
+    expect(sim.state.result).toMatchObject({ outcome: 'SUCCEEDED', reason: 'BOSS_DEFEATED' });
+  });
+
+  it('adaptive difficulty moves new enemy HP by at most ±15% from recent success', () => {
+    const base = createRaidState('a', DEFAULT_GAME_CONFIG, 1);
+    expect(adaptiveFactor(base)).toBe(1);
+    const at = (xs: number[]) =>
+      adaptiveFactor({
+        ...base,
+        gameMs: 100_000,
+        recentSuccess: xs.map((x, i) => [90_000 + i, x]),
+      });
+    expect(at([1, 1, 1, 1, 1])).toBeCloseTo(1.15);
+    expect(at([0, 0, 0, 0])).toBeCloseTo(0.85);
+    expect(at([0.65, 0.65, 0.65, 0.65])).toBeCloseTo(1);
+    expect(at([1, 1])).toBe(1); // too few samples
+    // Old samples fall out of the window.
+    expect(
+      adaptiveFactor({
+        ...base,
+        gameMs: 500_000,
+        recentSuccess: [
+          [1, 1],
+          [2, 1],
+          [3, 1],
+          [4, 1],
+        ],
+      }),
+    ).toBe(1);
+  });
+
+  it('difficulty presets rewrite numbers, keep telegraphs reactable and change the config hash', () => {
+    const easy = applyDifficultyPreset(DEFAULT_GAME_CONFIG, 'EASY');
+    const hard = applyDifficultyPreset(DEFAULT_GAME_CONFIG, 'HARD');
+    expect(easy.difficultyPreset).toBe('EASY');
+    expect(easy.scout.hp).toBeLessThan(DEFAULT_GAME_CONFIG.scout.hp);
+    expect(hard.siege.damage).toBeGreaterThan(DEFAULT_GAME_CONFIG.siege.damage);
+    expect(hard.bossBaseHp).toBeGreaterThan(DEFAULT_GAME_CONFIG.bossBaseHp);
+    for (const c of [easy, hard])
+      for (const k of ['scout', 'siege', 'saboteur', 'boss'] as const)
+        expect(c[k].telegraphMs[0]).toBeGreaterThanOrEqual(6000);
+    const hashes = new Set(
+      [DEFAULT_GAME_CONFIG, easy, hard].map((c) => createRaidState('h', c).configHash),
+    );
+    expect(hashes.size).toBe(3);
   });
 });
 

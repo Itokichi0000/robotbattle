@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import type {
+  ArenaPreviewCue,
   ArenaStatus,
   ClientToServerEvents,
   ClockTick,
@@ -153,7 +154,12 @@ export function createRealtime(
     io.to('public').emit('server:notice', n);
   };
 
-  return { io, broadcastClock, broadcastPresence, broadcastSnapshot, stats, notice };
+  /** Rehearsal effects go to venue screens only. */
+  const arenaCue = (cue: ArenaPreviewCue) => {
+    io.to('arena').emit('arena:cue', cue);
+  };
+
+  return { io, broadcastClock, broadcastPresence, broadcastSnapshot, stats, notice, arenaCue };
 }
 
 export type Realtime = ReturnType<typeof createRealtime>;

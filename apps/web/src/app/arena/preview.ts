@@ -1,4 +1,4 @@
-import type { RaidResult, RegionId } from '@sats-wars/shared';
+import type { ArenaPreviewCue, RaidResult, RegionId } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
 import type { ArenaDirector } from '@sats-wars/three-game';
 
@@ -135,5 +135,38 @@ export function handlePreviewKey(key: string, director: ArenaDirector, st: Previ
       return true;
     default:
       return false;
+  }
+}
+
+/** Operator rehearsal cue pushed from /admin (DEMO): same effects as the preview keys. */
+export function playArenaCue(cue: ArenaPreviewCue, director: ArenaDirector): void {
+  const special = (outcome: 'ACTIVATED' | 'FALLBACK' | 'FAILED') => {
+    director.play({ kind: 'specialOpen' });
+    setTimeout(
+      () =>
+        director.play({
+          kind: 'specialResolved',
+          outcome,
+          damage: outcome === 'ACTIVATED' ? 250 : outcome === 'FALLBACK' ? 90 : 0,
+          bossId: null,
+          cityHits: [],
+        }),
+      1500,
+    );
+  };
+  switch (cue) {
+    case 'RAID_START':
+      return director.play({ kind: 'raidStart' });
+    case 'BOSS_ENTRANCE':
+      return director.play({ kind: 'enemySpawned', enemyId: -1, enemyKind: 'BOSS' });
+    case 'SPECIAL_ACTIVATED':
+      return special('ACTIVATED');
+    case 'SPECIAL_FALLBACK':
+      return special('FALLBACK');
+    case 'SPECIAL_FAILED':
+      return special('FAILED');
+    case 'VICTORY':
+    case 'DEFEAT':
+      return director.play({ kind: 'raidEnded', result: fakeResult(cue === 'VICTORY') });
   }
 }

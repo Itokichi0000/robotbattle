@@ -6,6 +6,7 @@ import { AVATAR_PRESETS, ROLE_LABELS, TITLE_LABELS } from '@sats-wars/shared';
 import { Logo } from '@/components/Logo';
 import { ApiError, api } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
+import { LicenseCard } from './LicenseCard';
 
 /**
  * Pilot license + SATS PASSPORT: rank, titles and raid history. Everything
@@ -135,6 +136,8 @@ export function PassportView() {
         )}
       </section>
 
+      <LicenseCard data={data} onChanged={load} />
+
       <section className="sw-panel p-4">
         <h2 className="font-black">
           {L('出撃記録（SATS PASSPORT）', 'Raid history (SATS PASSPORT)')}
@@ -211,6 +214,18 @@ export function PassportView() {
           {L(
             '大画面にコールサインを表示する（オフなら PILOT-番号）',
             'Show my callsign on the big screen (PILOT-number otherwise)',
+          )}
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={p.showAvatarOnArena}
+            onChange={(e) => void patch({ showAvatarOnArena: e.target.checked })}
+            data-testid="show-avatar"
+          />
+          {L(
+            '大画面のコックピットに自分の装飾（ヘルメット等）を表示する',
+            'Show my helmet and decorations in the big-screen cockpit',
           )}
         </label>
         <label className="flex min-h-11 items-center gap-2 text-sm">

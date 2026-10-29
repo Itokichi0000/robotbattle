@@ -39,6 +39,14 @@ export interface RaidSim {
   /** City damage that got through, and what shields absorbed: is there anything to defend? */
   cityDamage: number;
   shieldAbsorbed: number;
+  /** Escort (not boss, not training) countdowns started / that actually fired. */
+  escortTelegraphs: number;
+  escortLanded: number;
+  /** Gunner mission requests and how many found nothing to do (NO_TARGET). */
+  gunnerRequests: number;
+  gunnerIdle: number;
+  /** Seconds into the raid when 神雷風陣 (or its fallback) resolved, if it did. */
+  specialAtSeconds: number | null;
 }
 
 const SPREAD: Role[] = [
@@ -65,9 +73,25 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
   const config = makeGameConfig(o.config ?? {});
   const rand = mulberry32((o.seed * 2654435761) >>> 0);
   let state: RaidState = createRaidState(`sim-${o.seed}`, config, o.seed);
+  let escortTelegraphs = 0;
+  let escortLanded = 0;
+  let gunnerRequests = 0;
+  let gunnerIdle = 0;
+  let specialAtSeconds: number | null = null;
   const run = (cmd: EngineCommand) => {
     const r = reduce(state, cmd);
     state = r.state;
+    for (const ev of r.events) {
+      if (ev.type === 'ENEMY_TELEGRAPH') {
+        const e = state.enemies.find((x) => x.id === ev.data.telegraph.enemyId);
+        if (ev.data.enemyKind !== 'BOSS' && !e?.training) escortTelegraphs += 1;
+      }
+      if (ev.type === 'ATTACK_RESOLVED' && ev.data.enemyKind !== 'BOSS') {
+        const e = state.enemies.find((x) => x.id === ev.data.enemyId);
+        if (!e?.training) escortLanded += 1;
+      }
+      if (ev.type === 'SPECIAL_RESOLVED') specialAtSeconds = Math.round(state.gameMs / 1000);
+    }
     return r;
   };
   for (let i = 0; i < o.pilots; i++)
@@ -103,6 +127,10 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
     const t = Math.round(next.at);
     if (next.step === 'request') {
       const r = run({ type: 'REQUEST_TASK', t, pilotId: next.pilotId });
+      if (state.pilots[next.pilotId]?.role === 'GUNNER' && r.outcome.kind === 'task') {
+        if (r.outcome.code === 'OK' || r.outcome.code === 'NO_TARGET') gunnerRequests += 1;
+        if (r.outcome.code === 'NO_TARGET') gunnerIdle += 1;
+      }
       if (r.outcome.kind === 'task' && r.outcome.code === 'OK' && r.outcome.task) {
         const task = r.outcome.task;
         const sink = task.target.kind === 'ENERGY' ? task.target.sink : undefined;
@@ -159,6 +187,11 @@ export function simulateRaid(o: RaidSimOptions): RaidSim {
     tasks: r.stats.tasks,
     cityDamage: r.stats.cityDamageTaken,
     shieldAbsorbed: r.stats.shieldAbsorbed,
+    escortTelegraphs,
+    escortLanded,
+    gunnerRequests,
+    gunnerIdle,
+    specialAtSeconds,
   };
 }
 
@@ -178,6 +211,12 @@ export interface Aggregate {
   assistMean: number;
   cityDamageMean: number;
   shieldAbsorbedMean: number;
+  /** Share of escort countdowns that fired (tension: 0 = every escort dies first). */
+  escortLandRate: number;
+  /** Share of gunner requests that found nothing to do. */
+  gunnerIdleRate: number;
+  /** Share of raids where 神雷風陣 (or its fallback/fail) resolved. */
+  specialReached: number;
 }
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -202,5 +241,12 @@ export function aggregate(sims: RaidSim[]): Aggregate {
     assistMean: mean(sims.map((x) => x.assistActions)),
     cityDamageMean: mean(sims.map((x) => x.cityDamage)),
     shieldAbsorbedMean: mean(sims.map((x) => x.shieldAbsorbed)),
+    escortLandRate:
+      sims.reduce((a, x) => a + x.escortLanded, 0) /
+      Math.max(1, sims.reduce((a, x) => a + x.escortTelegraphs, 0)),
+    gunnerIdleRate:
+      sims.reduce((a, x) => a + x.gunnerIdle, 0) /
+      Math.max(1, sims.reduce((a, x) => a + x.gunnerRequests, 0)),
+    specialReached: share((x) => x.specialAtSeconds !== null),
   };
 }

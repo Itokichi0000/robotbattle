@@ -13,3 +13,4 @@ export {
 export { applyClip } from './robots/animate';
 export { cueFromEvent } from './cues';
 export { SfxEngine, type SfxName } from './audio';
+export { QualityGovernor, type GovernorLevel } from './qualityGovernor';

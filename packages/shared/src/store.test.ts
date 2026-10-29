@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardPatch, GameEvent } from './events';
-import type { PublicRaidSnapshot } from './protocol';
+import { DEFAULT_ARENA_DISPLAY, type PublicRaidSnapshot } from './protocol';
 import { DEFAULT_GAME_CONFIG } from './config';
 import { REGION_IDS } from './regions';
 import { RaidStore } from './store';
@@ -79,6 +79,9 @@ function snap(lastSeq = 0): PublicRaidSnapshot {
     paymentMode: 'mock',
     playUrl: '',
     eventId: 'local',
+    venueName: '',
+    arenaLocale: 'ja',
+    arenaDisplay: DEFAULT_ARENA_DISPLAY,
     broadcast: null,
     namesHidden: false,
     demoMode: true,

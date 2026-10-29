@@ -103,6 +103,15 @@ export function RaidHeader({
           testId="boss-hp"
         />
       )}
+      {view.bossBarrier && (
+        <p className="swc-barrier" role="status" data-testid="boss-barrier">
+          🛡{' '}
+          {L(
+            'バリア展開中：最終決戦まで腕・脚を狙え',
+            'Barrier up: hit arms & legs until the finale',
+          )}
+        </p>
+      )}
       <div className="swc-header-row">
         <Meter value={raid.sync} tone="teal" label="SYNC" testId="sync" />
         {!compact && (

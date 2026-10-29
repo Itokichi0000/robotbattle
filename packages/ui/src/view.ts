@@ -7,7 +7,7 @@ import type {
   Telegraph,
 } from '@sats-wars/shared';
 import { REGION_IDS } from '@sats-wars/shared';
-import { neededRole, pendingCityDamage } from '@sats-wars/game-engine';
+import { bossBarrierUp, neededRole, pendingCityDamage } from '@sats-wars/game-engine';
 import { boardFrom } from './board';
 
 /** The parts of a raid snapshot the HUDs read (the offline demo builds the same shape). */
@@ -44,6 +44,8 @@ export interface RaidView {
   timeLeftMs: number;
   boss: Enemy | null;
   bossHpRatio: number | null;
+  /** NULL CORE's barrier holds (before FINAL_WAVE): its core takes no more damage. */
+  bossBarrier: boolean;
   citiesStanding: number;
   minCities: number;
   cities: Record<RegionId, CityState>;
@@ -86,6 +88,7 @@ export function raidView(s: RaidLike, gameNow: number): RaidView {
           : c.matchSeconds * 1000,
     boss,
     bossHpRatio: boss ? boss.hp / boss.hpMax : null,
+    bossBarrier: bossBarrierUp(board),
     citiesStanding: REGION_IDS.filter((id) => !cities[id].destroyed).length,
     minCities: c.minimumSurvivingCities,
     cities,

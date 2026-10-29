@@ -16,6 +16,8 @@ export interface ArenaSettings {
    * procedural = always the code-built models.
    */
   models: 'auto' | 'blender' | 'procedural';
+  /** Lower the 3D quality (and finally switch to 2D) when the FPS stays low. */
+  autoQuality: boolean;
 }
 
 const DEFAULTS: ArenaSettings = {
@@ -28,6 +30,7 @@ const DEFAULTS: ArenaSettings = {
   muted: false,
   showStats: false,
   models: 'auto',
+  autoQuality: true,
 };
 
 const KEY = 'sw.arena.settings';
@@ -44,7 +47,11 @@ export function loadArenaSettings(): ArenaSettings {
   if (typeof window !== 'undefined') {
     const q = new URLSearchParams(window.location.search);
     const quality = q.get('quality');
-    if (quality === 'low' || quality === 'medium' || quality === 'high') s.quality = quality;
+    if (quality === 'low' || quality === 'medium' || quality === 'high') {
+      s.quality = quality;
+      s.autoQuality = false;
+    }
+    if (quality === 'auto') s.autoQuality = true;
     const mode = q.get('mode');
     if (mode === '2d' || mode === '3d') s.renderer = mode;
     if (q.get('reduced') === '1') s.reducedMotion = true;

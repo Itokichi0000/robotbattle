@@ -211,6 +211,7 @@ export async function buildServer(opts: BuildOptions): Promise<SatsWarsServer> {
     isAllowedOrigin,
     realtimeStats: () => holder.realtime!.stats(),
     onSettingsChanged: () => holder.realtime?.broadcastSnapshot(),
+    arenaCue: (cue) => holder.realtime?.arenaCue(cue),
   });
 
   await app.ready();

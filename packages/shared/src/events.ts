@@ -1,3 +1,4 @@
+import type { AvatarLook } from './cosmetics';
 import type { RegionId } from './regions';
 import type {
   AttackKind,
@@ -23,6 +24,8 @@ export interface CrewMember {
   role: Role;
   robot: RobotId;
   isBot: boolean;
+  /** Cockpit avatar colours: only when the pilot allowed it (default look otherwise). */
+  look?: AvatarLook;
 }
 
 /**

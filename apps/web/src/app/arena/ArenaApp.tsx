@@ -6,6 +6,7 @@ import {
   ArenaDirector,
   type Banner,
   type FrameStats,
+  QualityGovernor,
   SfxEngine,
   type SfxName,
   cueFromEvent,
@@ -23,7 +24,7 @@ import {
   saveArenaSettings,
   webglAvailable,
 } from './settings';
-import { PREVIEW_HELP, handlePreviewKey, newPreviewState } from './preview';
+import { PREVIEW_HELP, handlePreviewKey, newPreviewState, playArenaCue } from './preview';
 import { SettingsPanel } from './SettingsPanel';
 
 const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.ArenaScene), {
@@ -32,7 +33,7 @@ const ArenaScene = dynamic(() => import('@sats-wars/three-game').then((m) => m.A
 });
 
 export function ArenaApp() {
-  const { locale } = useI18n();
+  const { locale, explicit, setDefaultLocale } = useI18n();
   const conn = useRaidConnection('arena');
   const snap = useRaid(conn);
   const connState = useConnectionState(conn);
@@ -100,6 +101,7 @@ export function ArenaApp() {
     const offs = [
       conn.store.onEvent((e) => cueFromEvent(director, e)),
       conn.onCheer(() => director.play({ kind: 'cheer' })),
+      conn.onArenaCue((c) => playArenaCue(c, director)),
     ];
     return () => offs.forEach((o) => o());
   }, [conn, director]);
@@ -120,7 +122,58 @@ export function ArenaApp() {
     if (snap) syncToSnapshot(snap);
   }, [snap, syncToSnapshot]);
 
-  const use3d = !!settings && settings.renderer !== '2d' && webgl === true && !contextLost;
+  // Venue screen language set by the operators, unless this PC chose one.
+  const arenaLocale = snap?.arenaLocale;
+  useEffect(() => {
+    if (arenaLocale && !explicit) setDefaultLocale(arenaLocale);
+  }, [arenaLocale, explicit, setDefaultLocale]);
+
+  // Display pushed from /admin: applied once per change (rev), then the venue
+  // PC can still adjust locally (S panel) until the next push.
+  const pushedRev = useRef<number | null>(null);
+  const display = snap?.arenaDisplay;
+  useEffect(() => {
+    if (!display || pushedRev.current === display.rev) return;
+    const first = pushedRev.current === null;
+    pushedRev.current = display.rev;
+    // rev 0 = operators never pushed anything: keep this PC's own settings.
+    if (first && display.rev === 0) return;
+    setSettings((s) =>
+      s
+        ? {
+            ...s,
+            renderer: display.renderer,
+            ...(display.quality !== 'auto' ? { quality: display.quality } : {}),
+            autoQuality: display.quality === 'auto',
+            volume: display.volume,
+          }
+        : s,
+    );
+  }, [display]);
+
+  // Automatic quality reduction (spec D6): step down on sustained low FPS,
+  // 2D as the last resort; climbs back up to the operator's choice.
+  const [autoLevel, setAutoLevel] = useState<'low' | 'medium' | 'high' | '2d' | null>(null);
+  const governor = useRef<QualityGovernor | null>(null);
+  const ceiling = settings?.quality;
+  const autoOn = settings?.autoQuality ?? false;
+  useEffect(() => {
+    governor.current = autoOn && ceiling ? new QualityGovernor({ ceiling }) : null;
+    setAutoLevel(null);
+  }, [autoOn, ceiling]);
+  useEffect(() => {
+    if (!stats || !governor.current) return;
+    const next = governor.current.sample(stats.fps, performance.now() / 1000);
+    if (next) setAutoLevel(next);
+  }, [stats]);
+
+  const use3d =
+    !!settings &&
+    settings.renderer !== '2d' &&
+    autoLevel !== '2d' &&
+    webgl === true &&
+    !contextLost;
+  const quality = autoLevel && autoLevel !== '2d' ? autoLevel : (settings?.quality ?? 'medium');
   useEffect(() => {
     if (!conn || !settings) return;
     const id = setInterval(() => {
@@ -128,11 +181,12 @@ export function ArenaApp() {
         fps: use3d ? (stats?.fps ?? 0) : 60,
         frameMs: use3d ? (stats?.frameMs ?? 0) : 16,
         renderer: use3d ? 'webgl' : '2d',
-        quality: settings.quality,
+        quality,
+        autoQuality: !!autoLevel,
       });
     }, 5000);
     return () => clearInterval(id);
-  }, [conn, settings, stats, use3d]);
+  }, [conn, settings, stats, use3d, autoLevel, quality]);
 
   // Keyboard: F fullscreen, S settings, M mute.
   useEffect(() => {
@@ -194,7 +248,7 @@ export function ArenaApp() {
           cityMaxHp={snap.config.cityMaxHp}
           glow={glow}
           reserve={snap.reserveEnergy / 100}
-          quality={settings.quality}
+          quality={quality}
           reducedMotion={settings.reducedMotion}
           locale={locale}
           onStats={setStats}
@@ -208,6 +262,7 @@ export function ArenaApp() {
               : undefined
           }
           bossModel={!modelError ? models?.BOSS : undefined}
+          bossBarrier={view.bossBarrier}
           onModelError={() => setModelError(true)}
         />
       ) : (

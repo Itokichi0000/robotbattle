@@ -10,7 +10,12 @@ import type {
   TaskInput,
   TaskResponse,
 } from '@sats-wars/shared';
-import { CHEER_EMOJIS, DEFAULT_GAME_CONFIG, isClockRunning } from '@sats-wars/shared';
+import {
+  CHEER_EMOJIS,
+  DEFAULT_ARENA_DISPLAY,
+  DEFAULT_GAME_CONFIG,
+  isClockRunning,
+} from '@sats-wars/shared';
 import {
   type EngineCommand,
   type Rng,
@@ -374,6 +379,9 @@ export class LocalRaid implements RaidClient {
       paymentMode: 'mock',
       playUrl: '',
       eventId: 'solo',
+      venueName: '',
+      arenaLocale: 'ja',
+      arenaDisplay: DEFAULT_ARENA_DISPLAY,
       broadcast: null,
       namesHidden: false,
       demoMode: true,

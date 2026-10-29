@@ -412,6 +412,9 @@ export class ArenaDirector {
       case 'DAMAGE': {
         const to: FxTarget = { kind: 'enemy', id: e.enemyId };
         this.emitEffect('impact', 'RAIJIN', null, to, e.defeated ? 1 : 0.6);
+        // The core barrier deflects the bolt: a ripple instead of a crack.
+        if (e.note === 'BARRIER' && this.throttle('barrier', 0.5))
+          this.emitEffect('shockwave', null, null, to, 0.4);
         if (this.throttle('sig-RAIJIN', 0.3)) {
           this.emitEffect('lightning', 'RAIJIN', { kind: 'robot', id: 'RAIJIN' }, to, 0.9);
           this.sound('thunder', 'RAIJIN');

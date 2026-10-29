@@ -1,4 +1,4 @@
-import type { GameConfig, GameEvent, RaidState } from '@sats-wars/shared';
+import type { AvatarLook, CrewMember, GameConfig, GameEvent, RaidState } from '@sats-wars/shared';
 import { isClockRunning } from '@sats-wars/shared';
 import {
   type EngineCommand,
@@ -30,6 +30,8 @@ export interface NamePolicy {
   hidden: boolean;
   /** Pseudonym shown otherwise (e.g. PILOT-00821). */
   pseudonym: string;
+  /** Cockpit avatar colours, only when the pilot allowed showing them. */
+  look?: AvatarLook | null;
 }
 
 /**
@@ -222,9 +224,20 @@ export class RaidRuntime {
     return callsign;
   };
 
+  /** Cockpit looks for pilots who allowed it (others keep the default look). */
+  private withLooks(crew: CrewMember[]): CrewMember[] {
+    return crew.map((m) => {
+      const look = this.names.get(m.pilotId)?.look;
+      return look ? { ...m, look } : m;
+    });
+  }
+
   /** Public names everywhere in an event (data, crew, MVPs in a result). */
   presentEvent(e: GameEvent): GameEvent {
-    return moderateNames(e, this.displayName);
+    const out = moderateNames(e, this.displayName);
+    return out.patch.crew
+      ? ({ ...out, patch: { ...out.patch, crew: this.withLooks(out.patch.crew) } } as GameEvent)
+      : out;
   }
 
   snapshotBase() {
@@ -238,7 +251,7 @@ export class RaidRuntime {
     const delta = core.running ? Math.max(0, t - core.clockMs) : 0;
     return {
       ...core,
-      crew: moderateNames(core.crew, this.displayName),
+      crew: this.withLooks(moderateNames(core.crew, this.displayName)),
       result: moderateNames(core.result, this.displayName),
       clockMs: core.clockMs + delta,
       gameMs: core.gameMs + delta,

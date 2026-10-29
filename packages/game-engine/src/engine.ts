@@ -32,10 +32,13 @@ import type {
   Telegraph,
   Weakpoint,
 } from '@sats-wars/shared';
+import type { Claims } from './rules';
 import { COMBAT_PHASES, REGION_IDS, ROLES, configHash } from '@sats-wars/shared';
 import {
   ROBOT_FOR_ROLE,
   activePilotIds,
+  bossBarrierFloor,
+  claimsOf,
   difficultyScale,
   facilityActive,
   liveEnemies,
@@ -92,7 +95,9 @@ export type EngineCommand =
   | { type: 'PAUSE'; t: number; reason: string }
   | { type: 'RESUME'; t: number }
   | { type: 'END'; t: number; reason: string }
-  | { type: 'CANCEL'; t: number; reason: string };
+  | { type: 'CANCEL'; t: number; reason: string }
+  /** Rehearsal: an enemy enters now (server allows it in DEMO_MODE only). */
+  | { type: 'DEBUG_SPAWN'; t: number; kind: EnemyKind };
 
 export type BoardCode = 'OK' | 'ALREADY_BOARDED' | 'JOIN_CLOSED' | 'RAID_FULL' | 'NOT_OPEN';
 export type RoleChangeCode = 'OK' | 'ROLE_COOLDOWN' | 'NOT_BOARDED' | 'NOT_OPEN';
@@ -182,6 +187,7 @@ export function createRaidState(raidId: string, config: GameConfig, seed = 1): R
       resolvedAt: null,
     },
     pilots: {},
+    recentSuccess: [],
     stats: emptyStats(),
     result: null,
     seq: 0,
@@ -236,6 +242,15 @@ export function reduce(prev: RaidState, cmd: EngineCommand): ReduceResult {
     case 'CANCEL':
       outcome = cancel(ctx, cmd.reason);
       break;
+    case 'DEBUG_SPAWN': {
+      // Operator rehearsal (DEMO only, enforced by the server; such raids leave the leaderboard).
+      const s = ctx.state;
+      const bossUp = s.bossId !== null && s.enemies.some((e) => e.id === s.bossId);
+      if (s.status !== 'LIVE' || (cmd.kind === 'BOSS' && bossUp))
+        outcome = { kind: 'rejected', reason: 'cannot spawn now' };
+      else spawnEnemy(ctx, cmd.kind);
+      break;
+    }
   }
   ctx.state.revision = ctx.state.seq;
   return { state: ctx.state, events: ctx.events, outcome };
@@ -400,7 +415,8 @@ function runTimer(ctx: Ctx, kind: TimerKind, enemyId?: number): void {
     case 'SPAWN': {
       const sp = c.spawns[s.spawnIndex]!;
       s.spawnIndex += 1;
-      spawnEnemy(ctx, sp.kind);
+      const count = wingSize(s, sp.kind);
+      for (let i = 0; i < count; i++) spawnEnemy(ctx, sp.kind, count, i);
       return;
     }
     case 'ENEMY':
@@ -417,6 +433,16 @@ function runTimer(ctx: Ctx, kind: TimerKind, enemyId?: number): void {
       s.nextDecayAt = s.gameMs + ms(c.sync.decayEverySeconds);
       s.stats.syncSum += s.sync;
       s.stats.syncSamples += 1;
+      if (c.guardian.shieldFade > 0) {
+        // Fading is for crowds that could blanket Japan; a small crew keeps its barriers.
+        const fade = Math.round(
+          c.guardian.shieldFade * Math.min(1, difficultyScale(c, activePilotIds(s).length)),
+        );
+        for (const id of REGION_IDS) {
+          const city = s.cities[id];
+          city.shield = Math.max(0, city.shield - fade);
+        }
+      }
       const amount = Math.max(0, c.sync.decayAmount - (facilityActive(s, 'COMMAND') ? 1 : 0));
       if (s.sync > 0 && amount > 0) {
         const before = s.sync;
@@ -425,10 +451,15 @@ function runTimer(ctx: Ctx, kind: TimerKind, enemyId?: number): void {
       }
       return;
     }
-    case 'ASSIST':
-      s.nextAssistAt = s.gameMs + ms(c.assistIntervalSeconds);
+    case 'ASSIST': {
+      // The fewer humans, the more often the assist AI covers a seat (a 1–2
+      // person demo still gets a full raid); at the threshold it is the base rate.
+      const humans = activePilotIds(s).length;
+      const share = Math.min(1, (humans + 1) / Math.max(1, c.assistBelowPilots));
+      s.nextAssistAt = s.gameMs + Math.max(4000, Math.round(ms(c.assistIntervalSeconds) * share));
       assistTurn(ctx);
       return;
+    }
     case 'TIMEOUT':
       endRaid(
         ctx,
@@ -458,14 +489,41 @@ function enemyConfig(c: GameConfig, kind: EnemyKind): EnemyConfig {
 }
 
 function currentScale(s: RaidState): number {
-  return difficultyScale(s.config, activePilotIds(s).length);
+  return difficultyScale(s.config, activePilotIds(s).length) * adaptiveFactor(s);
 }
 
-function spawnEnemy(ctx: Ctx, kind: EnemyKind): void {
+/**
+ * Spec C5: new enemies get slightly tougher when the crew keeps nailing its
+ * minigames and slightly softer when it struggles. Bounded (±maxAdjust) and
+ * computed from state only, so replays stay exact.
+ */
+export function adaptiveFactor(s: Pick<RaidState, 'config' | 'gameMs' | 'recentSuccess'>): number {
+  const a = s.config.adaptive;
+  if (a.maxAdjust <= 0) return 1;
+  const since = s.gameMs - ms(a.windowSeconds);
+  const recent = (s.recentSuccess ?? []).filter(([at]) => at >= since);
+  if (recent.length < 4) return 1;
+  const mean = recent.reduce((sum, [, x]) => sum + x, 0) / recent.length;
+  const adj = Math.max(-a.maxAdjust, Math.min(a.maxAdjust, (mean - a.targetSuccess) * a.gain));
+  return 1 + adj;
+}
+
+/** How many escorts one spawn entry becomes for the current crew (D-053). */
+export function wingSize(
+  s: Pick<RaidState, 'config' | 'phase' | 'pilots' | 'gameMs'>,
+  kind: EnemyKind,
+): number {
+  const w = s.config.escortWing;
+  if (kind === 'BOSS' || s.phase === 'INTRO_TRAINING' || w.extraEveryPilots <= 0) return 1;
+  return Math.min(w.max, 1 + Math.floor(activePilotIds(s).length / w.extraEveryPilots));
+}
+
+function spawnEnemy(ctx: Ctx, kind: EnemyKind, wing = 1, index = 0): void {
   const s = ctx.state;
   const cfg = enemyConfig(s.config, kind);
   const training = s.phase === 'INTRO_TRAINING';
-  let hp = Math.max(1, Math.round(cfg.hp * currentScale(s)));
+  // A wing splits the crew-scaled HP: same total work, more countdowns at once.
+  let hp = Math.max(1, Math.round((cfg.hp * currentScale(s)) / wing));
   // Floor for escorts so a large crew still has to race the telegraph (D-049).
   if (kind !== 'BOSS' && !training)
     hp = Math.max(hp, Math.round(s.config.escortMinHits * s.config.gunner.damage.CORE));
@@ -475,8 +533,9 @@ function spawnEnemy(ctx: Ctx, kind: EnemyKind): void {
     hp,
     hpMax: hp,
     ai: 'IDLE',
-    // First move soon after entering (the boss poses first).
-    aiUntil: s.gameMs + (kind === 'BOSS' ? 4000 : 1500),
+    // First move soon after entering (the boss poses first); a wing staggers
+    // its countdowns so they do not all land in the same second.
+    aiUntil: s.gameMs + (kind === 'BOSS' ? 4000 : 1500 + index * 2500),
     weaken: 0,
     lastTargets: [],
     partHits: { CORE: 0, ARM: 0, LEG: 0 },
@@ -496,6 +555,12 @@ function pickTargets(ctx: Ctx, e: Enemy, count: number): RegionId[] {
   for (let k = 0; k < count && standing.length > out.length; k++) {
     // Avoid the same city three times in a row; prefer hurt cities a little.
     let pool = standing.filter((id) => !out.includes(id));
+    // Spread simultaneous threats (a wing) over different cities when possible.
+    if (!e.training && s.telegraphs.length) {
+      const busy = new Set(s.telegraphs.flatMap((t) => t.targets));
+      const free = pool.filter((id) => !busy.has(id));
+      if (free.length) pool = free;
+    }
     const recent = e.lastTargets.slice(-2);
     if (recent.length === 2 && recent[0] === recent[1]) {
       const alt = pool.filter((id) => id !== recent[0]);
@@ -547,6 +612,11 @@ function telegraphFor(ctx: Ctx, e: Enemy): boolean {
     }
   }
   if (e.training) damage = Math.round(damage * c.trainingDamageRatio);
+  else if (c.difficultyDamageExponent > 0) {
+    // A big crew has many guardians: its enemies hit harder too (never softer than the base).
+    const crowd = Math.max(1, difficultyScale(c, activePilotIds(s).length));
+    damage = Math.round(damage * crowd ** c.difficultyDamageExponent);
+  }
   // Radar and jammer buy reaction time while their cities stand.
   const bonus = (facilityActive(s, 'RADAR') ? 1000 : 0) + (facilityActive(s, 'JAMMER') ? 1000 : 0);
   const duration = ctx.between(cfg.telegraphMs as [number, number]) + bonus;
@@ -971,15 +1041,21 @@ function liveCheck(s: RaidState): TaskErrorCode | null {
   return null;
 }
 
-function resolveTarget(s: RaidState, role: Role, choice: TaskChoice): TaskTarget | null {
+function resolveTarget(
+  s: RaidState,
+  role: Role,
+  choice: TaskChoice,
+  claims?: Claims,
+): TaskTarget | null {
   switch (role) {
     case 'GUNNER': {
       const enemies = liveEnemies(s);
       const chosen =
         choice.enemyId !== undefined ? enemies.find((e) => e.id === choice.enemyId) : undefined;
-      const rec = recommendGunnerTarget(s);
+      const rec = recommendGunnerTarget(s, claims);
       const enemyId = chosen?.id ?? rec?.enemyId;
-      if (enemyId === undefined) return null;
+      if (enemyId === undefined)
+        return s.config.gunner.chargeEnergy > 0 ? { kind: 'CHARGE' } : null;
       return {
         kind: 'ENEMY',
         enemyId,
@@ -1002,7 +1078,7 @@ function resolveTarget(s: RaidState, role: Role, choice: TaskChoice): TaskTarget
           ? { kind: 'TELEGRAPH', telegraphId: onCity.id, cityId: choice.cityId }
           : { kind: 'CITY_STANDBY', cityId: choice.cityId };
       }
-      const rec = recommendGuardianTarget(s);
+      const rec = recommendGuardianTarget(s, claims);
       return 'telegraphId' in rec
         ? { kind: 'TELEGRAPH', telegraphId: rec.telegraphId, cityId: rec.cityId }
         : { kind: 'CITY_STANDBY', cityId: rec.cityId };
@@ -1059,7 +1135,7 @@ function requestTask(ctx: Ctx, pilotId: string, choice: TaskChoice): CommandOutc
     p.task = null;
   }
   if (s.gameMs < p.cooldownUntil) return fail('COOLDOWN');
-  const target = resolveTarget(s, p.role, choice);
+  const target = resolveTarget(s, p.role, choice, claimsOf(s, pilotId));
   if (!target) return fail('NO_TARGET');
   const difficulty = choice.difficulty ?? 'NORMAL';
   const c = s.config;
@@ -1119,6 +1195,8 @@ function submitTask(ctx: Ctx, pilotId: string, taskId: string, input: TaskInput)
   p.cooldownUntil = s.gameMs + ms(c.normalActionCooldownSeconds);
   if (!ev.valid) return result('INVALID_INPUT', { cooldownUntil: p.cooldownUntil });
   const success = ev.success;
+  const since = s.gameMs - ms(c.adaptive.windowSeconds);
+  s.recentSuccess = [...(s.recentSuccess ?? []).filter(([at]) => at >= since), [s.gameMs, success]];
   const target: TaskTarget =
     task.role === 'ROUTER' && ev.sink ? { kind: 'ENERGY', sink: ev.sink } : task.target;
   const { effect, syncGain } = applyAction(ctx, p, task.role, task.robot, target, success);
@@ -1150,30 +1228,57 @@ function applyAction(
     s.stats.successes += 1;
     switch (role) {
       case 'GUNNER': {
-        if (target.kind !== 'ENEMY') break;
+        if (target.kind !== 'ENEMY' && target.kind !== 'CHARGE') break;
         const enemies = liveEnemies(s);
         // The target may have died meanwhile: the shot goes to the recommended one.
-        let e = enemies.find((x) => x.id === target.enemyId);
-        let weakpoint = target.weakpoint;
-        if (!e) {
+        let e = target.kind === 'ENEMY' ? enemies.find((x) => x.id === target.enemyId) : undefined;
+        let weakpoint: Weakpoint = target.kind === 'ENEMY' ? target.weakpoint : 'CORE';
+        if (!e && target.kind === 'ENEMY') {
           const rec = recommendGunnerTarget(s);
           e = rec ? enemies.find((x) => x.id === rec.enemyId) : undefined;
           weakpoint = rec?.weakpoint ?? 'CORE';
         }
-        if (!e) break;
         const raijin = s.robots.RAIJIN;
+        if (!e) {
+          // Nothing to shoot: the thunder drums store the energy instead (D-053).
+          if (c.gunner.chargeEnergy <= 0) break;
+          const amount = Math.max(1, Math.round(c.gunner.chargeEnergy * success * scale));
+          const sink: EnergySink = raijin.energy < 100 ? 'RAIJIN' : 'RESERVE';
+          let added: number;
+          if (sink === 'RAIJIN') {
+            added = Math.min(100 - raijin.energy, amount);
+            raijin.energy += added;
+          } else {
+            added = Math.min(100 - s.reserveEnergy, amount);
+            s.reserveEnergy += added;
+          }
+          s.stats.energyRouted += added;
+          if (actor) actor.stats.energy += added;
+          effect = { kind: 'ENERGY', sink, amount: added };
+          break;
+        }
         const armor =
-          e.kind === 'BOSS' && s.phase === 'FINAL_WAVE' && s.special.status !== 'ACTIVATED'
+          // Hardened only until 神雷風陣 resolves: after any outcome the overheated
+          // core is open for the last scramble (D-053).
+          e.kind === 'BOSS' &&
+          s.phase === 'FINAL_WAVE' &&
+          (s.special.status === 'LOCKED' || s.special.status === 'OPEN')
             ? c.boss.finalArmorFactor
             : 1;
-        const amount = Math.max(
+        let amount = Math.max(
           1,
           Math.round(c.gunner.damage[weakpoint] * success * scale * robotPower(c, raijin) * armor),
         );
+        let barrier = false;
+        const floor = bossBarrierFloor(s, e);
+        if (amount > e.hp - floor) {
+          if (floor > 0) barrier = true;
+          amount = Math.max(0, e.hp - floor);
+        }
         raijin.energy = Math.max(0, raijin.energy - c.gunner.energyPerHit);
         e.hp = Math.max(0, e.hp - amount);
         e.partHits[weakpoint] += 1;
-        let note: 'WEAKEN' | 'DELAY' | null = null;
+        let note: 'WEAKEN' | 'DELAY' | 'BARRIER' | null = barrier ? 'BARRIER' : null;
         if (weakpoint === 'ARM') {
           e.weaken = Math.min(c.gunner.armWeakenMax, e.weaken + c.gunner.armWeaken * success);
           note = 'WEAKEN';
@@ -1438,7 +1543,8 @@ function assistTurn(ctx: Ctx): void {
   const c = s.config;
   if (s.status !== 'LIVE' || s.phase === 'INTRO_TRAINING') return;
   const humansActive = activePilotIds(s).length;
-  if (humansActive >= c.assistBelowPilots) return;
+  // It fills seats for people who are playing; it never plays the raid alone.
+  if (humansActive === 0 || humansActive >= c.assistBelowPilots) return;
   const lastSuccess = (role: Role) =>
     Math.max(-1, ...Object.values(s.pilots).map((p) => p.lastSuccessAt[role] ?? -1));
   let roles: Role[] = [...ROLES].sort((a, z) => lastSuccess(a) - lastSuccess(z));
@@ -1447,7 +1553,7 @@ function assistTurn(ctx: Ctx): void {
     if (missing.length) roles = missing;
   }
   for (const role of roles) {
-    const target = resolveTarget(s, role, {});
+    const target = resolveTarget(s, role, {}, claimsOf(s));
     if (!target) continue;
     s.stats.assistActions += 1;
     applyAction(ctx, null, role, ROBOT_FOR_ROLE[role] ?? 'RAIJIN', target, c.assistSuccess);

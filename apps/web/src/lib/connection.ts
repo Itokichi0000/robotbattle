@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import type {
+  ArenaPreviewCue,
   ArenaStatus,
   CheerPush,
   ClientToServerEvents,
@@ -34,6 +35,7 @@ export class RaidConnection {
   private entitlementListeners = new Set<(e: EntitlementPush) => void>();
   private cheerListeners = new Set<(c: CheerPush) => void>();
   private noticeListeners = new Set<(n: ServerNotice) => void>();
+  private cueListeners = new Set<(c: ArenaPreviewCue) => void>();
   private resyncing = false;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -71,6 +73,7 @@ export class RaidConnection {
       this.notifyState();
     });
     this.socket.on('server:notice', (n) => this.noticeListeners.forEach((l) => l(n)));
+    this.socket.on('arena:cue', (c) => this.cueListeners.forEach((l) => l(c)));
     // Periodic reconciliation (cheap safety net for anything a patch missed).
     this.reconcileTimer = setInterval(() => this.resync(), 15_000);
   }
@@ -154,6 +157,13 @@ export class RaidConnection {
     this.cheerListeners.add(l);
     return () => {
       this.cheerListeners.delete(l);
+    };
+  }
+  /** Rehearsal effects from /admin (venue screens only, DEMO). */
+  onArenaCue(l: (c: ArenaPreviewCue) => void): () => void {
+    this.cueListeners.add(l);
+    return () => {
+      this.cueListeners.delete(l);
     };
   }
   onNotice(l: (n: ServerNotice) => void): () => void {

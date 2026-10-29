@@ -22,6 +22,7 @@ interface Overview {
     demoBots: number;
     demoBotSkill: number;
     eventId: string;
+    event: { eventId: string; venueName: string; arenaLocale: 'ja' | 'en' };
   };
   crew: { total: number; bots: number; roles: Record<string, number> };
   entitlements: Record<string, number>;
@@ -36,6 +37,7 @@ interface Overview {
       frameMs: number;
       renderer: string;
       quality: string;
+      autoQuality?: boolean;
     }>;
   };
   server: {
@@ -234,7 +236,7 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
           {msg}
         </p>
       )}
-      {tab === 'raid' && <RaidTab ov={ov} cmd={cmd} />}
+      {tab === 'raid' && <RaidTab ov={ov} cmd={cmd} token={token} onSaved={load} />}
       {tab === 'pilots' && <PilotsTab token={token} />}
       {tab === 'passes' && <PassesTab token={token} ov={ov} />}
       {tab === 'monitor' && <MonitorTab ov={ov} />}
@@ -325,7 +327,17 @@ function Toggle({
   );
 }
 
-function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
+function RaidTab({
+  ov,
+  cmd,
+  token,
+  onSaved,
+}: {
+  ov: Overview;
+  cmd: Cmd;
+  token: string;
+  onSaved: () => Promise<void>;
+}) {
   const snap = ov.snapshot;
   const s = ov.settings;
   const view = raidView(snap, snap.gameMs);
@@ -462,6 +474,9 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
       <section className="sw-panel p-4">
         <JapanMapMini view={view} locale="ja" maxHp={snap.config.cityMaxHp} />
       </section>
+      <NextRaidPanel ov={ov} token={token} onSaved={onSaved} />
+      <ArenaDisplayPanel ov={ov} cmd={cmd} />
+      {s.demoMode && <RehearsalPanel cmd={cmd} />}
       <section
         className="sw-panel flex flex-col gap-2 p-4 md:col-span-2"
         data-testid="broadcast-panel"
@@ -522,6 +537,256 @@ function RaidTab({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
         {snap.broadcast && <p className="text-sm">表示中：{snap.broadcast.messageJa}</p>}
       </section>
     </div>
+  );
+}
+
+/** Spec E4 作戦作成: what the next raid will be (the running raid never changes). */
+function NextRaidPanel({
+  ov,
+  token,
+  onSaved,
+}: {
+  ov: Overview;
+  token: string;
+  onSaved: () => Promise<void>;
+}) {
+  const c = ov.nextConfig;
+  const ev = ov.settings.event;
+  const [preset, setPreset] = useState<'' | 'EASY' | 'NORMAL' | 'HARD'>('');
+  const [price, setPrice] = useState(String(c.ticketPriceSats));
+  const [max, setMax] = useState(String(c.maxPilots));
+  const [eventId, setEventId] = useState(ev.eventId);
+  const [venue, setVenue] = useState(ev.venueName);
+  const [lang, setLang] = useState<'ja' | 'en'>(ev.arenaLocale);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = async () => {
+    setMsg(null);
+    try {
+      await api('/api/admin/next-raid', {
+        method: 'PUT',
+        token,
+        body: {
+          ...(preset ? { preset } : {}),
+          ticketPriceSats: Number(price),
+          maxPilots: Number(max),
+          eventId,
+          venueName: venue,
+          arenaLocale: lang,
+        },
+      });
+      setMsg('保存しました（次の作戦から反映）');
+      await onSaved();
+    } catch (e) {
+      setMsg(e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
+    }
+  };
+  const field = 'rounded border border-line bg-navy px-2 py-1';
+  return (
+    <section className="sw-panel flex flex-col gap-2 p-4 text-sm" data-testid="next-raid-panel">
+      <h2 className="font-black">次の作戦の設定</h2>
+      <p className="text-muted">
+        現在：{c.version} · 難度 {c.difficultyPreset} · {c.matchSeconds / 60}分 · 出撃パス{' '}
+        {c.ticketPriceSats} sats · 定員 {c.maxPilots} · イベント {ev.eventId}
+      </p>
+      <label className="flex items-center gap-2">
+        難度
+        <select
+          className={field}
+          value={preset}
+          onChange={(e) => setPreset(e.target.value as typeof preset)}
+          data-testid="next-preset"
+        >
+          <option value="">変更しない</option>
+          <option value="EASY">EASY（敵HP・攻撃 −20%、予告 +2秒）</option>
+          <option value="NORMAL">NORMAL（既定値）</option>
+          <option value="HARD">HARD（敵HP・攻撃 +20%、予告 −1秒・最短6秒）</option>
+        </select>
+      </label>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2">
+          出撃パス（sats）
+          <input
+            className={`${field} w-20`}
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          定員
+          <input className={`${field} w-20`} value={max} onChange={(e) => setMax(e.target.value)} />
+        </label>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2">
+          イベントID
+          <input
+            className={`${field} w-44`}
+            value={eventId}
+            onChange={(e) => setEventId(e.target.value)}
+            placeholder="btc-tokyo-2026"
+            data-testid="next-event-id"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          会場名
+          <input
+            className={`${field} w-44`}
+            value={venue}
+            maxLength={40}
+            onChange={(e) => setVenue(e.target.value)}
+            data-testid="next-venue"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          会場画面の言語
+          <select
+            className={field}
+            value={lang}
+            onChange={(e) => setLang(e.target.value as 'ja' | 'en')}
+          >
+            <option value="ja">日本語</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
+      <p className="text-xs text-muted">
+        イベントIDは英小文字・数字・ハイフン（ランキングと会場限定装飾に使用）。難度を変えると設定ハッシュが変わり、
+        ランキングは別枠になります。
+        {ov.settings.demoMode ? 'いまは DEMO_MODE（モック決済・モックログイン）。' : '本番モード。'}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          className="sw-btn bg-amber px-3 text-navy"
+          onClick={() => void save()}
+          data-testid="next-save"
+        >
+          次の作戦に保存
+        </button>
+        {msg && <span role="status">{msg}</span>}
+      </div>
+    </section>
+  );
+}
+
+/** Venue screens follow these when pushed (each PC can still adjust locally with S). */
+function ArenaDisplayPanel({ ov, cmd }: { ov: Overview; cmd: Cmd }) {
+  const d = ov.snapshot.arenaDisplay;
+  const [renderer, setRenderer] = useState(d.renderer);
+  const [quality, setQuality] = useState(d.quality);
+  const [volume, setVolume] = useState(d.volume);
+  const [showQr, setShowQr] = useState(d.showQr);
+  const field = 'rounded border border-line bg-navy px-2 py-1';
+  return (
+    <section className="sw-panel flex flex-col gap-2 p-4 text-sm" data-testid="arena-display-panel">
+      <h2 className="font-black">会場画面の表示</h2>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2">
+          表示
+          <select
+            className={field}
+            value={renderer}
+            onChange={(e) => setRenderer(e.target.value as typeof renderer)}
+          >
+            <option value="auto">自動</option>
+            <option value="3d">3D</option>
+            <option value="2d">2D</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          品質
+          <select
+            className={field}
+            value={quality}
+            onChange={(e) => setQuality(e.target.value as typeof quality)}
+          >
+            <option value="auto">自動（低FPSで下げる）</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          音量 {Math.round(volume * 100)}%
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={showQr} onChange={(e) => setShowQr(e.target.checked)} />
+          参加QRを表示（通常はON）
+        </label>
+      </div>
+      <button
+        className="sw-btn self-start bg-teal px-3 text-navy"
+        onClick={() =>
+          void cmd({ command: 'SET_ARENA_DISPLAY', renderer, quality, volume, showQr })
+        }
+        data-testid="arena-display-apply"
+      >
+        全ての会場画面に適用
+      </button>
+    </section>
+  );
+}
+
+/** DEMO only: rehearse enemies and the finale without waiting for the raid to get there. */
+function RehearsalPanel({ cmd }: { cmd: Cmd }) {
+  return (
+    <section
+      className="sw-panel flex flex-col gap-2 p-4 text-sm md:col-span-2"
+      data-testid="rehearsal-panel"
+    >
+      <h2 className="font-black">リハーサル（DEMOのみ）</h2>
+      <p className="text-xs text-muted">
+        敵の出現はゲームに実際に作用します（このレイドはランキング対象外になります）。演出テストは会場画面で再生するだけで、ゲームには作用しません。
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ['SCOUT', '偵察機を出す'],
+            ['SIEGE', '砲撃機を出す'],
+            ['SABOTEUR', '妨害機を出す'],
+            ['BOSS', 'NULL COREを出す'],
+          ] as const
+        ).map(([kind, label]) => (
+          <button
+            key={kind}
+            className="sw-btn bg-navy-3 px-3"
+            onClick={() => void cmd({ command: 'DEMO_SPAWN', kind })}
+            data-testid={`demo-spawn-${kind}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ['RAID_START', '開幕'],
+            ['BOSS_ENTRANCE', 'ボス登場'],
+            ['SPECIAL_ACTIVATED', '神雷風陣・成功'],
+            ['SPECIAL_FALLBACK', '神雷風陣・不完全'],
+            ['SPECIAL_FAILED', '神雷風陣・失敗'],
+            ['VICTORY', '勝利'],
+            ['DEFEAT', '敗北'],
+          ] as const
+        ).map(([cue, label]) => (
+          <button
+            key={cue}
+            className="sw-btn bg-navy-3 px-3"
+            onClick={() => void cmd({ command: 'DEMO_ARENA_CUE', cue })}
+            data-testid={`demo-cue-${cue}`}
+          >
+            演出：{label}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -736,7 +1001,9 @@ function MonitorTab({ ov }: { ov: Overview }) {
         <ul>
           {ov.realtime.arenas.map((a) => (
             <li key={a.socketId}>
-              大画面 {a.renderer}/{a.quality} {a.fps.toFixed(0)}fps {a.frameMs.toFixed(1)}ms
+              大画面 {a.renderer}/{a.quality}
+              {a.autoQuality ? '（自動で品質低下中）' : ''} {a.fps.toFixed(0)}fps{' '}
+              {a.frameMs.toFixed(1)}ms
             </li>
           ))}
         </ul>
@@ -752,7 +1019,33 @@ function MonitorTab({ ov }: { ov: Overview }) {
           次の作戦の設定：{ov.nextConfig.version}（進行中の作戦には反映しません）
         </p>
       </div>
+      <div>
+        <h2 className="font-black">役割の偏り</h2>
+        <RoleBalance roles={ov.crew.roles} total={ov.crew.total} />
+        <p className="mt-1 text-muted">
+          イベント seq {ov.snapshot.lastSeq} · SYNC {ov.snapshot.sync} · 予備電源{' '}
+          {ov.snapshot.reserveEnergy}
+        </p>
+      </div>
     </section>
+  );
+}
+
+/** Seat spread: one seat over half the crew means the others are missing (warn). */
+function RoleBalance({ roles, total }: { roles: Record<string, number>; total: number }) {
+  return (
+    <ul data-testid="role-balance">
+      {ROLES.map((r) => {
+        const n = roles[r] ?? 0;
+        const share = total ? n / total : 0;
+        return (
+          <li key={r} className={share > 0.5 ? 'font-bold text-danger' : ''}>
+            {ROLE_LABELS[r].icon} {ROLE_LABELS[r].ja} {n}（{Math.round(share * 100)}%）
+            {share > 0.5 ? ' ⚠ 偏り' : n === 0 && total > 0 ? ' ・空席' : ''}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

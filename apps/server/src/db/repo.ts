@@ -55,6 +55,8 @@ export interface PilotRow {
   created_at: number;
   last_seen_at: number;
   deleted_at: number | null;
+  equipped_json: string;
+  show_avatar: number;
 }
 
 export interface SessionRow {
@@ -315,6 +317,8 @@ export class Repo {
       | 'pass_credits'
       | 'merged_into'
       | 'deleted_at'
+      | 'equipped_json'
+      | 'show_avatar'
     >,
   ): void {
     this.run(
@@ -359,6 +363,8 @@ export class Repo {
         | 'device_hash'
         | 'callsign_hidden'
         | 'merged_into'
+        | 'equipped_json'
+        | 'show_avatar'
       >
     >,
   ): void {
@@ -419,10 +425,11 @@ export class Repo {
   /** Account deletion: anonymise, keep aggregate raid records consistent. */
   deletePilot(id: string, now: number): void {
     this.run(
-      "UPDATE pilots SET callsign = 'deleted', callsign_hidden = 1, device_hash = NULL, deleted_at = ?, titles_json = '[]' WHERE id = ?",
+      "UPDATE pilots SET callsign = 'deleted', callsign_hidden = 1, device_hash = NULL, deleted_at = ?, titles_json = '[]', equipped_json = '{}', show_avatar = 0 WHERE id = ?",
       now,
       id,
     );
+    this.run('DELETE FROM pilot_cosmetics WHERE pilot_id = ?', id);
     this.run(
       'UPDATE sessions SET revoked_at = ? WHERE pilot_id = ? AND revoked_at IS NULL',
       now,
@@ -798,10 +805,45 @@ export class Repo {
       fromId,
     );
   }
+  // ---- cosmetics -------------------------------------------------------------------
+  /** Record newly unlocked items (idempotent). Returns the ids that were new. */
+  unlockCosmetics(pilotId: string, ids: string[], now: number, raidId: string | null): string[] {
+    const fresh: string[] = [];
+    for (const id of ids)
+      if (
+        this.run(
+          'INSERT OR IGNORE INTO pilot_cosmetics (pilot_id, cosmetic_id, unlocked_at, raid_id) VALUES (?, ?, ?, ?)',
+          pilotId,
+          id,
+          now,
+          raidId,
+        ) === 1
+      )
+        fresh.push(id);
+    return fresh;
+  }
+  pilotCosmetics(pilotId: string): Array<{ cosmetic_id: string; unlocked_at: number }> {
+    return this.all(
+      'SELECT cosmetic_id, unlocked_at FROM pilot_cosmetics WHERE pilot_id = ? ORDER BY unlocked_at',
+      pilotId,
+    );
+  }
+  /** Venue event ids the pilot flew at (passport history). */
+  pilotEvents(pilotId: string): string[] {
+    return this.all<{ event_id: string }>(
+      'SELECT DISTINCT event_id FROM passport_history WHERE pilot_id = ?',
+      pilotId,
+    ).map((r) => r.event_id);
+  }
   /** Guest merge: move history to the target pilot (skips raids both flew). */
   moveHistory(fromPilot: string, toPilot: string): void {
     this.run(
       'UPDATE OR IGNORE passport_history SET pilot_id = ? WHERE pilot_id = ?',
+      toPilot,
+      fromPilot,
+    );
+    this.run(
+      'UPDATE OR IGNORE pilot_cosmetics SET pilot_id = ? WHERE pilot_id = ?',
       toPilot,
       fromPilot,
     );

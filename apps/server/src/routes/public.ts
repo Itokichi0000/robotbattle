@@ -134,6 +134,27 @@ export function registerPublicRoutes(app: FastifyInstance, services: Services): 
 
   app.get('/api/me/passport', async (req) => pilots.passport(requirePilot(req)));
 
+  /**
+   * License card image (SVG). ?anonymous=1 prints the pseudonym, ?lang=en|ja.
+   * Served with a locked-down CSP: the SVG has no scripts or external refs.
+   */
+  app.get('/api/passport-card', async (req, reply) => {
+    const p = requirePilot(req);
+    const q = z
+      .object({ anonymous: z.enum(['0', '1']).optional(), lang: z.enum(['ja', 'en']).optional() })
+      .parse(req.query ?? {});
+    const svg = pilots.passportCard(p, { anonymous: q.anonymous === '1', locale: q.lang });
+    void reply
+      .header('Content-Type', 'image/svg+xml; charset=utf-8')
+      .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+      .header('Content-Disposition', 'inline; filename="sats-wars-pilot-license.svg"')
+      .header('Cache-Control', 'no-store');
+    return svg;
+  });
+
+  /** Titles and the cosmetic catalogue with what is unlocked and how to earn the rest. */
+  app.get('/api/me/achievements', async (req) => pilots.achievements(requirePilot(req)));
+
   app.post('/api/me/export', async (req) => pilots.export(requirePilot(req)));
 
   app.delete('/api/me', async (req, reply) => {

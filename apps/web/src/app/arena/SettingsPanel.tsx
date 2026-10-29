@@ -93,6 +93,14 @@ export function SettingsPanel({
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
+            checked={settings.autoQuality}
+            onChange={(e) => set('autoQuality', e.target.checked)}
+          />
+          低FPSで自動的に負荷を下げる（最後は2D）/ Auto-lower quality on low FPS
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
             checked={settings.reducedMotion}
             onChange={(e) => set('reducedMotion', e.target.checked)}
           />

@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import type {
+  AchievementsResponse,
   AvatarPreset,
   MeResponse,
   PassportResponse,
@@ -8,7 +9,23 @@ import type {
   RaidState,
   Role,
 } from '@sats-wars/shared';
-import { AVATAR_PRESETS, ROLES, rankFor, sanitizeNickname } from '@sats-wars/shared';
+import {
+  AVATAR_PRESETS,
+  COSMETICS,
+  COSMETIC_BY_ID,
+  TITLE_LABELS,
+  passportCardInput,
+  passportCardSvg,
+  unlockHint,
+  ROLES,
+  type CareerFacts,
+  type CosmeticSlot,
+  avatarLook,
+  normalizeEquipped,
+  rankFor,
+  sanitizeNickname,
+  unlockedCosmeticIds,
+} from '@sats-wars/shared';
 import type { WallClock } from '../clock';
 import type { AuthKind, PilotRow, Repo } from '../db/repo';
 import { AppError } from '../errors';
@@ -100,10 +117,43 @@ export class PilotService {
     });
   }
 
+  private facts(p: PilotRow): CareerFacts {
+    return {
+      sorties: p.sorties,
+      victories: p.victories,
+      rolesDone: p.roles_done.split(',').filter(Boolean).length,
+      rank: rankFor(p.rank_points).index,
+      titles: JSON.parse(p.titles_json) as string[],
+      events: this.repo.pilotEvents(p.id),
+    };
+  }
+
+  /**
+   * Unlocked cosmetics. The career decides; the table keeps when each item
+   * was first earned (and backfills pilots from before the table existed).
+   */
+  cosmetics(
+    p: PilotRow,
+    raidId: string | null = null,
+  ): PilotProfile['cosmetics'] & {
+    fresh: string[];
+  } {
+    const eligible = unlockedCosmeticIds(this.facts(p));
+    const fresh = this.repo.unlockCosmetics(p.id, eligible, this.now(), raidId);
+    const unlocked = this.repo.pilotCosmetics(p.id).map((r) => r.cosmetic_id);
+    const equipped = normalizeEquipped(
+      JSON.parse(p.equipped_json || '{}') as Record<string, string>,
+      unlocked,
+    );
+    return { unlocked, equipped, fresh };
+  }
+
   profile(p: PilotRow): PilotProfile {
+    const { unlocked, equipped } = this.cosmetics(p);
     return {
       pilotId: p.id,
       callsign: p.callsign,
+      pseudonym: pseudonym(p.code),
       avatar: (AVATAR_PRESETS as readonly string[]).includes(p.avatar)
         ? (p.avatar as AvatarPreset)
         : 'standard',
@@ -114,6 +164,8 @@ export class PilotService {
       victories: p.victories,
       titles: JSON.parse(p.titles_json) as string[],
       showNameOnArena: p.show_name === 1,
+      showAvatarOnArena: p.show_avatar === 1,
+      cosmetics: { unlocked, equipped },
       locale: p.locale === 'en' ? 'en' : 'ja',
       reducedMotion: p.reduced_motion === 1,
       assistMode: p.assist_mode === 1,
@@ -122,7 +174,25 @@ export class PilotService {
   }
 
   patch(p: PilotRow, patch: ProfilePatch): PilotProfile {
+    let equippedJson: string | undefined;
+    if (patch.equip) {
+      const { unlocked, equipped } = this.cosmetics(p);
+      const next: Record<string, string> = { ...equipped };
+      for (const [slot, id] of Object.entries(patch.equip)) {
+        if (!id) continue;
+        const def = COSMETIC_BY_ID[id];
+        // Only items of that slot the pilot has actually earned.
+        if (!def || def.slot !== slot || !unlocked.includes(id))
+          throw new AppError('BAD_REQUEST', 'その装飾はまだ解放されていません / Not unlocked yet');
+        next[slot as CosmeticSlot] = id;
+      }
+      equippedJson = JSON.stringify(next);
+    }
     this.repo.updatePilot(p.id, {
+      ...(equippedJson !== undefined ? { equipped_json: equippedJson } : {}),
+      ...(patch.showAvatarOnArena !== undefined
+        ? { show_avatar: patch.showAvatarOnArena ? 1 : 0 }
+        : {}),
       ...(patch.callsign !== undefined
         ? { callsign: sanitizeNickname(patch.callsign, p.code).nickname }
         : {}),
@@ -137,12 +207,13 @@ export class PilotService {
     return this.profile(fresh);
   }
 
-  /** Tell the running raid how this pilot may be named on public screens. */
+  /** Tell the running raid how this pilot may be named (and drawn) on public screens. */
   applyNamePolicy(p: PilotRow): void {
     this.opts.manager.current().setNamePolicy(p.id, {
       show: p.show_name === 1,
       hidden: p.callsign_hidden === 1,
       pseudonym: pseudonym(p.code),
+      look: p.show_avatar === 1 ? avatarLook(this.cosmetics(p).equipped) : null,
     });
   }
 
@@ -190,6 +261,46 @@ export class PilotService {
       rankNameJa: rank.ja,
       rankNameEn: rank.en,
       nextRankAt: rank.nextAt,
+    };
+  }
+
+  /** The shareable license image as SVG (spec F5 /api/passport-card). */
+  passportCard(p: PilotRow, o: { anonymous: boolean; locale?: 'ja' | 'en' }): string {
+    const locale = o.locale ?? (p.locale === 'en' ? 'en' : 'ja');
+    const info = this.opts.manager.eventInfo;
+    return passportCardSvg(
+      passportCardInput(this.passport(p), {
+        anonymous: o.anonymous,
+        locale,
+        now: this.now(),
+        venueName: info.venueName || undefined,
+      }),
+    );
+  }
+
+  achievements(p: PilotRow): AchievementsResponse {
+    const locale = p.locale === 'en' ? 'en' : 'ja';
+    const { equipped } = this.cosmetics(p);
+    const when = new Map(this.repo.pilotCosmetics(p.id).map((r) => [r.cosmetic_id, r.unlocked_at]));
+    return {
+      titles: (JSON.parse(p.titles_json) as string[]).map((code) => ({
+        code,
+        ja: TITLE_LABELS[code]?.ja ?? code,
+        en: TITLE_LABELS[code]?.en ?? code,
+      })),
+      cosmetics: COSMETICS.map((c) => ({
+        id: c.id,
+        slot: c.slot,
+        ja: c.ja,
+        en: c.en,
+        color: c.color,
+        accent: c.accent,
+        rarity: c.rarity,
+        unlocked: when.has(c.id),
+        unlockedAt: when.get(c.id) ?? null,
+        equipped: equipped[c.slot] === c.id,
+        hint: unlockHint(c.unlock, locale),
+      })),
     };
   }
 
@@ -289,6 +400,7 @@ export class PilotService {
         const points =
           row.rank_points + 1 + (won ? 2 : 0) + (specialPilots.has(pilot.pilotId) ? 1 : 0);
         this.repo.recordSortie(pilot.pilotId, won, [...roles].join(','), [...titles], points);
+        // History first: a venue event in this raid counts for event-limited items.
         this.repo.insertPassport({
           pilot_id: pilot.pilotId,
           event_id: this.opts.manager.eventId,
@@ -300,6 +412,7 @@ export class PilotService {
           titles_json: JSON.stringify(earned),
           created_at: now,
         });
+        this.cosmetics(this.repo.getPilot(pilot.pilotId)!, state.raidId);
       }
     });
   }

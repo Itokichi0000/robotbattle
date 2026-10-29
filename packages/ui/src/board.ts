@@ -83,6 +83,17 @@ export function choiceOptions(role: Role, b: Board, L: Lx): ChoiceOption[] {
           });
         }
       }
+      // Nothing to shoot: the seat charges Raijin's thunder drums (D-053).
+      if (!out.length && b.config.gunner.chargeEnergy > 0)
+        out.push({
+          key: 'charge',
+          label: L('⚡ 雷鼓チャージ', '⚡ Charge the thunder drums'),
+          hint: L(
+            '敵がいない間に雷神へエネルギー（満タンなら予備電源へ）',
+            'No enemy yet: energy to Raijin (reserve when full)',
+          ),
+          choice: {},
+        });
       return out.slice(0, 6);
     }
     case 'GUARDIAN': {
@@ -198,16 +209,23 @@ export function effectSentence(effect: TaskEffect | null, L: Lx): string {
     case 'DAMAGE': {
       const name = L(ENEMY_LABELS[effect.enemyKind].ja, ENEMY_LABELS[effect.enemyKind].en);
       const wp = L(WEAKPOINT_LABELS[effect.weakpoint].ja, WEAKPOINT_LABELS[effect.weakpoint].en);
+      if (effect.note === 'BARRIER' && effect.amount === 0)
+        return L(
+          `${name}のバリアに阻まれた ― 最終決戦まで腕・脚を狙え`,
+          `The ${name} barrier held — aim at arms and legs until the finale`,
+        );
       const base = L(
         `雷神が${name}の${wp}に${Math.round(effect.amount)}ダメージ`,
         `Raijin hit the ${name} ${wp} for ${Math.round(effect.amount)}`,
       );
       const note =
-        effect.note === 'WEAKEN'
-          ? L('（攻撃が弱まった）', ' (attacks weakened)')
-          : effect.note === 'DELAY'
-            ? L('（攻撃を遅らせた）', ' (attack delayed)')
-            : '';
+        effect.note === 'BARRIER'
+          ? L('（バリア展開！最終決戦まで削り切れない）', ' (barrier up until the finale)')
+          : effect.note === 'WEAKEN'
+            ? L('（攻撃が弱まった）', ' (attacks weakened)')
+            : effect.note === 'DELAY'
+              ? L('（攻撃を遅らせた）', ' (attack delayed)')
+              : '';
       return base + note + (effect.defeated ? L(' ― 撃破！', ' — destroyed!') : '');
     }
     case 'SHIELD':
