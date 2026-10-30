@@ -10,7 +10,7 @@ import path from 'node:path';
 import { chromium, devices, type Page } from '@playwright/test';
 import { signedCallback } from '../../apps/server/src/testWallet';
 import { solvePuzzle } from '../../packages/game-engine/src/router';
-import type { PowerLane, PublicMatchState } from '../../packages/shared/src/index';
+import type { PowerLane, PublicMatchState, RouterPuzzle } from '../../packages/shared/src/index';
 
 const base = process.argv[2] ?? 'http://localhost:4400';
 const out = path.resolve(process.argv[3] ?? 'docs/qa/phase2');
@@ -75,11 +75,55 @@ async function frozenShot(name: string) {
   if (live && !s.paused) await op.getByRole('button', { name: /RESUME/ }).click();
 }
 
+/**
+ * A phone screenshot with the fight held still. Each one takes ~15 s next to the software-WebGL
+ * big screen, and a live wave kept running meanwhile (cities fell while nobody could act).
+ */
+async function stillShot(page: Page, name: string) {
+  const s = await state();
+  const live = ['WAVE_1', 'WAVE_2', 'BOSS'].includes(s.phase) && !s.paused;
+  if (live) await op.getByRole('button', { name: /PAUSE/ }).click();
+  await page.screenshot({ path: path.join(out, name) });
+  if (live) await op.getByRole('button', { name: /RESUME/ }).click();
+}
+
+/**
+ * Turns the router tiles with the fight paused. Software WebGL in this container makes each
+ * tap slow; without the pause a cut circuit stayed open for a minute and the wave was lost
+ * before CONNECT. Taps are client-side only (the overlay is skipped with dispatchEvent);
+ * the route itself is sent after RESUME, like a real pilot.
+ */
+async function turnTiles(puzzle: RouterPuzzle, target: number[]) {
+  const wasPaused = (await state()).paused;
+  if (!wasPaused) await op.getByRole('button', { name: /PAUSE/ }).click();
+  for (let i = 0; i < 9; i++) {
+    const turns = (((target[i]! - puzzle.tiles[i]!.rot) % 4) + 4) % 4;
+    for (let k = 0; k < turns; k++)
+      await router.getByRole('button', { name: `タイル ${i + 1} を回す` }).dispatchEvent('click');
+  }
+  if (!wasPaused) await op.getByRole('button', { name: /RESUME/ }).click();
+  await sleep(600);
+}
+
+/**
+ * Hands a seat to AUTO SUPPORT once its phone shots are done. A scripted phone that just sits
+ * there is a pilot who stopped playing, and half a crew of those loses the wave.
+ */
+async function kick(seatLabel: RegExp) {
+  await op
+    .getByRole('row')
+    .filter({ hasText: seatLabel })
+    .getByRole('button', { name: 'KICK' })
+    .click({ timeout: 5_000 })
+    .catch(() => undefined);
+}
+
 async function phone(): Promise<Page> {
   const ctx = await browser.newContext({ ...devices['iPhone 13'], baseURL: base });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => log('phone error', e.message.slice(0, 200)));
-  await p.goto('/pilot/');
+  // capture=1 hides the pause overlay: slow shots are taken with the match paused.
+  await p.goto('/pilot/?capture=1');
   return p;
 }
 
@@ -113,7 +157,9 @@ await gunner.screenshot({
   path: path.join(out, '12_phone_seat_select_callsign.png'),
   fullPage: true,
 });
-await board(gunner, /砲撃 右/);
+// The wallet-authenticated pilot flies ENGINEER A (and later sends the GRID PULSE); both
+// gunners stay with DEMO BOTS so the capture crew can actually hold the line.
+await board(gunner, /整備 A/);
 
 const guest = async (seat: RegExp) => {
   const p = await phone();
@@ -123,16 +169,33 @@ const guest = async (seat: RegExp) => {
 };
 const power = await guest(/電力 A/);
 const router = await guest(/電力 B/);
-const engineer = await guest(/整備 A/);
+const engineer = gunner;
 
 await op.getByLabel(/DEMO BOTS/).check();
+// DEMO BOTS start a quiet lobby after 12 s, and the software-WebGL lobby shot takes longer
+// than that: hold the sortie paused from its first wave until the lobby shots are done.
+let holding = true;
+const holder = (async () => {
+  while (holding) {
+    const s0 = await state();
+    if (s0.phase === 'WAVE_1' && !s0.paused)
+      await op
+        .getByRole('button', { name: /PAUSE/ })
+        .click({ timeout: 2_000 })
+        .catch(() => undefined);
+    await sleep(200);
+  }
+})();
 await sleep(4_000);
 await display.screenshot({ path: path.join(out, '01_display_lobby_bots.png'), ...SHOT });
 await op.screenshot({ path: path.join(out, '30_operator_lobby.png'), fullPage: true });
 log('lobby captured');
+holding = false;
+await holder;
 
 if ((await state()).phase === 'LOBBY') await op.getByRole('button', { name: /START/ }).click();
 while ((await state()).phase !== 'WAVE_1') await sleep(500);
+if ((await state()).paused) await op.getByRole('button', { name: /RESUME/ }).click();
 await sleep(2_000);
 
 // POWER A: one-tap plan.
@@ -141,87 +204,122 @@ await sleep(300);
 await frozenShot('02_display_power_routed.png');
 await power.getByRole('button', { name: '武器系 を5%上げる' }).click();
 await power.getByRole('button', { name: '機動系 を5%下げる' }).click();
-await power.screenshot({ path: path.join(out, '13_phone_power_a.png') });
+await stillShot(power, '13_phone_power_a.png');
 log('power captured');
+await kick(/POWER A/);
 
-// Shared energy pulse early in WAVE 1, while CHARGE still has room (refused when full).
-await gunner.getByRole('button', { name: '共有エネルギー' }).click();
-await sleep(800);
-await gunner.screenshot({ path: path.join(out, '18_phone_pulse_terms.png') });
-await gunner.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
-await sleep(1_000);
-await gunner.screenshot({ path: path.join(out, '19_phone_pulse_virtual_invoice.png') });
-await op.screenshot({ path: path.join(out, '31_operator_payments_pending.png'), fullPage: true });
-await op.locator('.payments').getByRole('button', { name: 'SETTLE' }).click();
-await sleep(700);
-await frozenShot('05_display_sats_pulse.png');
-await sleep(1_500);
-await gunner.screenshot({ path: path.join(out, '20_phone_pulse_applied.png') });
-await gunner
-  .getByRole('button', { name: '閉じる' })
-  .click({ timeout: 5_000 })
-  .catch(() => undefined);
-log('pulse captured');
+// Demo cashier off: VIRTUAL pulses confirm themselves (operator opt-in, still VIRTUAL).
+await op.getByLabel(/VIRTUAL を自動確定/).check();
 
 let shotRouter = false;
 let shotRouterSolved = false;
+let shotBlackout = false;
+let shotReroute = false;
 let shotEngineer = false;
 let shotOdReady = false;
 let shotOdFired = false;
 let shotBoss = false;
 let lastOverdrives = 0;
-const deadline = Date.now() + 360_000;
+let kickedEngineer = false;
+// Generous: every slow shot pauses the match, so a sortie takes far longer than its 3.5 min.
+const deadline = Date.now() + 1_200_000;
 while (Date.now() < deadline) {
   const s = await state();
   if (['VICTORY', 'DEFEAT', 'RESULTS'].includes(s.phase)) break;
+  // First REACTOR BLACKOUT: the GRID PULSE moment from the gunner's phone.
+  if (s.crisis && !shotBlackout) {
+    await sleep(600);
+    // Hold the fight still for the whole GRID PULSE flow: a pause keeps the match in combat,
+    // so the pulse still lands, but the wave cannot end while the phones are being shot.
+    await op.getByRole('button', { name: /PAUSE/ }).click();
+    await sleep(1_500);
+    await engineer.screenshot({ path: path.join(out, '18_phone_blackout_banner.png') });
+    await frozenShot('05_display_blackout.png');
+    await engineer.getByRole('button', { name: /GRID PULSE で即時復旧/ }).click();
+    await sleep(800);
+    await engineer.screenshot({ path: path.join(out, '19_phone_grid_pulse_sheet.png') });
+    const pulses = s.stats.pulses;
+    await engineer.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
+    for (let i = 0; i < 40 && (await state()).stats.pulses === pulses; i++) await sleep(250);
+    await sleep(400);
+    await engineer.screenshot({ path: path.join(out, '20_phone_pulse_landed.png') });
+    await frozenShot('05b_display_lightning_pulse.png');
+    await op.screenshot({ path: path.join(out, '31_operator_payments.png'), fullPage: true });
+    await engineer
+      .getByRole('button', { name: '閉じる' })
+      .click({ timeout: 5_000 })
+      .catch(() => undefined);
+    await op.getByRole('button', { name: /RESUME/ }).click();
+    if ((await state()).stats.pulses === pulses) throw new Error('GRID PULSE did not land');
+    shotBlackout = true;
+    log('blackout + pulse captured');
+    continue;
+  }
+  // A later blackout: POWER B's phone re-routes the core instead.
+  if (s.crisis && shotBlackout && !shotReroute && s.seats.POWER_ROUTER.bot === false) {
+    await sleep(1_500);
+    await stillShot(router, '15b_phone_router_blackout.png');
+    const target = solvePuzzle(s.crisis.puzzle);
+    if (target) {
+      await turnTiles(s.crisis.puzzle, target);
+      await router.getByRole('button', { name: /接続する/ }).click();
+      await sleep(500);
+      await frozenShot('05c_display_core_rerouted.png');
+      shotReroute = true;
+      log('blackout re-route captured');
+    }
+    continue;
+  }
   const cut = LANES.find((l) => s.circuits[l].broken);
-  if (cut && !shotRouterSolved) {
+  // POWER B keeps re-routing every overload (a person who stops leaves the lane cut for good).
+  if (cut && !s.crisis) {
     const puzzle = s.circuits[cut].puzzle!;
-    await router.getByRole('tab', { name: new RegExp(LANE_JA[cut]) }).click();
+    // Paused for the slow shots and taps; the route itself is sent after RESUME.
+    await op.getByRole('button', { name: /PAUSE/ }).click();
+    await router.getByRole('tab', { name: new RegExp(LANE_JA[cut]) }).dispatchEvent('click');
     if (!shotRouter) {
+      await sleep(600);
       await router.screenshot({ path: path.join(out, '14_phone_router_overload.png') });
       await frozenShot('03_display_overload.png');
       shotRouter = true;
     }
     const target = solvePuzzle(puzzle);
     if (target) {
-      for (let i = 0; i < 9; i++) {
-        const turns = (((target[i]! - puzzle.tiles[i]!.rot) % 4) + 4) % 4;
-        for (let k = 0; k < turns; k++)
-          await router.getByRole('button', { name: `タイル ${i + 1} を回す` }).click();
-      }
-      await router.screenshot({ path: path.join(out, '15_phone_router_connected.png') });
+      await turnTiles(puzzle, target);
+      if (!shotRouterSolved)
+        await router.screenshot({ path: path.join(out, '15_phone_router_connected.png') });
+    }
+    await op.getByRole('button', { name: /RESUME/ }).click();
+    await sleep(600);
+    if (target) {
       await router.getByRole('button', { name: /接続する/ }).click();
+      if (!shotRouterSolved) log('router solved');
       shotRouterSolved = true;
-      log('router solved');
     }
   }
   const eng = s.engineers.ENGINEER_LEGS;
   if (
     !shotEngineer &&
     !eng.job &&
-    (s.parts.LEG_L < 95 || s.parts.LEG_R < 95) &&
+    (s.parts.LEG_L < 100 || s.parts.LEG_R < 100) &&
     s.t >= eng.cooldownUntil
   ) {
-    await engineer.screenshot({ path: path.join(out, '16_phone_engineer_scan.png') });
-    await engineer
-      .getByRole('button', { name: /修理実行/ })
-      .click()
-      .catch(() => undefined);
-    await sleep(400);
-    await engineer
-      .getByRole('button', { name: 'ボルト 1' })
-      .click()
-      .catch(() => undefined);
-    await engineer.screenshot({ path: path.join(out, '17_phone_engineer_bolts.png') });
-    await engineer
-      .getByRole('button', { name: 'ボルト 2' })
-      .click()
-      .catch(() => undefined);
-    await engineer
-      .getByRole('button', { name: 'ボルト 3' })
-      .click()
-      .catch(() => undefined);
+    const repair = engineer.getByRole('button', { name: /修理実行/ });
+    if (await repair.isEnabled({ timeout: 2_000 }).catch(() => false)) {
+      await stillShot(engineer, '16_phone_engineer_scan.png');
+      await repair.click({ timeout: 3_000 }).catch(() => undefined);
+      await sleep(400);
+      // Bolts are turned by a circular drag; Enter is the accessible equivalent.
+      const bolt = (n: number) =>
+        engineer
+          .getByRole('button', { name: `ボルト ${n}` })
+          .press('Enter', { timeout: 3_000 })
+          .catch(() => undefined);
+      await bolt(1);
+      await stillShot(engineer, '17_phone_engineer_bolts.png');
+      await bolt(2);
+      await bolt(3);
+    } else continue;
     await sleep(300);
     await frozenShot('04_display_repair.png');
     shotEngineer = true;
@@ -237,9 +335,9 @@ while (Date.now() < deadline) {
     shotBoss = true;
   }
   if (!shotOdReady && s.overdrive.status !== 'IDLE') {
-    await power.screenshot({ path: path.join(out, '21_phone_overdrive_call.png') });
+    await stillShot(router, '21_phone_overdrive_call.png');
     await frozenShot('07_display_overdrive_ready.png');
-    await power
+    await router
       .getByRole('button', { name: /SYNC NOW/ })
       .click()
       .catch(() => undefined);
@@ -257,14 +355,27 @@ while (Date.now() < deadline) {
     shotOdFired = true;
     log('overdrive fired captured');
   }
+  if (shotBlackout && (shotEngineer || s.phase === 'BOSS') && !kickedEngineer) {
+    await kick(/ENGINEER A/);
+    kickedEngineer = true;
+  }
   lastOverdrives = s.stats.overdrives;
   await sleep(250);
 }
-log({ shotRouter, shotRouterSolved, shotEngineer, shotBoss, shotOdReady, shotOdFired });
+log({
+  shotRouter,
+  shotRouterSolved,
+  shotBlackout,
+  shotReroute,
+  shotEngineer,
+  shotBoss,
+  shotOdReady,
+  shotOdFired,
+});
 while (!['RESULTS'].includes((await state()).phase)) await sleep(1_000);
 await sleep(3_000);
 await display.screenshot({ path: path.join(out, '09_display_results.png'), ...SHOT });
-await power.screenshot({ path: path.join(out, '22_phone_debrief.png') });
+await router.screenshot({ path: path.join(out, '22_phone_debrief.png') });
 await op.screenshot({ path: path.join(out, '32_operator_after.png'), fullPage: true });
 const s = await state();
 console.log(JSON.stringify({ result: s.result, stats: s.stats }, null, 2));

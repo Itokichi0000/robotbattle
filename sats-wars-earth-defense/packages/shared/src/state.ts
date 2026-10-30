@@ -179,6 +179,15 @@ export interface MatchStats {
   overdrives: number;
   overdriveFails: number;
   pulses: number;
+  /** REACTOR BLACKOUT crises: started, and how each ended. */
+  blackouts: number;
+  blackoutsByPulse: number;
+  blackoutsByRoute: number;
+  blackoutsFailed: number;
+  /** Shots released the moment the charge completed. */
+  perfectShots: number;
+  /** LINK CHAINs that reached all four systems. */
+  fullLinks: number;
 }
 
 export type MatchOutcome = 'VICTORY' | 'DEFEAT';
@@ -190,15 +199,32 @@ export interface MatchResult {
   at: number;
 }
 
-export interface RecentSuccess {
-  t: number;
-  seatId: SeatId;
-  role: 'GUNNER' | 'DEFENSE' | 'POWER' | 'ENGINEER';
-}
-
 export interface ActionRecord {
   accepted: boolean;
   reason: string | null;
+}
+
+/**
+ * LINK CHAIN (spec §6.6, made visible): a success by one system opens the link; each success
+ * by a different system within the window extends it and pays SYNC. Four systems = FULL LINK.
+ */
+export interface LinkState {
+  roles: RoleId[];
+  seats: SeatId[];
+  expiresAt: number;
+}
+
+/**
+ * REACTOR BLACKOUT: the reactor goes dark (no energy regen) and the crew has until `endsAt`.
+ * POWER B can re-route the core circuit, or anyone can send a GRID PULSE (Lightning). With
+ * nobody on POWER B, AUTO SUPPORT restores it at `autoAt`.
+ */
+export interface CrisisState {
+  kind: 'BLACKOUT';
+  startedAt: number;
+  endsAt: number;
+  autoAt: number | null;
+  puzzle: RouterPuzzle;
 }
 
 export interface MatchState {
@@ -234,8 +260,13 @@ export interface MatchState {
   shields: Record<ShieldSeatId, ShieldState>;
   teamSync: number;
   teamCapacitor: number;
-  recentSuccesses: RecentSuccess[];
   lastComboAt: number;
+  link: LinkState | null;
+  crisis: CrisisState | null;
+  /** Waves whose scheduled crisis has already happened. */
+  crisisFired: Array<'WAVE_1' | 'WAVE_2' | 'BOSS'>;
+  /** Energy regen is boosted until then (after a GRID PULSE or a crew re-route). */
+  overchargeUntil: number;
   spawn: { scriptedDone: number; nextSpawnAt: number };
   circuits: Record<PowerLane, CircuitState>;
   /** Next circuit overload (match clock); null when none is scheduled in this wave. */
@@ -322,6 +353,9 @@ export interface PublicMatchState {
   overdrive: OverdriveState;
   teamSync: number;
   teamCapacitor: number;
+  link: LinkState | null;
+  crisis: CrisisState | null;
+  overchargeUntil: number;
   stats: MatchStats;
   result: MatchResult | null;
   /** Balance numbers clients need to draw gauges (costs, cooldowns). */
@@ -345,5 +379,10 @@ export interface PublicMatchState {
     powerLaneMax: number;
     pulseGain: number;
     pulseAmountSats: number;
+    linkWindowMs: number;
+    /** Damage bonus per extra system already in the LINK (gunner shots). */
+    linkDamagePerRole: number;
+    /** FIRE within this many ms after the charge completes = PERFECT SHOT. */
+    perfectShotMs: number;
   };
 }

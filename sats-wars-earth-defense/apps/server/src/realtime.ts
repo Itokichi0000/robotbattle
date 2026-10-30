@@ -475,6 +475,8 @@ export class Realtime {
         return this.payments.enableLive(cmd.confirm);
       case 'PAYMENTS_DISABLE':
         return this.payments.disable();
+      case 'SET_AUTO_SETTLE_VIRTUAL':
+        return this.payments.setAutoSettleVirtual(cmd.enabled);
     }
   }
 

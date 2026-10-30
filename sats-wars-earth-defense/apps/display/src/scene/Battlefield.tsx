@@ -3,6 +3,7 @@ import { COLORS } from '@swed/ui-tokens';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { store } from '../net';
+import { anim } from './anim';
 import { box, cylinder, ngon } from './geometry';
 import { getMaterials } from './materials';
 
@@ -233,16 +234,45 @@ function Skyline() {
 
 export function BattlefieldLights({ shadows }: { shadows: boolean }) {
   const boss = useRef<THREE.PointLight>(null);
-  useFrame((s) => {
+  const hemi = useRef<THREE.HemisphereLight>(null);
+  const key = useRef<THREE.DirectionalLight>(null);
+  const rim = useRef<THREE.DirectionalLight>(null);
+  const alarm = useRef<THREE.PointLight>(null);
+  const surge = useRef<THREE.PointLight>(null);
+  useFrame((s, dt) => {
     const has = !!store.getState().snap?.state.boss;
     if (boss.current)
       boss.current.intensity = has ? 9000 + Math.sin(s.clock.elapsedTime * 2) * 1500 : 0;
+    // REACTOR BLACKOUT: the mech's own lights die and a red emergency beacon turns (≤1 Hz).
+    anim.blackout += (anim.blackoutTarget - anim.blackout) * Math.min(1, dt * 2.5);
+    const b = anim.blackout;
+    if (hemi.current) hemi.current.intensity = 0.55 * (1 - 0.65 * b);
+    if (key.current) key.current.intensity = 1.6 * (1 - 0.55 * b);
+    if (rim.current) rim.current.intensity = 2.4 * (1 - 0.75 * b);
+    if (alarm.current) {
+      const t = s.clock.elapsedTime;
+      alarm.current.position.set(Math.sin(t * 2.4) * 9, 16, Math.cos(t * 2.4) * 9);
+      alarm.current.intensity = b * 1800;
+    }
+    // OVERCHARGE: a cool surge light breathing on the chest reactor.
+    if (surge.current)
+      surge.current.intensity = anim.overcharge ? 900 + Math.sin(s.clock.elapsedTime * 4) * 250 : 0;
   });
   return (
     <>
-      <hemisphereLight args={['#2a4258', '#06090c', 0.55]} />
+      <hemisphereLight ref={hemi} args={['#2a4258', '#06090c', 0.55]} />
+      <pointLight ref={alarm} intensity={0} distance={60} decay={2} color={COLORS.danger} />
+      <pointLight
+        ref={surge}
+        position={[0, 10, -4]}
+        intensity={0}
+        distance={40}
+        decay={2}
+        color="#9ff3ff"
+      />
       {/* Cold moon key from above-left-behind: carves the armour. */}
       <directionalLight
+        ref={key}
         position={[-40, 70, 30]}
         intensity={1.6}
         color="#bcd2ff"
@@ -258,7 +288,7 @@ export function BattlefieldLights({ shadows }: { shadows: boolean }) {
         shadow-bias={-0.0004}
       />
       {/* Strong cyan rim from the front-right so the silhouette reads against the sky. */}
-      <directionalLight position={[30, 20, -40]} intensity={2.4} color="#7fdcff" />
+      <directionalLight ref={rim} position={[30, 20, -40]} intensity={2.4} color="#7fdcff" />
       {/* Warm city bounce from below the horizon. */}
       <pointLight
         position={[0, 4, -120]}

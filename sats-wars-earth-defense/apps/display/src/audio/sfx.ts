@@ -150,6 +150,7 @@ class Sfx {
           this.tone('sawtooth', 2400, 260, e.auto ? 0.08 : 0.18, 0.002, 0.18);
           this.hiss('bandpass', 5000, 1200, 0.12, 0.002, 0.12);
         }
+        if (e.perfect && !e.auto) this.tone('sine', 2093, 2093, 0.06, 0.003, 0.35, 0.04);
         break;
       case 'weapon_charged':
         if (this.gate(`charge${e.seatId}`, 600)) this.tone('sine', 140, 460, 0.06, 0.25, 0.25);
@@ -186,10 +187,13 @@ class Sfx {
         this.tone('square', 660, 660, 0.05, 0.005, 0.11, 0.15);
         break;
       case 'team_combo':
-        if (!this.gate('combo', 500)) return;
-        [523.3, 659.3, 784, 1046.5].forEach((f, i) =>
-          this.tone('sine', f, f, 0.08, 0.01, 0.6, i * 0.07),
-        );
+        if (!this.gate('combo', 400)) return;
+        // One rising step per link; FULL LINK plays the whole run, louder.
+        [523.3, 659.3, 784, 1046.5]
+          .slice(0, Math.max(2, e.link))
+          .forEach((f, i) =>
+            this.tone('sine', f, f, e.link >= 4 ? 0.11 : 0.07, 0.01, 0.6, i * 0.07),
+          );
         break;
       case 'seat_assigned':
         this.tone('sine', 660, 990, 0.08, 0.01, 0.2);
@@ -228,7 +232,32 @@ class Sfx {
       case 'circuit_restored':
         if (this.gate('restored', 400)) this.tone('triangle', 440, 880, 0.08, 0.01, 0.35);
         break;
+      case 'crisis_started':
+        // Reactor power-down: a falling sweep, then a slow two-tone alarm.
+        this.tone('sawtooth', 420, 38, 0.18, 0.02, 1.4);
+        this.hiss('lowpass', 1600, 60, 0.25, 0.01, 1.3);
+        [0, 0.7, 1.4].forEach((at) => {
+          this.tone('square', 620, 620, 0.05, 0.01, 0.28, at + 0.4);
+          this.tone('square', 470, 470, 0.05, 0.01, 0.28, at + 0.72);
+        });
+        break;
+      case 'crisis_resolved':
+        // Power-up: a rising sweep back to the reactor hum.
+        this.tone('sawtooth', 50, 520, e.by === 'AUTO' ? 0.08 : 0.15, 0.6, 0.4);
+        if (e.by === 'ROUTE')
+          [523.3, 784].forEach((f, i) =>
+            this.tone('triangle', f, f, 0.08, 0.01, 0.5, 0.6 + i * 0.1),
+          );
+        break;
+      case 'crisis_failed':
+        this.tone('sine', 60, 22, 0.9, 0.005, 1.6);
+        this.hiss('lowpass', 1800, 70, 0.6, 0.005, 1.4);
+        break;
       case 'sats_pulse_settled':
+        // Lightning strike first (crack + rolling thunder), then the shared-energy chime.
+        this.hiss('highpass', 9000, 2500, e.crisis ? 0.5 : 0.35, 0.002, 0.25);
+        this.tone('sine', 55, 30, e.crisis ? 0.8 : 0.5, 0.02, 1.6, 0.05);
+        this.hiss('lowpass', 900, 80, e.crisis ? 0.45 : 0.3, 0.05, 1.8, 0.05);
         // The shared pulse: a bright rising chime on top of a low swell.
         this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
         [784, 1046.5, 1318.5].forEach((f, i) =>

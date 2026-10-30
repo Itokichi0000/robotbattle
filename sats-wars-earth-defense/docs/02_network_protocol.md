@@ -40,15 +40,16 @@
 
 ### 操作の payload（`action.actionType`）
 
-| actionType      | 席                 | payload                                                                     | 主な拒否理由                                       |
-| --------------- | ------------------ | --------------------------------------------------------------------------- | -------------------------------------------------- |
-| `LOCK` / `FIRE` | GUNNER_L/R         | `{ targetId }` / `{}`                                                       | `NO_TARGET` `CHARGING` `NO_ENERGY` `WEAPON_BROKEN` |
-| `DEPLOY_SHIELD` | SHIELD_L/R         | `{ dir }`（担当方向のみ）                                                   | `BAD_DIRECTION` `COOLDOWN` `NO_ENERGY`             |
-| `SET_POWER`     | POWER_CORE         | `{ distribution: {weapon,shield,mobility,repair}, baseVersion }`（合計100） | `STALE_VERSION` `BAD_DISTRIBUTION`                 |
-| `ROUTE_SUBMIT`  | POWER_ROUTER       | `{ lane, rotations: number[9] }`                                            | `CIRCUIT_OK` `ROUTE_INCOMPLETE`                    |
-| `REPAIR_START`  | ENGINEER_LEGS/CORE | `{ part }`（担当区画のみ）                                                  | `NOT_YOUR_PART` `PART_OK` `COOLDOWN` `NO_ENERGY`   |
-| `REPAIR_FINISH` | ENGINEER_LEGS/CORE | `{ part, order: number[] }`（ボルトを締めた順）                             | `NO_JOB` `JOB_EXPIRED` `WRONG_ORDER`               |
-| `SYNC_NOW`      | 全席               | `{}`                                                                        | `OVERDRIVE_NOT_READY`                              |
+| actionType       | 席                 | payload                                                                     | 主な拒否理由                                       |
+| ---------------- | ------------------ | --------------------------------------------------------------------------- | -------------------------------------------------- |
+| `LOCK` / `FIRE`  | GUNNER_L/R         | `{ targetId }` / `{}`                                                       | `NO_TARGET` `CHARGING` `NO_ENERGY` `WEAPON_BROKEN` |
+| `DEPLOY_SHIELD`  | SHIELD_L/R         | `{ dir }`（担当方向のみ）                                                   | `BAD_DIRECTION` `COOLDOWN` `NO_ENERGY`             |
+| `SET_POWER`      | POWER_CORE         | `{ distribution: {weapon,shield,mobility,repair}, baseVersion }`（合計100） | `STALE_VERSION` `BAD_DISTRIBUTION`                 |
+| `ROUTE_SUBMIT`   | POWER_ROUTER       | `{ lane, rotations: number[9] }`                                            | `CIRCUIT_OK` `ROUTE_INCOMPLETE`                    |
+| `REPAIR_START`   | ENGINEER_LEGS/CORE | `{ part }`（担当区画のみ）                                                  | `NOT_YOUR_PART` `PART_OK` `COOLDOWN` `NO_ENERGY`   |
+| `REPAIR_FINISH`  | ENGINEER_LEGS/CORE | `{ part, order: number[] }`（ボルトを締めた順）                             | `NO_JOB` `JOB_EXPIRED` `WRONG_ORDER`               |
+| `SYNC_NOW`       | 全席               | `{}`                                                                        | `OVERDRIVE_NOT_READY`                              |
+| `BLACKOUT_ROUTE` | POWER_ROUTER       | `{ rotations: number[9] }`（炉心回路）                                      | `NO_CRISIS` `ROUTE_INCOMPLETE`                     |
 
 - `PublicMatchState` に内部 `pilotId`・乱数状態・冪等ログは含めない（エンジンのテストとサーバー統合テストで検査）。
 - `seq` は試合ごとに単調増加。クライアントの `MatchStore` は同じ `seq` を二度配らない。
@@ -71,7 +72,10 @@
 `shield_deployed` `threat_blocked` `threat_intercepted` `incoming_hit` `city_damaged` `city_lost` `part_damaged`
 `part_repaired` `team_combo` `match_result` `power_routed` `circuit_overload` `circuit_restored` `repair_started`
 `overdrive_ready` `overdrive_window` `overdrive_sync` `overdrive_fired` `overdrive_failed` `sats_pulse_settled`。
-`sats_pulse_settled` は `{ seatId, gain, virtual }` のみ（金額・支払者の情報は載せない）。
+`crisis_started` `crisis_resolved { by: PULSE | ROUTE | AUTO }` `crisis_failed` も配信。`weapon_fired` は `perfect` と `link`、
+`team_combo` は `link`（2〜4）を持つ。公開状態に `link`（現在の LINK）・`crisis`（炉心パズル含む）・`overchargeUntil`。
+`sats_pulse_settled` は `{ seatId, gain, virtual, settleMs, crisis, overchargeUntil }`（金額・支払者の情報は載せない。
+`settleMs` は実決済だけの「請求→着金」実測）。
 
 ## HTTP
 

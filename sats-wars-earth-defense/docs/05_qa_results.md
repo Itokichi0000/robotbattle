@@ -92,30 +92,38 @@ CINEMATIC→SAFE に下がることを運営画面の DISPLAY 欄で確認。**�
 コマンド：`pnpm lint`（警告0）、`pnpm typecheck`（scripts も対象）、`pnpm format:check`、`pnpm test`、`pnpm build`、`pnpm e2e`、
 ルートの秘密情報スキャン（`node tools/security/scan-secrets.mjs`）すべて成功。
 
-### 画面キャプチャ（Phase 2〜4）
+### 画面キャプチャ（Phase 2〜4、支払いシーン改善後に撮り直し）
 
 `tools/perf/capture-phase2.ts` が実際に操作して撮影（LNURL-auth はテスト用ウォレットで署名、電力 B のパズルはスマホ画面のタイルを
-タップして解く）。大画面は 1280×720・`?q=BALANCED&capture=1`。画像は `docs/qa/phase2/`。
+タップして解く）。大画面は 1280×720・`?q=BALANCED&capture=1`、スマホは `?capture=1`。画像は `docs/qa/phase2/`。
+撮影した試合は **VICTORY（BOSS_DESTROYED）**、ブラックアウト2回（1回目 GRID PULSE、2回目 電力B の回路修復）。
 
-| 画像                                                                | 内容                                                                                                                 |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `01_display_lobby_bots.png`                                         | 搭乗受付：人4人 + DEMO-BOT 4体（「DEMO-BOT 交代可」）、搭乗者数は人だけ、コールサイン RAIJIN_FAN（本人が表示を選択） |
-| `02_display_power_routed.png`                                       | 電力案の送信：胸部から各部への光、CHARGE メーター、フィード「POWER ROUTED」                                          |
-| `03_display_overload.png`                                           | 過負荷：背部の火花、C3「OVERLOAD」、電力 B の状態                                                                    |
-| `04_display_repair.png`                                             | 修理：部位の緑の火花、C4 の状態                                                                                      |
-| `05_display_sats_pulse.png`                                         | 共有エネルギーパルス：席→炉の光、フィード「SHARED ENERGY PULSE +20 CHARGE [VIRTUAL]」（支払者・金額は出さない）      |
-| `07_display_overdrive_ready.png`                                    | OVERDRIVE READY：4系統のバナー（WAIT/SYNC/AUTO）、胸部コアのリング                                                   |
-| `08_display_overdrive_fired.png` / `08b_display_overdrive_beam.png` | 発射：HUD が薄くなり「RAIJIN OVERDRIVE」、8席→コアの収束 → コアからボスへの雷撃ビーム                                |
-| `09_display_results.png`                                            | 作戦記録：修理・回路復旧・必殺技・役割ごとの仕事量（HITS/GUARDS/ROUTES/REPAIRS）、BOT 表示                           |
-| `10_phone_join.png` / `11_phone_lnurl_pending.png`                  | 参加：パイロット認証（無料）、ウォレットを開く・リンクをコピー・別端末用の個人 QR・残り秒数                          |
-| `12_phone_seat_select_callsign.png`                                 | 席選択とコールサイン（任意・大画面表示はオプトイン）                                                                 |
-| `13_phone_power_a.png`                                              | 電力 A：4レーンの ±5、下書きとサーバー値の差、切断レーン、ワンタップ案、出力を送る                                   |
-| `14_phone_router_overload.png` / `15_phone_router_connected.png`    | 電力 B：過負荷の回路タブ、3×3 タイル、届いている経路の点灯 → 接続OK                                                  |
-| `16_phone_engineer_scan.png` / `17_phone_engineer_bolts.png`        | 整備 A：機体シルエットの損傷 → 番号付きボルト                                                                        |
-| `18`〜`20_phone_pulse_*.png`                                        | パルス：条件（金額・受取先・VIRTUAL・残り）→ VIRTUAL 請求 → 炉心へ送りました                                         |
-| `21_phone_overdrive_call.png`                                       | OVERDRIVE READY の SYNC NOW                                                                                          |
-| `22_phone_debrief.png`                                              | デブリーフ                                                                                                           |
-| `30`〜`32_operator_*.png`                                           | 運営：DEMO BOTS・HIDE CALLSIGNS・SHARED ENERGY（SETTLE 待ち）・監査ログ                                              |
+| 画像                                                                | 内容                                                                                                              |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `01_display_lobby_bots.png`                                         | 搭乗受付：人3人 + DEMO-BOT 5体（「DEMO-BOT 交代可」）、コールサイン RAIJIN_FAN（本人が表示を選択）                |
+| `02_display_power_routed.png`                                       | 電力案の送信：胸部から各部への光、CHARGE メーター、フィード「POWER ROUTED」                                       |
+| `03_display_overload.png`                                           | 過負荷：背部の火花、C3「OVERLOAD」、電力 B の状態                                                                 |
+| `05_display_blackout.png`                                           | **REACTOR BLACKOUT**：照明が落ちて赤い非常灯、中央に残り秒数と2つの出口（GRID PULSE／電力B 回路修復中）           |
+| `05b_display_lightning_pulse.png`                                   | **LIGHTNING PULSE**：「VIRTUAL（テスト）· 炉心復旧 · OVERCHARGE」、C3「OVERCHARGE 10s」（支払者・金額は出さない） |
+| `05c_display_core_rerouted.png`                                     | ボス戦の2回目：電力B が炉心をつなぎ直して「CORE RE-ROUTED」、フィードに LINK ×3・FULL LINK                        |
+| `06_display_boss.png`                                               | NULL CORE 戦                                                                                                      |
+| `07_display_overdrive_ready.png`                                    | OVERDRIVE READY：4系統のバナー（WAIT/SYNC/AUTO）、胸部コアのリング                                                |
+| `08_display_overdrive_fired.png` / `08b_display_overdrive_beam.png` | 発射：HUD が薄くなり「RAIJIN OVERDRIVE」、8席→コアの収束 → コアからボスへの雷撃ビーム                             |
+| `09_display_results.png`                                            | 作戦記録                                                                                                          |
+| `10_phone_join.png` / `11_phone_lnurl_pending.png`                  | 参加：パイロット認証（無料）、ウォレットを開く・リンクをコピー・別端末用の個人 QR・残り秒数                       |
+| `12_phone_seat_select_callsign.png`                                 | 席選択とコールサイン（任意・大画面表示はオプトイン）                                                              |
+| `13_phone_power_a.png`                                              | 電力 A：レーンをドラッグして配分                                                                                  |
+| `14_phone_router_overload.png` / `15_phone_router_connected.png`    | 電力 B：過負荷の回路タブ、3×3 タイル、届いている経路の点灯 → 接続OK。LINK バー（あと何系統で LINK が伸びるか）    |
+| `15b_phone_router_blackout.png`                                     | 電力 B のブラックアウト：炉心タブが自動で開き「予備電源のみ（回復 30%）。あなたの回路修復で炉心が戻ります」       |
+| `18_phone_blackout_banner.png`                                      | 全員のスマホに赤い帯：残り秒数と「GRID PULSE で即時復旧（任意・払わなくても復旧できます）」                       |
+| `19_phone_grid_pulse_sheet.png`                                     | GRID PULSE の条件シート：金額・受取先・VIRTUAL・残り回数・「払わなくても電力Bの回路修復で復旧できます」           |
+| `20_phone_pulse_landed.png`                                         | 着金：「共有エネルギー +20 を炉心へ送りました」「LIGHTNING PULSE 着金、炉心復旧 — VIRTUAL」                       |
+| `21_phone_overdrive_call.png`                                       | OVERDRIVE READY の SYNC NOW                                                                                       |
+| `22_phone_debrief.png`                                              | デブリーフ                                                                                                        |
+| `30`〜`32_operator_*.png`                                           | 運営：DEMO BOTS・「VIRTUAL を自動確定」・SHARED ENERGY（applied）・監査ログ                                       |
+
+整備の修理シーン（旧 `04`/`16`/`17`）は、この試合では脚が一度も損傷しなかったため撮れていない。新しいボルト操作（なぞって回す／Enter）は
+E2E の8席ソーティーで実行している。
 
 ### 負荷試験
 
@@ -140,6 +148,37 @@ CINEMATIC→SAFE に下がることを運営画面の DISPLAY 欄で確認。**�
 
 - 実ウォレットでの LNURL-auth（https の公開ドメインが必要）。実決済（LNbits 実サーバー・受取先・オーナー承認が必要）。
 - iPhone / Android 実機、会場 GPU での FPS、会場 Wi-Fi。
+
+## 支払いシーンと遊び方の改善（2026-10-30、D-025〜D-031）
+
+オーナー指摘「支払いシーンと遊び方の改善」への対応。REACTOR BLACKOUT と GRID PULSE、LINK CHAIN、PERFECT SHOT、スマホのジェスチャー操作。
+
+### 自動テスト（合計 106 件 + E2E 4 件、すべて合格）
+
+| 対象                   | 件数 | 追加・変更した内容                                                                                                                                                                                    |
+| ---------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/game-engine` | 54   | `crew.test.ts`：LINK CHAIN（別系統で伸びる・同じ系統では伸びない・FULL LINK）、PERFECT SHOT、ブラックアウト（回復は予備電源 30%・電力B の修復・AUTO・失敗で −120・GRID PULSE で即時復旧）、OVERCHARGE |
+| `apps/server` 統合     | 35   | パルスは「払って何か起きるときだけ」請求（ブラックアウト中は CHARGE 満タンでも可）、ブラックアウト中のパルス、運営の VIRTUAL 自動確定（約 1.5 秒・VIRTUAL のまま）                                    |
+| Playwright E2E         | 4    | 8席ソーティーで、電力B のスマホがブラックアウトの炉心回路を解く（`blackoutsByRoute ≥ 1`）・大画面に REACTOR BLACKOUT の帯、整備のボルトは Enter（なぞって回す操作のキーボード版）                     |
+
+### バランス（BOT 対戦、STANDARD、skill 0.85）
+
+ブラックアウト中の回復を最初「ゼロ」にしたところ、2人クルー（電力B 空席）の勝率が下がった。回復を予備電源 30% にして戻した（D-031）。
+
+| クルー              | ブラックアウトなし | 回復ゼロ（初版） | 予備電源 30%（採用）         |
+| ------------------- | ------------------ | ---------------- | ---------------------------- |
+| 2人（20 試合）      | 15/20              | 6/20             | 14/20                        |
+| 2人（別の 30 試合） | 27/30              | 22/30            | 27/30                        |
+| 4人（20 試合）      | 20/20              | 20/20            | 20/20                        |
+| 8人（12 試合）      | —                  | —                | 12/12                        |
+| 0人（12 試合）      | —                  | —                | 0/12（人がいないと勝てない） |
+
+### 撮影スクリプトについて（正直な記録）
+
+このコンテナは WebGL がソフトウェア描画で、大画面のスクリーンショット1枚に 15〜40 秒、スマホ1枚に約 15 秒かかる。撮影中も試合が
+進んで負けていたため、`capture-phase2.ts` は撮影の間だけ運営 PAUSE で試合を止める（操作の送信は必ず再開後）。スマホは
+`?capture=1` で一時停止の表示を隠す（大画面と同じ仕組み。会場では使わない）。撮影用の人の席は撮り終えたら運営 KICK で
+AUTO SUPPORT に渡す（何もしない人の席が残ると、それは「途中で操作をやめたパイロット」で、実際に負ける）。
 
 ## 受け入れ基準（仕様 §16）の現状（2026-10-30 更新）
 

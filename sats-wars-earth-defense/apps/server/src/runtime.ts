@@ -305,9 +305,14 @@ export class MatchRuntime {
   }
 
   /** Applies a settled energy pulse to the live match; false if the engine refused it. */
-  applyPulse(intentId: string, seatId: string | null, virtual: boolean): boolean {
+  applyPulse(
+    intentId: string,
+    seatId: string | null,
+    virtual: boolean,
+    settleMs: number | null = null,
+  ): boolean {
     const seat = SEAT_IDS.find((s) => s === seatId) ?? null;
-    const r = this.command({ type: 'SATS_PULSE', intentId, seatId: seat, virtual });
+    const r = this.command({ type: 'SATS_PULSE', intentId, seatId: seat, virtual, settleMs });
     return r.outcome.kind === 'control' && r.outcome.ok;
   }
 

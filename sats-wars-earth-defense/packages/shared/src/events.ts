@@ -32,6 +32,10 @@ export type MatchEventBody =
       weak: boolean;
       auto: boolean;
       killed: boolean;
+      /** Released the moment the charge completed. */
+      perfect: boolean;
+      /** LINK length this shot extended (0 = no link bonus). */
+      link: number;
     }
   | { type: 'enemy_destroyed'; enemyId: string; kind: EnemyKind; bySeat: SeatId | null }
   | {
@@ -65,7 +69,24 @@ export type MatchEventBody =
   | { type: 'city_lost'; cityId: CityId }
   | { type: 'part_damaged'; part: MechPartId; hp: number }
   | { type: 'part_repaired'; part: MechPartId; hp: number; seatId: SeatId; auto: boolean }
-  | { type: 'team_combo'; roles: RoleId[]; gain: number; sync: number }
+  | {
+      type: 'team_combo';
+      roles: RoleId[];
+      gain: number;
+      sync: number;
+      /** LINK length after this success (2–4); 4 = FULL LINK. */
+      link: number;
+      seatId: SeatId;
+    }
+  | { type: 'crisis_started'; kind: 'BLACKOUT'; endsAt: number; autoAt: number | null }
+  | {
+      type: 'crisis_resolved';
+      kind: 'BLACKOUT';
+      by: 'PULSE' | 'ROUTE' | 'AUTO';
+      seatId: SeatId | null;
+      overchargeUntil: number | null;
+    }
+  | { type: 'crisis_failed'; kind: 'BLACKOUT'; damage: number }
   | { type: 'power_routed'; seatId: SeatId; distribution: PowerDistribution; auto: boolean }
   | { type: 'circuit_overload'; lane: PowerLane }
   | { type: 'circuit_restored'; lane: PowerLane; seatId: SeatId; auto: boolean }
@@ -75,7 +96,17 @@ export type MatchEventBody =
   | { type: 'overdrive_sync'; role: RoleId; seatId: SeatId | null; auto: boolean }
   | { type: 'overdrive_fired'; damage: number; roles: RoleId[]; autoRoles: RoleId[] }
   | { type: 'overdrive_failed'; missing: RoleId[] }
-  | { type: 'sats_pulse_settled'; seatId: SeatId | null; gain: number; virtual: boolean }
+  | {
+      type: 'sats_pulse_settled';
+      seatId: SeatId | null;
+      gain: number;
+      virtual: boolean;
+      /** Invoice issued → payment confirmed by the server (ms). Null for VIRTUAL pulses. */
+      settleMs: number | null;
+      /** This pulse ended a REACTOR BLACKOUT. */
+      crisis: boolean;
+      overchargeUntil: number;
+    }
   | { type: 'match_result'; outcome: MatchOutcome; result: MatchResult };
 
 export type MatchEventType = MatchEventBody['type'];

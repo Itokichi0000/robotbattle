@@ -414,17 +414,26 @@ export function Raijin() {
       const ps = snap?.seats[seat];
       const p = pulse.current[seat] ?? 0;
       const base = ps?.occupied ? 2.6 : ps?.auto ? 0.3 : 0.06;
-      stations[seat].emissiveIntensity = (base + p * 6) * powered;
+      stations[seat].emissiveIntensity = (base + p * 6) * powered * (1 - 0.8 * anim.blackout);
       pulse.current[seat] = Math.max(0, p - dt * 1.2);
     }
     thrusterMat.emissiveIntensity = 0.4 + thrust * 6 + Math.sin(t * 40) * thrust * 0.6;
     // The chest reactor brightens with SYNC and the shared CHARGE, and burns at OVERDRIVE READY.
     const charge = snap ? Math.min(1, snap.teamCapacitor / snap.hints.overdriveCapacitorMin) : 0;
     const od = snap && snap.overdrive.status !== 'IDLE' ? 3 + Math.sin(t * 5) * 0.8 : 0;
+    // Blackout: the reactor nearly dies (a weak flicker); overcharge: it burns brighter.
+    const dark = 1 - 0.85 * anim.blackout;
+    const surge = anim.overcharge ? 2.5 + Math.sin(t * 6) * 0.6 : 0;
     coreMat.emissiveIntensity =
-      (1.2 + (snap ? (snap.teamSync / 100) * 3 : 0) + charge * 2 + od + Math.sin(t * 2) * 0.25) *
-      powered;
-    visorMat.emissiveIntensity = 3.2 * powered;
+      (1.2 +
+        (snap ? (snap.teamSync / 100) * 3 : 0) +
+        charge * 2 +
+        od +
+        surge +
+        Math.sin(t * 2) * 0.25) *
+      powered *
+      dark;
+    visorMat.emissiveIntensity = 3.2 * powered * (1 - 0.7 * anim.blackout);
   });
 
   return (

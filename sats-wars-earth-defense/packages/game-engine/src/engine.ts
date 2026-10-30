@@ -25,6 +25,7 @@ import type {
   EngineerSeatId,
   GameConfig,
   GunnerSeatId,
+  LinkState,
   MatchEvent,
   MatchEventBody,
   MatchResult,
@@ -93,7 +94,15 @@ export type EngineCommand =
       action: PilotActionInput;
     }
   /** A settled Lightning (or VIRTUAL sandbox) energy pulse. Applied once per intent id. */
-  | { type: 'SATS_PULSE'; t: number; intentId: string; seatId: SeatId | null; virtual: boolean };
+  | {
+      type: 'SATS_PULSE';
+      t: number;
+      intentId: string;
+      seatId: SeatId | null;
+      virtual: boolean;
+      /** Invoice issued → confirmed (ms), for the big screen. Null for VIRTUAL pulses. */
+      settleMs?: number | null;
+    };
 
 export type CommandOutcome =
   | { kind: 'none' }
@@ -225,8 +234,11 @@ export function createMatch(input: CreateMatchInput): MatchState {
     },
     teamSync: 0,
     teamCapacitor: 0,
-    recentSuccesses: [],
     lastComboAt: 0,
+    link: null,
+    crisis: null,
+    crisisFired: [],
+    overchargeUntil: 0,
     spawn: { scriptedDone: 0, nextSpawnAt: 0 },
     circuits: Object.fromEntries(
       POWER_LANES.map((l) => [l, { broken: false, brokenAt: 0, puzzle: null }]),
@@ -260,6 +272,12 @@ export function createMatch(input: CreateMatchInput): MatchState {
       overloads: 0,
       overdrives: 0,
       overdriveFails: 0,
+      blackouts: 0,
+      blackoutsByPulse: 0,
+      blackoutsByRoute: 0,
+      blackoutsFailed: 0,
+      perfectShots: 0,
+      fullLinks: 0,
       pulses: 0,
     },
     result: null,
@@ -360,6 +378,8 @@ function enterPhase(ctx: Ctx, to: Phase, at: number): void {
     s.nextOverloadAt = first === null ? null : at + first;
     s.autoTimers.power = at + 4_000;
   }
+  // A blackout belongs to its wave: the next wave (or the result) starts with power.
+  s.crisis = null;
   if (to === 'VICTORY' || to === 'DEFEAT') {
     s.threats = [];
     s.paused = false;
@@ -570,8 +590,11 @@ function resolveThreat(ctx: Ctx, th: ThreatState): void {
       st.perfect += 1;
       s.stats.perfectGuards += 1;
     }
+    const linkN = linkBonusRoles(s, 'DEFENSE', at);
     s.teamCapacitor = clamp(
-      s.teamCapacitor + (perfect ? s.config.capacitor.perPerfect : s.config.capacitor.perBlock),
+      s.teamCapacitor +
+        (perfect ? s.config.capacitor.perPerfect : s.config.capacitor.perBlock) +
+        s.config.sync.linkBlockCapacitorPerRole * linkN,
       0,
       s.config.capacitor.max,
     );
@@ -666,38 +689,63 @@ function checkDefeat(ctx: Ctx, at: number): void {
 
 /* ------------------------------------------------------------ cooperation */
 
+function activeLink(s: MatchState, at: number): LinkState | null {
+  return s.link && at <= s.link.expiresAt ? s.link : null;
+}
+
+/** Systems already in the active LINK that this role's success would extend (0 = none). */
+function linkBonusRoles(s: MatchState, role: RoleId, at: number): number {
+  const l = activeLink(s, at);
+  return l && !l.roles.includes(role) ? l.roles.length : 0;
+}
+
+/**
+ * LINK CHAIN (spec §6.6): one system's success opens a link; a different system succeeding
+ * within the window extends it (any order) and pays SYNC, up to FULL LINK with all four.
+ * The same system again does not extend it, so the chain needs the whole crew.
+ */
 function recordSuccess(ctx: Ctx, at: number, seatId: SeatId, auto: boolean): void {
   const s = ctx.s;
   const role = roleOf(seatId);
   if (!auto) s.teamSync = clamp(s.teamSync + s.config.sync.perAction, 0, 100);
-  s.recentSuccesses.push({ t: at, seatId, role });
-  const windowStart = at - s.config.sync.windowMs;
-  s.recentSuccesses = s.recentSuccesses.filter((r) => r.t >= windowStart);
-  const roles = [...new Set(s.recentSuccesses.map((r) => r.role))] as RoleId[];
-  const humanRoles = new Set(
-    s.recentSuccesses.filter((r) => isHuman(s, r.seatId)).map((r) => r.role),
-  ).size;
-  if (roles.length >= 2 && humanRoles >= 1) {
-    // AUTO SUPPORT can complete a link, but people linking with people is worth more.
-    const weight = humanRoles >= 2 ? 1 : 0.5;
-    const gain = Math.round(
-      s.config.sync.gainByRoles[Math.min(4, roles.length) as 2 | 3 | 4] * weight,
-    );
-    s.teamSync = clamp(s.teamSync + gain, 0, 100);
-    s.teamCapacitor = clamp(
-      s.teamCapacitor + Math.round(s.config.capacitor.perCombo * weight),
-      0,
-      s.config.capacitor.max,
-    );
-    s.stats.combos += 1;
-    s.stats.bestSync = Math.max(s.stats.bestSync, s.teamSync);
-    for (const seat of new Set(s.recentSuccesses.map((r) => r.seatId))) {
-      if (isHuman(s, seat)) s.seats[seat].stats.combos += 1;
+  const link = activeLink(s, at);
+  if (!link) {
+    s.link = { roles: [role], seats: [seatId], expiresAt: at + s.config.sync.windowMs };
+  } else if (!link.roles.includes(role)) {
+    link.roles.push(role);
+    link.seats.push(seatId);
+    link.expiresAt = at + s.config.sync.windowMs;
+    const n = link.roles.length as 2 | 3 | 4;
+    const humans = link.seats.filter((id) => isHuman(s, id));
+    const humanRoles = new Set(humans.map((id) => roleOf(id))).size;
+    if (humanRoles >= 1) {
+      // AUTO SUPPORT can carry a link, but people linking with people is worth more.
+      const weight = humanRoles >= 2 ? 1 : 0.5;
+      const g = s.config.sync.gainByRoles;
+      const step = n === 2 ? g[2] : g[n] - g[(n - 1) as 2 | 3];
+      const gain = Math.round(step * weight);
+      s.teamSync = clamp(s.teamSync + gain, 0, 100);
+      s.teamCapacitor = clamp(
+        s.teamCapacitor + Math.round(s.config.capacitor.perCombo * weight),
+        0,
+        s.config.capacitor.max,
+      );
+      s.stats.combos += 1;
+      if (isHuman(s, seatId)) s.seats[seatId].stats.combos += 1;
+      if (n === 2 && isHuman(s, link.seats[0]!)) s.seats[link.seats[0]!].stats.combos += 1;
+      s.lastComboAt = at;
+      if (n === 4) s.stats.fullLinks += 1;
+      emit(ctx, at, {
+        type: 'team_combo',
+        roles: [...link.roles],
+        gain,
+        sync: s.teamSync,
+        link: n,
+        seatId,
+      });
     }
-    s.lastComboAt = at;
-    // A combo consumes its links: the next one needs fresh teamwork.
-    s.recentSuccesses = [];
-    emit(ctx, at, { type: 'team_combo', roles, gain, sync: s.teamSync });
+    // FULL LINK: the chain is complete; the next one starts fresh.
+    if (n === 4) s.link = null;
   }
   s.stats.bestSync = Math.max(s.stats.bestSync, s.teamSync);
 }
@@ -748,18 +796,27 @@ function fireWeapon(
   seat: GunnerSeatId,
   enemy: EnemyState,
   auto: boolean,
+  perfect = false,
 ): void {
   const s = ctx.s;
   const cfg = s.config.weapons;
   const arm = s.parts[armOf(seat)];
   const weak = enemy.weakUntil > at;
   const base = cfg.seats[seat].damage * (auto ? s.config.auto.gunnerDamageRatio : 1);
+  // A shot that extends the LINK lands harder: teamwork is visible in the numbers.
+  const linkN = auto ? 0 : linkBonusRoles(s, 'GUNNER', at);
   const damage = Math.max(
     1,
     Math.round(
-      base * (0.5 + 0.5 * (arm / 100)) * weaponFactor(s) * (weak ? cfg.weakMultiplier : 1),
+      base *
+        (0.5 + 0.5 * (arm / 100)) *
+        weaponFactor(s) *
+        (weak ? cfg.weakMultiplier : 1) *
+        (perfect ? cfg.perfectMultiplier : 1) *
+        (1 + s.config.sync.linkDamagePerRole * linkN),
     ),
   );
+  if (perfect) s.stats.perfectShots += 1;
   s.energy.weapon -= cfg.energyCost;
   wear(s, armOf(seat), s.config.mech.wear.perShot);
   const st = s.seats[seat].stats;
@@ -781,6 +838,8 @@ function fireWeapon(
     weak,
     auto,
     killed: enemy.hp - damage <= 0,
+    perfect,
+    link: linkN ? linkN + 1 : 0,
   });
   damageEnemy(ctx, at, enemy, damage, auto ? null : seat);
   if (!s.result) recordSuccess(ctx, at, seat, auto);
@@ -826,10 +885,12 @@ function fire(ctx: Ctx, at: number, seat: GunnerSeatId): ReasonCode | null {
   if (s.parts[armOf(seat)] <= 0) return 'WEAPON_BROKEN';
   if (at < g.readyAt) return at < g.lastFiredAt + cfg.cooldownMs ? 'COOLDOWN' : 'CHARGING';
   if (s.energy.weapon < cfg.energyCost) return 'NO_ENERGY';
+  // PERFECT SHOT: released the moment the charge completed (server clock decides).
+  const perfect = at - g.readyAt <= cfg.perfectMs;
   g.lastFiredAt = at;
   g.readyAt = at + cfg.cooldownMs;
   g.chargedNotified = false;
-  fireWeapon(ctx, at, seat, target, false);
+  fireWeapon(ctx, at, seat, target, false, perfect);
   return null;
 }
 
@@ -943,6 +1004,94 @@ function routeSubmit(
   return null;
 }
 
+/* -------------------------------------------------------- reactor blackout */
+
+function crisisAutoAt(s: MatchState, startedAt: number): number | null {
+  // AUTO SUPPORT stands in only when nobody flies POWER B; a person gets the full time.
+  return !isHuman(s, 'POWER_ROUTER') && s.autoSupport
+    ? startedAt + s.config.crisis.autoFixMs
+    : null;
+}
+
+function startCrisis(ctx: Ctx, at: number): void {
+  const s = ctx.s;
+  const autoAt = crisisAutoAt(s, at);
+  s.crisis = {
+    kind: 'BLACKOUT',
+    startedAt: at,
+    endsAt: at + s.config.crisis.durationMs,
+    autoAt,
+    puzzle: generatePuzzle(s),
+  };
+  s.stats.blackouts += 1;
+  emit(ctx, at, { type: 'crisis_started', kind: 'BLACKOUT', endsAt: s.crisis.endsAt, autoAt });
+}
+
+function resolveCrisis(
+  ctx: Ctx,
+  at: number,
+  by: 'PULSE' | 'ROUTE' | 'AUTO',
+  seatId: SeatId | null,
+): void {
+  const s = ctx.s;
+  if (!s.crisis) return;
+  s.crisis = null;
+  // The crew's fix and a GRID PULSE end the same way; AUTO SUPPORT only restores power.
+  let until: number | null = null;
+  if (by !== 'AUTO') {
+    until = Math.max(s.overchargeUntil, at + s.config.overcharge.ms);
+    s.overchargeUntil = until;
+  }
+  if (by === 'PULSE') s.stats.blackoutsByPulse += 1;
+  if (by === 'ROUTE') s.stats.blackoutsByRoute += 1;
+  emit(ctx, at, {
+    type: 'crisis_resolved',
+    kind: 'BLACKOUT',
+    by,
+    seatId,
+    overchargeUntil: until,
+  });
+}
+
+function runCrisis(ctx: Ctx, now: number): void {
+  const s = ctx.s;
+  const c = s.crisis;
+  if (c) {
+    c.autoAt = crisisAutoAt(s, c.startedAt);
+    if (c.autoAt !== null && now >= c.autoAt) {
+      resolveCrisis(ctx, now, 'AUTO', null);
+    } else if (now >= c.endsAt) {
+      const damage = s.config.crisis.failDamage;
+      s.crisis = null;
+      s.coreHp = Math.max(0, s.coreHp - damage);
+      s.energy = { weapon: 0, shield: 0, mobility: 0, repair: 0 };
+      s.stats.blackoutsFailed += 1;
+      emit(ctx, now, { type: 'crisis_failed', kind: 'BLACKOUT', damage });
+      checkDefeat(ctx, now);
+    }
+    return;
+  }
+  const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
+  const offset = s.config.crisis.atMs[wave];
+  if (offset == null || s.crisisFired.includes(wave)) return;
+  // Never on top of the OVERDRIVE call: the blackout waits until the finisher is decided.
+  if (s.overdrive.status !== 'IDLE') return;
+  if (now >= s.phaseStartedAt + offset) {
+    s.crisisFired.push(wave);
+    startCrisis(ctx, now);
+  }
+}
+
+function blackoutRoute(ctx: Ctx, at: number, rotations: number[]): ReasonCode | null {
+  const s = ctx.s;
+  if (!s.crisis) return 'NO_CRISIS';
+  if (!routeConnects(s.crisis.puzzle, rotations)) return 'ROUTE_INCOMPLETE';
+  resolveCrisis(ctx, at, 'ROUTE', 'POWER_ROUTER');
+  s.seats.POWER_ROUTER.stats.routes += 1;
+  recordSuccess(ctx, at, 'POWER_ROUTER', false);
+  return null;
+}
+
 /* ----------------------------------------------------------------- repair */
 
 function repairFactor(s: MatchState): number {
@@ -992,7 +1141,9 @@ function repairFinish(
   }
   if (s.energy.repair < s.config.repair.energyCost) return 'NO_ENERGY';
   s.energy.repair -= s.config.repair.energyCost;
-  const gain = Math.round(s.config.repair.amount * repairFactor(s));
+  const gain =
+    Math.round(s.config.repair.amount * repairFactor(s)) +
+    s.config.sync.linkRepairPerRole * linkBonusRoles(s, 'ENGINEER', at);
   s.parts[part] = Math.min(100, s.parts[part] + gain);
   eng.job = null;
   eng.cooldownUntil = at + s.config.repair.cooldownMs;
@@ -1153,9 +1304,16 @@ function autoPlan(s: MatchState): PowerDistribution {
 
 /* -------------------------------------------------------------- simulation */
 
-function regenEnergy(s: MatchState, dtSec: number): void {
+function regenEnergy(s: MatchState, dtSec: number, now: number): void {
   const coreFactor = 0.5 + 0.5 * (s.parts.CORE / 100);
-  const total = s.config.energy.regenPerSec * coreFactor * dtSec;
+  // REACTOR BLACKOUT: the reactor runs on reserve. Not fully dark, so a small crew with
+  // nobody on POWER B is pressed, not starved (fully dark cut 2-pilot wins from 15/20 to 6/20).
+  const boost = s.crisis
+    ? s.config.crisis.regenFactor
+    : now < s.overchargeUntil
+      ? s.config.overcharge.regenFactor
+      : 1;
+  const total = s.config.energy.regenPerSec * coreFactor * boost * dtSec;
   const max = s.config.energy.laneMax;
   const d = s.distribution;
   // A cut circuit starves its lane until POWER B re-routes it.
@@ -1194,7 +1352,7 @@ function step(ctx: Ctx, now: number, dtSec: number): void {
     }
   }
   if (!isCombatPhase(s.phase)) return;
-  regenEnergy(s, dtSec);
+  regenEnergy(s, dtSec, now);
   runSpawner(ctx, now);
   launchAttacks(ctx, now);
   resolveImpacts(ctx, now);
@@ -1206,7 +1364,9 @@ function step(ctx: Ctx, now: number, dtSec: number): void {
       emit(ctx, now, { type: 'weapon_charged', seatId: seat, enemyId: g.targetId });
     }
   }
-  runOverloads(ctx, now);
+  if (!s.crisis) runOverloads(ctx, now);
+  runCrisis(ctx, now);
+  if (!isCombatPhase(s.phase)) return;
   runAutoSupport(ctx, now);
   if (!isCombatPhase(s.phase)) return;
   for (const id of ['ENGINEER_LEGS', 'ENGINEER_CORE'] as const) {
@@ -1366,6 +1526,9 @@ function pilotAction(
       a.actionType === 'REPAIR_START'
         ? repairStart(ctx, at, e, a.payload.part)
         : repairFinish(ctx, at, e, a.payload.part, a.payload.order);
+  } else if (a.actionType === 'BLACKOUT_ROUTE') {
+    if (cmd.seatId !== 'POWER_ROUTER') return reject('WRONG_ROLE');
+    reason = blackoutRoute(ctx, at, a.payload.rotations);
   } else if (a.actionType === 'SYNC_NOW') {
     reason = syncNow(ctx, at, cmd.seatId);
   } else {
@@ -1523,15 +1686,22 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
       else if (!isCombatPhase(s.phase)) outcome = control(false, 'NOT_IN_COMBAT');
       else {
         const gain = s.config.pulses.capacitorGain;
+        const crisis = !!s.crisis;
         s.pulsesApplied.push(cmd.intentId);
         s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
+        // GRID PULSE: the shared energy overcharges the reactor (same as the crew's own fix).
+        s.overchargeUntil = Math.max(s.overchargeUntil, at + s.config.overcharge.ms);
         s.stats.pulses += 1;
         emit(ctx, at, {
           type: 'sats_pulse_settled',
           seatId: cmd.seatId,
           gain,
           virtual: cmd.virtual,
+          settleMs: cmd.virtual ? null : (cmd.settleMs ?? null),
+          crisis,
+          overchargeUntil: s.overchargeUntil,
         });
+        if (crisis) resolveCrisis(ctx, at, 'PULSE', cmd.seatId);
         outcome = control(true);
       }
       break;

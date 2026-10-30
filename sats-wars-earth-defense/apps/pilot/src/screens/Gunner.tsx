@@ -2,14 +2,15 @@ import { useStore, useTicker } from '@swed/client';
 import { enemyPositionAt, recommendTarget } from '@swed/game-engine';
 import type { GunnerSeatId, PublicEnemy, PublicMatchState } from '@swed/shared';
 import { COLORS, IconCrosshair, IconLock, IconWarning } from '@swed/ui-tokens';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { haptic, sendAction, store } from '../net';
 import { Flow, Gauge, PilotHeader, reasonText, SystemLine, useL } from '../ui';
 
 /**
- * GUNNER console (spec §5.3, §9.3, ref 06): target scope → LOCK → CHARGE → FIRE.
- * One or two taps; the server decides hit and damage. The scope shows where the swarm is
- * relative to RAIJIN's facing, red when an enemy has a telegraphed attack running.
+ * GUNNER console (spec §5.3, §9.3, ref 06): drag the reticle onto a target (or tap it) →
+ * LOCK → CHARGE → FIRE. Firing the moment the charge completes is a PERFECT SHOT, judged on
+ * the server clock. The scope shows where the swarm is relative to RAIJIN's facing, red when
+ * an enemy has a telegraphed attack running.
  */
 
 const W = 360;
@@ -50,23 +51,27 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
     () =>
       store.onEvent(({ payload: e }) => {
         if (e.type === 'weapon_fired' && e.seatId === seat && !e.auto) {
-          haptic(30);
+          haptic(e.perfect ? 60 : 30);
+          const extra = `${e.perfect ? ' PERFECT' : ''}${e.link ? ` LINK×${e.link}` : ''}`;
           setMsg({
             text: e.killed
-              ? L(`撃墜！ −${e.damage}`, `DOWN! −${e.damage}`)
+              ? L(`撃墜！ −${e.damage}${extra}`, `DOWN! −${e.damage}${extra}`)
               : L(
-                  `命中 −${e.damage}${e.weak ? ' 弱点' : ''}`,
-                  `HIT −${e.damage}${e.weak ? ' WEAK' : ''}`,
+                  `命中 −${e.damage}${e.weak ? ' 弱点' : ''}${extra}`,
+                  `HIT −${e.damage}${e.weak ? ' WEAK' : ''}${extra}`,
                 ),
             tone: 'ok',
           });
         }
         if (e.type === 'weapon_charged' && e.seatId === seat) {
           haptic(15);
-          setMsg({ text: L('チャージ完了 — FIRE!', 'Charged — FIRE!'), tone: 'ok' });
+          setMsg({
+            text: L('チャージ完了 — 今撃てば PERFECT!', 'Charged — fire now for PERFECT!'),
+            tone: 'ok',
+          });
         }
         if (e.type === 'team_combo')
-          setMsg({ text: `LINK ESTABLISHED +${e.gain} SYNC`, tone: 'ok' });
+          setMsg({ text: `LINK ×${e.link}  +${e.gain} SYNC`, tone: 'ok' });
       }),
     [seat, L],
   );
@@ -100,6 +105,29 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
       });
   };
 
+  // PERFECT window: from the moment the charge completes, for perfectShotMs (server judges).
+  const sinceReady = mt - g.readyAt;
+  const perfectNow = !!target && !cooling && sinceReady >= 0 && sinceReady <= s.hints.perfectShotMs;
+
+  // Drag-to-aim: the reticle follows the finger; releasing near a target locks it.
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [aim, setAim] = useState<{ x: number; y: number } | null>(null);
+  const toSvg = (ev: { clientX: number; clientY: number }) => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { x: ((ev.clientX - r.left) / r.width) * W, y: ((ev.clientY - r.top) / r.height) * H };
+  };
+  const nearest = (pt: { x: number; y: number }) => {
+    let best: { id: string; d: number } | null = null;
+    for (const e of s.enemies) {
+      if (e.arrivesAt > mt) continue;
+      const p = scopeXY(e, mt);
+      const d = Math.hypot(p.x - pt.x, Math.max(14, Math.min(H - 22, p.y)) - pt.y);
+      if (d <= 46 && (!best || d < best.d)) best = { id: e.id, d };
+    }
+    return best?.id ?? null;
+  };
+  const aimId = aim ? nearest(aim) : null;
+
   const step = !target ? 0 : mt < g.readyAt ? 1 : 2;
   let label = seat === 'GUNNER_R' ? L('弱点ロック', 'WEAK LOCK') : L('ロックオン', 'LOCK ON');
   let sub = 'LOCK ON';
@@ -117,8 +145,8 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
     primary = null;
     fill = chargePct;
   } else if (target) {
-    label = L('発射', 'FIRE');
-    sub = lowEnergy ? L('エネルギー不足', 'LOW ENERGY') : 'FIRE';
+    label = perfectNow ? L('今！', 'NOW!') : L('発射', 'FIRE');
+    sub = lowEnergy ? L('エネルギー不足', 'LOW ENERGY') : perfectNow ? 'PERFECT SHOT' : 'FIRE';
     primary = () => act({ actionType: 'FIRE', payload: {} });
     fill = 100;
   }
@@ -148,10 +176,24 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
           ) : null}
         </div>
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           className="scope"
           role="group"
-          aria-label={L('照準スコープ', 'Target scope')}
+          aria-label={L('照準スコープ（ドラッグで照準）', 'Target scope (drag to aim)')}
+          onPointerDown={(ev) => {
+            ev.currentTarget.setPointerCapture(ev.pointerId);
+            setAim(toSvg(ev));
+          }}
+          onPointerMove={(ev) => {
+            if (aim) setAim(toSvg(ev));
+          }}
+          onPointerUp={(ev) => {
+            const id = nearest(toSvg(ev));
+            setAim(null);
+            if (id) void act({ actionType: 'LOCK', payload: { targetId: id } });
+          }}
+          onPointerCancel={() => setAim(null)}
         >
           {[0.25, 0.5, 0.75].map((k) => (
             <line key={k} x1={0} x2={W} y1={H * k} y2={H * k} stroke="rgba(68,96,112,0.35)" />
@@ -193,12 +235,10 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
                 key={e.id}
                 transform={`translate(${p.x.toFixed(1)} ${Math.max(14, Math.min(H - 22, p.y)).toFixed(1)})`}
                 className={arriving ? 'arriving' : 'tappable'}
-                onClick={
-                  arriving
-                    ? undefined
-                    : () => act({ actionType: 'LOCK', payload: { targetId: e.id } })
-                }
               >
+                {e.id === aimId ? (
+                  <circle r={r + 12} fill="none" stroke="#f2ad4d" strokeDasharray="4 4" />
+                ) : null}
                 <circle r={24} fill="transparent" />
                 {e.kind === 'DRONE' ? (
                   <path
@@ -255,8 +295,20 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
               </g>
             );
           })}
+          {aim ? (
+            <g
+              transform={`translate(${aim.x.toFixed(1)} ${aim.y.toFixed(1)})`}
+              pointerEvents="none"
+            >
+              <circle r={14} fill="none" stroke="#f2ad4d" strokeWidth={1.5} />
+              <path d="M-24 0h14M10 0h14M0 -24v14M0 10v14" stroke="#f2ad4d" strokeWidth={2} />
+            </g>
+          ) : null}
         </svg>
-        <div className="vp-foot">[ RETICLE / CHARGE ]</div>
+        <div className="vp-foot">
+          [ RETICLE / CHARGE ]{' '}
+          {L('ドラッグで照準・満タンの瞬間に発射', 'Drag to aim · fire on full charge')}
+        </div>
       </section>
       <Flow steps={['LOCK', 'CHARGE', 'FIRE']} active={step} />
       <div className="chips" role="group" aria-label={L('目標', 'Targets')}>
@@ -288,7 +340,7 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
       </div>
       <div className="thumb">
         <button
-          className={`btn fire${primary ? '' : ' busy'}`}
+          className={`btn fire${primary ? '' : ' busy'}${perfectNow ? ' perfect' : ''}`}
           disabled={!primary || pending || armHp <= 0}
           onClick={primary ?? undefined}
           style={{ ['--fill' as string]: `${fill}%` }}

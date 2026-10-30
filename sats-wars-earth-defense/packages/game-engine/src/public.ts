@@ -82,6 +82,10 @@ export function toPublicState(s: MatchState): PublicMatchState {
     shields: { SHIELD_L: { ...s.shields.SHIELD_L }, SHIELD_R: { ...s.shields.SHIELD_R } },
     teamSync: Math.round(s.teamSync),
     teamCapacitor: Math.round(s.teamCapacitor),
+    // Only a live link is shown; an expired one is simply gone.
+    link: s.link && s.link.expiresAt >= s.t ? structuredClone(s.link) : null,
+    crisis: s.crisis ? structuredClone(s.crisis) : null,
+    overchargeUntil: s.overchargeUntil,
     stats: { ...s.stats },
     result: s.result,
     hints: {
@@ -104,6 +108,9 @@ export function toPublicState(s: MatchState): PublicMatchState {
       powerLaneMax: s.config.power.laneMax,
       pulseGain: s.config.pulses.capacitorGain,
       pulseAmountSats: s.config.pulses.amountSats,
+      linkWindowMs: s.config.sync.windowMs,
+      linkDamagePerRole: s.config.sync.linkDamagePerRole,
+      perfectShotMs: s.config.weapons.perfectMs,
     },
   };
 }

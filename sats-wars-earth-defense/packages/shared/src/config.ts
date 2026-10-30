@@ -87,6 +87,9 @@ export interface GameConfig {
     energyCost: number;
     weakMultiplier: number;
     weakPointMs: number;
+    /** Releasing FIRE within this window after the charge completes = PERFECT SHOT. */
+    perfectMs: number;
+    perfectMultiplier: number;
   };
   shields: {
     energyCost: number;
@@ -137,8 +140,14 @@ export interface GameConfig {
     slots: number;
   };
   sync: {
+    /** LINK window: a different system must succeed within this to extend the chain. */
     windowMs: number;
+    /** Total SYNC for a chain of 2 / 3 / 4 systems (each link pays the difference). */
     gainByRoles: Record<2 | 3 | 4, number>;
+    /** Bonus for the success that extends a LINK, per system already in it. */
+    linkDamagePerRole: number;
+    linkRepairPerRole: number;
+    linkBlockCapacitorPerRole: number;
     perAction: number;
     decayPerSec: number;
     decayAfterMs: number;
@@ -170,6 +179,20 @@ export interface GameConfig {
     cooldownMs: number;
     maxPerMatch: number;
   };
+  /** REACTOR BLACKOUT crisis (spec §8.1: the GRID PULSE moment). Never payment-only. */
+  crisis: {
+    /** Offset from the wave start; null = no crisis in that wave. */
+    atMs: Record<'WAVE_1' | 'WAVE_2' | 'BOSS', number | null>;
+    durationMs: number;
+    /** With nobody on POWER B, AUTO SUPPORT restores the reactor after this long. */
+    autoFixMs: number;
+    /** Core damage if the blackout is not resolved in time. */
+    failDamage: number;
+    /** Energy regen while the reactor is down runs on reserve at this fraction (0 = dark). */
+    regenFactor: number;
+  };
+  /** After a GRID PULSE or a crew re-route of the blackout: boosted regen for a while. */
+  overcharge: { ms: number; regenFactor: number };
   auto: {
     gunnerEveryMs: number;
     gunnerDamageRatio: number;
@@ -241,6 +264,8 @@ const STANDARD: GameConfig = {
     },
     cooldownMs: 3_000,
     energyCost: 15,
+    perfectMs: 500,
+    perfectMultiplier: 1.25,
     weakMultiplier: 1.5,
     weakPointMs: 6_000,
   },
@@ -270,6 +295,9 @@ const STANDARD: GameConfig = {
   sync: {
     windowMs: 10_000,
     gainByRoles: { 2: 6, 3: 10, 4: 15 },
+    linkDamagePerRole: 0.15,
+    linkRepairPerRole: 4,
+    linkBlockCapacitorPerRole: 2,
     perAction: 1,
     decayPerSec: 0.4,
     decayAfterMs: 8_000,
@@ -284,6 +312,14 @@ const STANDARD: GameConfig = {
     syncAfter: 40,
     failCapacitorKeep: 0.5,
   },
+  crisis: {
+    atMs: { WAVE_1: null, WAVE_2: 28_000, BOSS: 22_000 },
+    durationMs: 25_000,
+    autoFixMs: 15_000,
+    failDamage: 120,
+    regenFactor: 0.3,
+  },
+  overcharge: { ms: 10_000, regenFactor: 1.8 },
   pulses: {
     capacitorGain: 20,
     amountSats: 21,

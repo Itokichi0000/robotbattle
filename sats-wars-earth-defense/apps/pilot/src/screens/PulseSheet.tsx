@@ -125,10 +125,15 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
     body = (
       <>
         <p className="pulse-what">
-          {L(
-            `仲間の共同メカへ送る共有エネルギー。TEAM CAPACITOR が +${q?.capacitorGain ?? 20} されます。支払わなくても最後まで遊べます。`,
-            `Shared energy for the crew's mech: TEAM CAPACITOR +${q?.capacitorGain ?? 20}. You can play to the end without paying.`,
-          )}
+          {q?.crisis
+            ? L(
+                `炉心ブラックアウトを即時復旧し、しばらくエネルギー回復アップ（OVERCHARGE）、CHARGE +${q.capacitorGain}。払わなくても電力Bの回路修復で復旧できます。`,
+                `Restores the blacked-out reactor at once, then OVERCHARGE and CHARGE +${q.capacitorGain}. The crew can also fix it without paying (POWER B).`,
+              )
+            : L(
+                `仲間の共同メカへ送る共有エネルギー。TEAM CAPACITOR +${q?.capacitorGain ?? 20} と、しばらくエネルギー回復アップ（OVERCHARGE）。支払わなくても最後まで遊べます。`,
+                `Shared energy for the crew's mech: TEAM CAPACITOR +${q?.capacitorGain ?? 20} and a short OVERCHARGE. You can play to the end without paying.`,
+              )}
         </p>
         <dl className="pulse-terms">
           <div>
@@ -186,7 +191,10 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
                 : !q.inCombat
                   ? L('搭乗中の戦闘中だけ', 'Only aboard, during combat')
                   : q.capacitorFull
-                    ? L('CHARGE は満タン（今は不要）', 'CHARGE is full (not needed now)')
+                    ? L(
+                        'CHARGE 満タン・OVERCHARGE 中（今は不要）',
+                        'Full and overcharged (not needed now)',
+                      )
                     : `+${q.capacitorGain} CAPACITOR`}
             </small>
           </span>
@@ -198,14 +206,18 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
   return (
     <div className="sheet-back" onClick={close}>
       <div
-        className={`sheet sw-frame${live ? ' live' : ''}`}
+        className={`sheet sw-frame${live ? ' live' : ''}${p.quote?.crisis ? ' crisis' : ''}`}
         role="dialog"
         aria-label={L('共有エネルギー', 'Shared energy')}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sheet-head">
           <IconBolt size={18} />
-          <b>{L('共有エネルギーパルス', 'SHARED ENERGY PULSE')}</b>
+          <b>
+            {p.quote?.crisis
+              ? L('GRID PULSE — 炉心を即時復旧', 'GRID PULSE — restore the reactor')
+              : L('共有エネルギーパルス', 'SHARED ENERGY PULSE')}
+          </b>
           <button className="ph-lang" onClick={close} aria-label={L('閉じる', 'Close')}>
             ×
           </button>

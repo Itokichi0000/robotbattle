@@ -2,7 +2,9 @@ import { useLang, useStore, useTicker } from '@swed/client';
 import { isCombatPhase, SEATS } from '@swed/shared';
 import type { EngineerSeatId, GunnerSeatId, SeatId, ShieldSeatId } from '@swed/shared';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { CAPTURE } from './capture';
 import { clearNotice, loadSession, sessionStore, store } from './net';
+import { CrisisBanner, CrisisFlash } from './screens/Crisis';
 import { Debrief } from './screens/Debrief';
 import { Defense } from './screens/Defense';
 import { Engineer } from './screens/Engineer';
@@ -77,9 +79,11 @@ function Router() {
     return (
       <>
         <Console seat={seat} />
+        <CrisisBanner seat={seat} />
         <OverdriveCall seat={seat} />
+        <CrisisFlash />
         {pulseOpen ? <PulseSheet onClose={() => pulseUi.set(false)} /> : null}
-        {s.paused ? (
+        {s.paused && !CAPTURE ? (
           <div className="overlay">
             {L('作戦一時停止中 — 運営の再開を待っています', 'Paused — waiting for the operator')}
           </div>

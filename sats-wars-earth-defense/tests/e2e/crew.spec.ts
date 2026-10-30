@@ -6,7 +6,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test';
-import type { MatchSnapshotMsg } from '@swed/shared';
+import type { MatchSnapshotMsg, RouterPuzzle } from '@swed/shared';
 import { solvePuzzle } from '../../packages/game-engine/src/router';
 import { signedCallback } from '../../apps/server/src/testWallet';
 import { BASE, OPERATOR_PASSWORD } from './playwright.config';
@@ -172,9 +172,21 @@ async function solveRouterOnPhone(router: Page, op: Page): Promise<boolean> {
   );
   if (!lane) return false;
   const puzzle = s.circuits[lane].puzzle!;
+  await router.getByRole('tab', { name: new RegExp(LANE_JA[lane]) }).click();
+  return turnTilesAndConnect(router, puzzle);
+}
+
+/** REACTOR BLACKOUT on POWER B's phone: the core tab opens by itself; re-route it. */
+async function solveBlackoutOnPhone(router: Page, op: Page): Promise<boolean> {
+  const s = (await publicMatch(op)).state;
+  if (!s.crisis) return false;
+  await router.getByRole('tab', { name: /炉心 BLACKOUT/ }).click();
+  return turnTilesAndConnect(router, s.crisis.puzzle);
+}
+
+async function turnTilesAndConnect(router: Page, puzzle: RouterPuzzle): Promise<boolean> {
   const target = solvePuzzle(puzzle);
   if (!target) return false;
-  await router.getByRole('tab', { name: new RegExp(LANE_JA[lane]) }).click();
   for (let i = 0; i < 9; i++) {
     const turns = (((target[i]! - puzzle.tiles[i]!.rot) % 4) + 4) % 4;
     for (let k = 0; k < turns; k++)
@@ -226,10 +238,13 @@ test('eight seats, one sortie: people and labelled demo bots fly to the debrief'
   // POWER B and ENGINEER: answer the first overload and the first damage on their section.
   let routed = false;
   let repaired = false;
+  let blackoutRouted = false;
   await expect
     .poll(
       async () => {
         const s = (await publicMatch(op)).state;
+        if (s.crisis && !blackoutRouted)
+          blackoutRouted = await solveBlackoutOnPhone(router, op).catch(() => false);
         if (
           !routed &&
           (['weapon', 'shield', 'mobility', 'repair'] as const).some((l) => s.circuits[l].broken)
@@ -246,9 +261,10 @@ test('eight seats, one sortie: people and labelled demo bots fly to the debrief'
           if (await btn.isEnabled().catch(() => false)) {
             await btn.click().catch(() => undefined);
             for (const n of [1, 2, 3])
+              // Bolts are turned by a circular drag; Enter is the accessible equivalent.
               await engineer
                 .getByRole('button', { name: `ボルト ${n}` })
-                .click({ timeout: 3_000 })
+                .press('Enter', { timeout: 3_000 })
                 .catch(() => undefined);
           }
         }
@@ -266,6 +282,14 @@ test('eight seats, one sortie: people and labelled demo bots fly to the debrief'
     .poll(
       async () => {
         const m = await publicMatch(op);
+        // REACTOR BLACKOUT: both screens call it; POWER B's phone re-routes the core.
+        if (m.state.crisis && !blackoutRouted) {
+          await expect(display.locator('.crisis-banner'))
+            .toBeVisible({ timeout: 5_000 })
+            .catch(() => undefined);
+          await expect(power.getByText('REACTOR BLACKOUT')).toBeVisible();
+          blackoutRouted = await solveBlackoutOnPhone(router, op).catch(() => false);
+        }
         if (m.state.overdrive.status !== 'IDLE' && !sawOverdrive) {
           sawOverdrive = true;
           await expect(display.locator('.od-banner'))
@@ -286,6 +310,9 @@ test('eight seats, one sortie: people and labelled demo bots fly to the debrief'
   expect(end.stats.repairs).toBeGreaterThan(0);
   expect(end.stats.routesFixed).toBeGreaterThan(0);
   expect(end.stats.pulses).toBe(0);
+  // At least one blackout was met and POWER B's phone brought the reactor back.
+  expect(end.stats.blackouts).toBeGreaterThanOrEqual(1);
+  expect(end.stats.blackoutsByRoute).toBeGreaterThanOrEqual(1);
   await expect(power.getByText(/VICTORY|DEFEAT|勝利|敗北|撃退|防衛失敗/).first()).toBeVisible({
     timeout: 20_000,
   });

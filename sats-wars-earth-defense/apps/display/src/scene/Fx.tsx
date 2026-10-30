@@ -238,7 +238,8 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
   const pools = useMemo(() => {
     const beamGeo = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
     beamGeo.translate(0, 0.5, 0);
-    const beams: Beam[] = Array.from({ length: 16 }, () => {
+    // Lightning strikes use ~14 segments at once, so the pool is generous.
+    const beams: Beam[] = Array.from({ length: 40 }, () => {
       const mat = new THREE.MeshBasicMaterial({
         transparent: true,
         blending: THREE.AdditiveBlending,
@@ -453,6 +454,22 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       slot.mat.color.set(color);
       slot.mesh.visible = false;
     };
+    /** A jagged strike: short beams between jittered points, a bright core and a wide halo. */
+    const lightning = (from: THREE.Vector3, to: THREE.Vector3, life: number) => {
+      const n = 7;
+      let prev = from.clone();
+      for (let i = 1; i <= n; i++) {
+        const k = i / n;
+        const next = from.clone().lerp(to, k);
+        if (i < n) {
+          const j = 2.2 * Math.sin(Math.PI * k);
+          next.add(tmpC.set((Math.random() - 0.5) * j * 2, 0, (Math.random() - 0.5) * j * 2));
+        }
+        beam(prev, next, '#ffffff', 0.22, life);
+        beam(prev, next, COLORS.ally, 0.9, life * 0.8);
+        prev = next;
+      }
+    };
     const later = (sec: number, run: () => void) =>
       queue.current.push({ at: fxClock.current + sec, run });
     const shieldPoint = (dir: Direction, out: THREE.Vector3) =>
@@ -475,6 +492,11 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           beam(a, b, left ? '#ffcf7a' : '#bff6ff', left ? 0.42 : 0.2, left ? 0.32 : 0.22);
           beam(a, b, left ? COLORS.action : COLORS.ally, left ? 0.9 : 0.5, left ? 0.18 : 0.14);
           sparks.spawn(b, e.auto ? 14 : 34, left ? COLORS.action : COLORS.ally, 14, 0.7);
+          if (e.perfect && !e.auto) {
+            // PERFECT SHOT: a white-hot core to the beam and a brighter impact.
+            beam(a, b, '#ffffff', left ? 0.18 : 0.1, 0.4);
+            sparks.spawn(b, 40, '#ffffff', 18, 0.6);
+          }
           flashLevel.current[left ? 'L' : 'R'] = e.auto ? 0.4 : 1;
           if (!e.auto) cameraKick(left ? 0.25 : 0.15);
           break;
@@ -525,6 +547,7 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
         }
         case 'team_combo':
           pools.combo.userData.life = 1;
+          pools.combo.userData.full = e.link >= 4;
           pools.combo.visible = true;
           break;
         case 'part_repaired':
@@ -566,7 +589,16 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           break;
         }
         case 'sats_pulse_settled': {
-          // The shared pulse: from the pilot's station into the chest reactor (spec §8.1).
+          // The shared pulse: Lightning strikes the chest reactor from the sky (the GRID PULSE
+          // moment), then the pilot's own station feeds it too (spec §8.1).
+          const core = station('core', tmpB).clone();
+          lightning(core.clone().add(tmpC.set(6, 70, -30)), core, e.crisis ? 0.9 : 0.6);
+          later(0.08, () =>
+            lightning(core.clone().add(tmpC.set(-10, 64, -24)), core, e.crisis ? 0.7 : 0.45),
+          );
+          sparks.spawn(core, e.crisis ? 140 : 70, COLORS.ally, 16, 0.9);
+          blast(core.clone(), e.crisis ? 3.2 : 2, '#bff6ff');
+          cameraKick(e.crisis ? 0.9 : 0.5);
           const to = station('core', tmpB).clone();
           const from = e.seatId
             ? seatPos(e.seatId, tmpA).clone()
@@ -576,6 +608,33 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
             pools.combo.userData.life = 1;
             pools.combo.visible = true;
           });
+          break;
+        }
+        case 'crisis_started': {
+          const core = station('core', tmpA).clone();
+          sparks.spawn(core, 90, COLORS.danger, 9, 0.7);
+          blast(core, 1.6, '#ff4a4a');
+          cameraKick(0.5);
+          break;
+        }
+        case 'crisis_resolved': {
+          if (e.by === 'PULSE') break; // the pulse case already struck
+          const core = station('core', tmpB).clone();
+          // POWER B's re-route (or AUTO): power runs back up the spine into the reactor.
+          orb(station('backpack', tmpA).clone(), core, COLORS.power, {
+            dur: 0.6,
+            arc: 1.2,
+            size: 0.5,
+            burst: 60,
+          });
+          later(0.6, () => blast(core.clone(), 2.2, COLORS.power));
+          break;
+        }
+        case 'crisis_failed': {
+          const core = station('core', tmpA).clone();
+          sparks.spawn(core, 160, '#ff6a3a', 14, 0.9);
+          blast(core, 3, '#ff4a2a');
+          cameraKick(1);
           break;
         }
         case 'overdrive_window':
@@ -760,7 +819,7 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       combo.userData.life = l;
       combo.position.set(0, 9.4, -1.4);
       combo.lookAt(s.camera.position);
-      combo.scale.setScalar(1.5 + (1 - l) * 5);
+      combo.scale.setScalar((1.5 + (1 - l) * 5) * (combo.userData.full ? 1.8 : 1));
       (combo.material as THREE.MeshBasicMaterial).opacity = Math.max(0, l) * flashScale;
       if (l <= 0) combo.visible = false;
     }

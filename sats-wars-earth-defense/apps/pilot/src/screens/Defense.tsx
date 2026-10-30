@@ -9,8 +9,15 @@ import { Flow, Gauge, PilotHeader, reasonText, SystemLine, useL } from '../ui';
 
 /**
  * DEFENSE console (spec §5.4, §9.4, ref 06): read the warning in your two sectors, then
- * DEPLOY SHIELD inside the guard window. Same countdown as the big screen (server clock).
+ * DEPLOY SHIELD inside the guard window — or swipe on the dial toward the attack to raise
+ * that shield at once. Same countdown as the big screen (server clock).
  */
+
+/** Swipe angle (0 = up, clockwise) to the nearest of the four sectors. */
+function dirOfSwipe(dx: number, dy: number): Direction {
+  const deg = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+  return (['FRONT', 'RIGHT', 'REAR', 'LEFT'] as const)[Math.round(deg / 90) % 4]!;
+}
 
 const SECTOR_ANGLE: Record<Direction, number> = { FRONT: 0, RIGHT: 90, REAR: 180, LEFT: 270 };
 
@@ -88,19 +95,20 @@ export function Defense({ seat }: { seat: ShieldSeatId }) {
   const cooling = mt < sh.cooldownUntil;
   const lowEnergy = s.energy.shield < s.hints.shieldCost;
 
-  const deploy = async () => {
+  const deploy = async (d: Direction = dir) => {
     if (pending) return;
     haptic(20);
     setPending(true);
-    const r = await sendAction(seat, { actionType: 'DEPLOY_SHIELD', payload: { dir } });
+    const r = await sendAction(seat, { actionType: 'DEPLOY_SHIELD', payload: { dir: d } });
     setPending(false);
     if (!r.accepted) setMsg({ text: reasonText(r.reasonCode, L), tone: 'bad' });
     else
       setMsg({
-        text: L(`シールド展開 ${DIRECTION_LABEL[dir].ja}`, `Shield up ${dir}`),
+        text: L(`シールド展開 ${DIRECTION_LABEL[d].ja}`, `Shield up ${d}`),
         tone: 'info',
       });
   };
+  const swipe = useRef<{ x: number; y: number } | null>(null);
 
   const lead = next ? next.impactAt - mt : null;
   const span = s.hints.threatWarnMs;
@@ -128,7 +136,28 @@ export function Defense({ seat }: { seat: ShieldSeatId }) {
             viewBox="-110 -110 220 220"
             className="dial"
             role="img"
-            aria-label={L('攻撃方向', 'Attack directions')}
+            aria-label={L('攻撃方向（スワイプで展開）', 'Attack directions (swipe to deploy)')}
+            onPointerDown={(ev) => {
+              swipe.current = { x: ev.clientX, y: ev.clientY };
+            }}
+            onPointerUp={(ev) => {
+              const from = swipe.current;
+              swipe.current = null;
+              if (!from) return;
+              const dx = ev.clientX - from.x;
+              const dy = ev.clientY - from.y;
+              if (Math.hypot(dx, dy) < 28) return; // a tap selects; a swipe deploys
+              const d = dirOfSwipe(dx, dy);
+              if (!mine.includes(d)) {
+                setMsg({ text: L('その方向は担当外です', 'Not your sector'), tone: 'bad' });
+                return;
+              }
+              setManual({ dir: d, at: performance.now() });
+              void deploy(d);
+            }}
+            onPointerCancel={() => {
+              swipe.current = null;
+            }}
           >
             {(['FRONT', 'RIGHT', 'REAR', 'LEFT'] as Direction[]).map((d) => {
               const isMine = mine.includes(d);
@@ -228,7 +257,10 @@ export function Defense({ seat }: { seat: ShieldSeatId }) {
             <rect x={toX(lead) - 1.5} y={6} width={3} height={22} fill="#ef596b" />
           ) : null}
         </svg>
-        <div className="vp-foot">[ DIRECTION / SHIELD ]</div>
+        <div className="vp-foot">
+          [ DIRECTION / SHIELD ]{' '}
+          {L('攻撃の方向へスワイプで即展開', 'Swipe toward the attack to deploy')}
+        </div>
       </section>
       <Flow
         steps={['READ', 'GUARD WINDOW']}
@@ -251,7 +283,7 @@ export function Defense({ seat }: { seat: ShieldSeatId }) {
         <button
           className={`btn shield${cooling || up ? ' busy' : ''}`}
           disabled={pending || cooling || up}
-          onClick={deploy}
+          onClick={() => void deploy()}
           style={{
             ['--fill' as string]: cooling
               ? `${100 - ((sh.cooldownUntil - mt) / s.hints.shieldCooldownMs) * 100}%`

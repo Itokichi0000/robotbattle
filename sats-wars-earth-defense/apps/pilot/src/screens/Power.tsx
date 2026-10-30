@@ -74,6 +74,13 @@ export function Power() {
     [L],
   );
 
+  // Drag along a lane bar to set its share directly (snaps to 5 %, capped per lane).
+  const dragTo = (lane: PowerLane, ev: React.PointerEvent<HTMLDivElement>) => {
+    const r = ev.currentTarget.getBoundingClientRect();
+    const v = Math.round((((ev.clientX - r.left) / r.width) * max) / 5) * 5;
+    setDraft((d) => ({ ...d, [lane]: Math.max(0, Math.min(max, v)) }));
+  };
+
   const step = (lane: PowerLane, delta: number) => {
     haptic(8);
     setDraft((d) => ({ ...d, [lane]: Math.max(0, Math.min(max, d[lane] + delta)) }));
@@ -148,7 +155,18 @@ export function Power() {
                   >
                     −
                   </button>
-                  <div className="lane-bar" aria-hidden>
+                  <div
+                    className="lane-bar drag"
+                    aria-hidden
+                    onPointerDown={(ev) => {
+                      ev.currentTarget.setPointerCapture(ev.pointerId);
+                      haptic(5);
+                      dragTo(lane, ev);
+                    }}
+                    onPointerMove={(ev) => {
+                      if (ev.currentTarget.hasPointerCapture(ev.pointerId)) dragTo(lane, ev);
+                    }}
+                  >
                     <i style={{ width: `${(draft[lane] / max) * 100}%` }} />
                     <b style={{ width: `${(s.energy[lane] / s.hints.laneMax) * 100}%` }} />
                   </div>
@@ -169,7 +187,11 @@ export function Power() {
           })}
         </div>
         <div className="vp-foot">
-          [ ROUTING / GAUGES ] {L('細線＝現在の蓄電量', 'thin line = stored energy')}
+          [ ROUTING / GAUGES ]{' '}
+          {L(
+            'バーをドラッグで配分・細線＝蓄電量',
+            'drag a bar to set it · thin line = stored energy',
+          )}
         </div>
       </section>
       <Flow steps={['ALLOCATE', 'CONFIRM']} active={changed ? 1 : 0} />

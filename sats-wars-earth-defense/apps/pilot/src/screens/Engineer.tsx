@@ -2,15 +2,20 @@ import { useStore, useTicker } from '@swed/client';
 import { ENGINEER_COVERAGE, MECH_PART_IDS, PARTS } from '@swed/shared';
 import type { EngineerSeatId, MechPartId, PublicMatchState } from '@swed/shared';
 import { COLORS, IconWrench } from '@swed/ui-tokens';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { haptic, sendAction, store } from '../net';
 import { Flow, Gauge, PilotHeader, reasonText, SystemLine, useL } from '../ui';
 
 /**
  * ENGINEER console (spec §5.6, §9.6): RAIJIN's silhouette with damaged parts in red.
- * SCAN (pick a part in your section) → REPAIR (tighten the numbered bolts in order) →
- * CONFIRM (the server checks the order and applies the repair).
+ * SCAN (pick a part in your section) → REPAIR (turn the numbered bolts in order: drag around
+ * a bolt to tighten it; a long press or Enter also works) → CONFIRM (the server checks the
+ * order and applies the repair).
  */
+
+/** Degrees of turning that tighten one bolt, and the press that also does (accessibility). */
+const TURN_DEG = 300;
+const HOLD_MS = 700;
 
 /** Where each part sits on the silhouette (same drawing as the seat map). */
 const PART_XY: Record<MechPartId, [number, number, number, number]> = {
@@ -111,6 +116,49 @@ export function Engineer({ seat }: { seat: EngineerSeatId }) {
     }
   };
 
+  // Turning a bolt: accumulate the angle the finger sweeps around the bolt's centre.
+  const svgRef = useRef<SVGSVGElement>(null);
+  const turnRef = useRef<{ slot: number; last: number; total: number; timer: number } | null>(null);
+  const [turn, setTurn] = useState<{ slot: number; deg: number } | null>(null);
+  const angleAt = (slot: number, ev: { clientX: number; clientY: number }) => {
+    const r = svgRef.current!.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * 150;
+    const y = ((ev.clientY - r.top) / r.height) * 124;
+    const [cx, cy] = BOLT_XY[slot]!;
+    return (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+  };
+  const endTurn = () => {
+    if (turnRef.current) window.clearTimeout(turnRef.current.timer);
+    turnRef.current = null;
+    setTurn(null);
+  };
+  const tightened = (slot: number) => {
+    endTurn();
+    haptic(25);
+    void tap(slot);
+  };
+  const startTurn = (slot: number, ev: React.PointerEvent<SVGGElement>) => {
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    const timer = window.setTimeout(() => {
+      // Held without turning: tighten anyway (one-handed or limited movement).
+      if (turnRef.current?.slot === slot && Math.abs(turnRef.current.total) < 40) tightened(slot);
+    }, HOLD_MS);
+    turnRef.current = { slot, last: angleAt(slot, ev), total: 0, timer };
+    setTurn({ slot, deg: 0 });
+  };
+  const moveTurn = (slot: number, ev: React.PointerEvent<SVGGElement>) => {
+    const t = turnRef.current;
+    if (!t || t.slot !== slot) return;
+    const a = angleAt(slot, ev);
+    let d = a - t.last;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    t.last = a;
+    t.total += d;
+    if (Math.abs(t.total) >= TURN_DEG) tightened(slot);
+    else setTurn({ slot, deg: Math.abs(t.total) });
+  };
+
   const worst = mine.reduce((a, b) => (s.parts[b] < s.parts[a] ? b : a));
   const cooling = mt < eng.cooldownUntil;
   const left = job ? Math.max(0, job.expiresAt - mt) : 0;
@@ -141,6 +189,7 @@ export function Engineer({ seat }: { seat: EngineerSeatId }) {
         </div>
         {job ? (
           <svg
+            ref={svgRef}
             viewBox="0 0 150 124"
             className="bolts"
             role="group"
@@ -164,10 +213,29 @@ export function Engineer({ seat }: { seat: EngineerSeatId }) {
                   transform={`translate(${x} ${y})`}
                   className={active ? 'tappable' : undefined}
                   role={active ? 'button' : undefined}
+                  tabIndex={active && !done ? 0 : undefined}
                   aria-label={active ? L(`ボルト ${order + 1}`, `Bolt ${order + 1}`) : undefined}
-                  onClick={active ? () => void tap(slot) : undefined}
+                  onPointerDown={active && !done ? (ev) => startTurn(slot, ev) : undefined}
+                  onPointerMove={active && !done ? (ev) => moveTurn(slot, ev) : undefined}
+                  onPointerUp={endTurn}
+                  onPointerCancel={endTurn}
+                  onKeyDown={
+                    active && !done
+                      ? (ev) => (ev.key === 'Enter' || ev.key === ' ') && tightened(slot)
+                      : undefined
+                  }
                 >
                   <circle r={17} fill="transparent" />
+                  {turn?.slot === slot ? (
+                    <circle
+                      r={16}
+                      fill="none"
+                      stroke={COLORS.repair}
+                      strokeWidth={3}
+                      strokeDasharray={`${(turn.deg / TURN_DEG) * 100.5} 200`}
+                      transform="rotate(-90)"
+                    />
+                  ) : null}
                   <path
                     d="M-12 0 L-6 -10 L6 -10 L12 0 L6 10 L-6 10 Z"
                     fill={done ? COLORS.repair : active ? '#1a2a33' : '#0d151b'}
@@ -236,7 +304,10 @@ export function Engineer({ seat }: { seat: EngineerSeatId }) {
         <div className="vp-foot">
           [ MECH WIREFRAME ]{' '}
           {job
-            ? L('番号順にタップ', 'Tap in number order')
+            ? L(
+                '番号順にボルトを回して締める（長押しでも可）',
+                'Turn the bolts in number order (or hold)',
+              )
             : L('赤い部位をタップ', 'Tap a red part')}
         </div>
       </section>

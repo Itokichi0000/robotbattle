@@ -124,17 +124,67 @@ describe('sandbox (VIRTUAL) pulses', () => {
     expect((await intent(cookie)).body.error).toBe('PULSE_LIMIT');
   });
 
-  it('never offers a pulse while CHARGE is already full', async () => {
+  it('never sells a pulse that would add nothing; a blackout always makes it useful', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
     await seatedInCombat(cookie);
-    await launch(await operator());
-    srv.runtime.state.teamCapacitor = srv.runtime.state.config.capacitor.max;
-    const res = await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } });
-    expect(((await res.json()) as { capacitorFull: boolean }).capacitorFull).toBe(true);
+    const op = await operator();
+    await launch(op);
+    const st = srv.runtime.state;
+    const quote = async () =>
+      (await (await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })).json()) as {
+        capacitorFull: boolean;
+        crisis: boolean;
+      };
+    // CHARGE full alone still leaves the OVERCHARGE to gain.
+    st.teamCapacitor = st.config.capacitor.max;
+    expect((await quote()).capacitorFull).toBe(false);
+    // Full and already overcharged: nothing to buy.
+    st.overchargeUntil = st.t + 60_000;
+    expect((await quote()).capacitorFull).toBe(true);
     const r = await intent(cookie);
     expect(r.status).toBe(409);
     expect(r.body.error).toBe('CAPACITOR_FULL');
+  });
+
+  it('a pulse during a REACTOR BLACKOUT restores it; staff can let VIRTUAL pulses confirm themselves', async () => {
+    srv = await new TestServer().start();
+    const cookie = await srv.demoGuest();
+    await seatedInCombat(cookie);
+    const op = await operator();
+    await launch(op);
+    const display = await srv.connect('/display');
+    const events = collect<MatchEventMsg>(display, 'match:event');
+    // Force the blackout now (normally scheduled mid-wave).
+    srv.runtime.state.config.crisis.atMs.WAVE_1 = 0;
+    srv.advance(200);
+    expect(srv.runtime.state.crisis?.kind).toBe('BLACKOUT');
+    // Even with CHARGE full, a blackout makes the pulse worth it.
+    srv.runtime.state.teamCapacitor = srv.runtime.state.config.capacitor.max;
+    srv.runtime.state.overchargeUntil = srv.runtime.state.t + 60_000;
+    const q = (await (
+      await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })
+    ).json()) as {
+      crisis: boolean;
+      capacitorFull: boolean;
+    };
+    expect(q).toMatchObject({ crisis: true, capacitorFull: false });
+    expect((await op({ command: 'SET_AUTO_SETTLE_VIRTUAL', enabled: true })).ok).toBe(true);
+    const r = await intent(cookie);
+    expect(r.status).toBe(200);
+    // Nobody presses SETTLE: one poller pass after the short pause confirms it by itself.
+    srv.built.db
+      .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
+      .run();
+    await srv.built.payments.poll();
+    expect(srv.runtime.state.stats.pulses).toBe(1);
+    expect(srv.runtime.state.crisis).toBeNull();
+    await eventually(() =>
+      events.some((m) => m.payload.type === 'crisis_resolved' && m.payload.by === 'PULSE'),
+    );
+    const pulse = events.find((m) => m.payload.type === 'sats_pulse_settled')!.payload;
+    expect(pulse).toMatchObject({ virtual: true, crisis: true, settleMs: null });
+    expect(srv.runtime.state.stats.blackoutsByPulse).toBe(1);
   });
 });
 

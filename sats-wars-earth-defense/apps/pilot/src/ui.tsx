@@ -1,6 +1,21 @@
-import { formatClock, isCombatPhase, PHASE_LABEL, REASON_TEXT, ROLES, SEATS } from '@swed/shared';
-import type { Lang, PublicMatchState, ReasonCode, SeatId } from '@swed/shared';
-import { IconBolt, IconSignal, ROLE_VAR } from '@swed/ui-tokens';
+import {
+  formatClock,
+  isCombatPhase,
+  PHASE_LABEL,
+  REASON_TEXT,
+  ROLE_IDS,
+  ROLES,
+  SEATS,
+} from '@swed/shared';
+import type { Lang, PublicMatchState, ReasonCode, RoleId, SeatId } from '@swed/shared';
+import {
+  IconBolt,
+  IconCrosshair,
+  IconShield,
+  IconSignal,
+  IconWrench,
+  ROLE_VAR,
+} from '@swed/ui-tokens';
 import { createContext, useContext, type ReactNode } from 'react';
 
 /** Language context: Japanese first, English toggle (spec §3.4). */
@@ -63,6 +78,11 @@ export function PilotHeader({
         {seat ? null : <span className="ph-brand">SATS WARS / PILOT</span>}
         <span className="ph-wave sw-num">{label ? (lang === 'ja' ? label.ja : label.en) : ''}</span>
         <span className="ph-time sw-num">{end !== null ? formatClock(end - mt) : '--:--'}</span>
+        {seat && s && isCombatPhase(s.phase) && mt < s.overchargeUntil ? (
+          <span className="ph-oc sw-num" title="OVERCHARGE">
+            OC {Math.ceil((s.overchargeUntil - mt) / 1000)}s
+          </span>
+        ) : null}
         {seat && s && isCombatPhase(s.phase) ? (
           <button
             className="ph-pulse"
@@ -95,7 +115,70 @@ export function PilotHeader({
           <span className="part">{L(def.partJa, def.partEn)}</span>
         </div>
       ) : null}
+      {seat && s && isCombatPhase(s.phase) ? <LinkBar s={s} mt={mt} seat={seat} /> : null}
     </header>
+  );
+}
+
+const ROLE_ICON: Record<RoleId, typeof IconBolt> = {
+  GUNNER: IconCrosshair,
+  DEFENSE: IconShield,
+  POWER: IconBolt,
+  ENGINEER: IconWrench,
+};
+
+/**
+ * LINK CHAIN made visible (spec §6.6): which systems are in the live link, how long it stays
+ * open, and whether YOUR success right now would extend it (and what that is worth).
+ */
+export function LinkBar({ s, mt, seat }: { s: PublicMatchState; mt: number; seat: SeatId }) {
+  const { L } = useL();
+  const role = SEATS[seat].role;
+  const link = s.link && s.link.expiresAt > mt ? s.link : null;
+  const mineIn = !!link?.roles.includes(role);
+  const yours = !!link && !mineIn;
+  const n = link?.roles.length ?? 0;
+  const bonus =
+    role === 'GUNNER'
+      ? L(
+          `威力+${Math.round(n * s.hints.linkDamagePerRole * 100)}%`,
+          `+${Math.round(n * s.hints.linkDamagePerRole * 100)}% damage`,
+        )
+      : role === 'ENGINEER'
+        ? L('修理量アップ', 'bigger repair')
+        : role === 'DEFENSE'
+          ? L('CHARGE アップ', 'more CHARGE')
+          : L('SYNC アップ', 'more SYNC');
+  const text = !link
+    ? L('LINK — 誰かが成功すると連携が始まる', 'LINK — any success starts a chain')
+    : mineIn
+      ? L(`LINK ×${n} — ほかの系統の成功を待つ`, `LINK ×${n} — waiting for other systems`)
+      : L(`今あなたが成功で LINK ×${n + 1}（${bonus}）`, `Succeed now: LINK ×${n + 1} (${bonus})`);
+  return (
+    <div className={`link-bar${yours ? ' yours' : ''}${link ? ' live' : ''}`} aria-live="polite">
+      <div className="link-roles" aria-hidden>
+        {ROLE_IDS.map((r) => {
+          const Icon = ROLE_ICON[r];
+          const on = !!link?.roles.includes(r);
+          return (
+            <span
+              key={r}
+              className={`lr${on ? ' on' : ''}${r === role ? ' me' : ''}`}
+              style={{ ['--rc' as string]: ROLE_VAR[r] }}
+            >
+              <Icon size={14} />
+            </span>
+          );
+        })}
+      </div>
+      <span className="link-text">{text}</span>
+      {link ? (
+        <i
+          className="link-time"
+          style={{ width: `${Math.max(0, ((link.expiresAt - mt) / s.hints.linkWindowMs) * 100)}%` }}
+        />
+      ) : null}
+    </div>
   );
 }
 

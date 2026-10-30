@@ -38,6 +38,8 @@ interface IntentRow {
 }
 
 export const INVOICE_TTL_SECONDS = 180;
+/** Sandbox demo: VIRTUAL invoices confirm themselves after this pause (operator opt-in). */
+export const AUTO_SETTLE_MS = 1_500;
 
 export interface PaymentServiceDeps {
   db: Db;
@@ -59,6 +61,8 @@ type CheckResult = { ok: boolean; detail: string; at: string };
 export class PaymentService {
   readonly mode: PaymentMode;
   private liveEnabled = false;
+  /** Sandbox demo: staff let VIRTUAL invoices confirm themselves after a short pause. */
+  private autoSettleVirtual = false;
   private checks: { backend: CheckResult | null; webhook: CheckResult | null } = {
     backend: null,
     webhook: null,
@@ -77,7 +81,8 @@ export class PaymentService {
 
   start(): void {
     if (this.pollTimer) return;
-    this.pollTimer = setInterval(() => void this.poll(), 3_000);
+    // Sandbox polls faster so an auto-confirmed VIRTUAL pulse lands while the moment lasts.
+    this.pollTimer = setInterval(() => void this.poll(), this.mode === 'sandbox' ? 1_000 : 3_000);
     this.pollTimer.unref?.();
   }
 
@@ -116,6 +121,15 @@ export class PaymentService {
     };
   }
 
+  /**
+   * A pulse must do something: end a blackout, add CHARGE, or start an OVERCHARGE. Only when
+   * CHARGE is full and the reactor is already overcharged would it add nothing.
+   */
+  private pulseUseful(): boolean {
+    const s = this.deps.runtime.state;
+    return !!s.crisis || s.teamCapacitor < s.config.capacitor.max || s.t >= s.overchargeUntil;
+  }
+
   /** Everything the phone needs to show before the pilot decides (amount, receiver, limits). */
   quote(pilot: PilotRow): PaymentsStatus {
     const s = this.deps.runtime.state;
@@ -135,7 +149,8 @@ export class PaymentService {
       remaining: Math.max(0, lim.perPilot - mine.n),
       cooldownUntil: lastAt ? new Date(lastAt + lim.cooldownMs).toISOString() : null,
       inCombat: isCombatPhase(s.phase) && this.deps.runtime.seatOf(pilot.id) !== null,
-      capacitorFull: s.teamCapacitor >= s.config.capacitor.max,
+      capacitorFull: !this.pulseUseful(),
+      crisis: !!s.crisis,
     };
   }
 
@@ -178,7 +193,7 @@ export class PaymentService {
       .get(s.matchId) as { n: number };
     if (total.n >= lim.maxPerMatch) return { ok: false, code: 'PULSE_MATCH_LIMIT' };
     // Never sell a pulse that cannot add anything (real money for no effect).
-    if (s.teamCapacitor >= s.config.capacitor.max) return { ok: false, code: 'CAPACITOR_FULL' };
+    if (!this.pulseUseful()) return { ok: false, code: 'CAPACITOR_FULL' };
 
     const intentId = `pi_${randomUUID()}`;
     this.creating.add(pilot.id);
@@ -244,7 +259,10 @@ export class PaymentService {
       let applied: 'applied' | 'unapplied' = 'unapplied';
       let note = '';
       if (rt.state.matchId === r.match_id && isCombatPhase(rt.state.phase)) {
-        const out = rt.applyPulse(r.id, r.seat_id, r.mode === 'sandbox');
+        // Invoice issued → confirmed here: the honest "Lightning speed" number for the screen
+        // (includes the payer's own time in the wallet; never shown for VIRTUAL pulses).
+        const settleMs = Math.max(0, Date.now() - Date.parse(r.created_at));
+        const out = rt.applyPulse(r.id, r.seat_id, r.mode === 'sandbox', settleMs);
         applied = out ? 'applied' : 'unapplied';
         if (!out) note = 'engine refused (duplicate or not in combat)';
       } else {
@@ -316,20 +334,36 @@ export class PaymentService {
     for (const r of rows) {
       if (this.mode === 'sandbox') {
         if (Date.parse(r.expires_at) < Date.now()) this.markExpired(r);
+        else if (
+          this.autoSettleVirtual &&
+          Date.now() - Date.parse(r.created_at) >= AUTO_SETTLE_MS
+        ) {
+          this.sandboxSettle(r.id, 'auto-virtual');
+        }
       } else {
         await this.recheck(r, 'poll');
       }
     }
   }
 
+  /** Operator: let VIRTUAL invoices confirm themselves (sandbox demos without a cashier). */
+  setAutoSettleVirtual(enabled: boolean): { ok: boolean; message: string } {
+    if (this.mode !== 'sandbox') return { ok: false, message: 'only in sandbox mode' };
+    this.autoSettleVirtual = enabled;
+    return {
+      ok: true,
+      message: enabled ? 'VIRTUAL pulses confirm automatically' : 'VIRTUAL pulses wait for SETTLE',
+    };
+  }
+
   /** Operator: settle a VIRTUAL invoice (sandbox only). */
-  sandboxSettle(intentId: string): { ok: boolean; message: string } {
+  sandboxSettle(intentId: string, via = 'operator-sandbox'): { ok: boolean; message: string } {
     if (this.mode !== 'sandbox') return { ok: false, message: 'only in sandbox mode' };
     const r = this.row(intentId);
     if (!r || r.status !== 'pending') return { ok: false, message: 'no pending intent' };
     const sandbox = this.deps.provider as SandboxPaymentProvider;
     if (!sandbox.settle(r.payment_hash)) return { ok: false, message: 'already settled' };
-    this.confirmSettled(r, 'operator-sandbox');
+    this.confirmSettled(r, via);
     return { ok: true, message: `VIRTUAL pulse ${intentId} settled` };
   }
 
@@ -409,6 +443,7 @@ export class PaymentService {
       provider: this.deps.provider.name,
       enabled: this.enabled,
       liveEnabled: this.liveEnabled,
+      autoSettleVirtual: this.autoSettleVirtual,
       recipient: this.deps.recipient,
       amountSats: this.deps.amountSats,
       capacitorGain: lim.gain,

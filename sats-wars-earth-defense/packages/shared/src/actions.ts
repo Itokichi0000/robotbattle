@@ -17,6 +17,8 @@ export type PilotActionInput =
   /** ENGINEER: pick a damaged part (opens a bolt job), then tighten bolts in order. */
   | { actionType: 'REPAIR_START'; payload: { part: MechPartId } }
   | { actionType: 'REPAIR_FINISH'; payload: { part: MechPartId; order: number[] } }
+  /** POWER B: re-route the reactor core circuit during a REACTOR BLACKOUT. */
+  | { actionType: 'BLACKOUT_ROUTE'; payload: { rotations: number[] } }
   /** Anyone: confirm RAIJIN OVERDRIVE for your role. */
   | { actionType: 'SYNC_NOW'; payload: Record<string, never> };
 
@@ -55,6 +57,7 @@ export const REASON_CODES = [
   'JOB_EXPIRED',
   'WRONG_ORDER',
   'OVERDRIVE_NOT_READY',
+  'NO_CRISIS',
   /** Client-side only: no answer from the server in time. */
   'NETWORK',
 ] as const;
@@ -100,6 +103,7 @@ export const REASON_TEXT: Record<ReasonCode, { ja: string; en: string }> = {
   JOB_EXPIRED: { ja: '時間切れ。もう一度選び直し', en: 'Too slow. Pick the part again' },
   WRONG_ORDER: { ja: 'ボルトの順番が違います', en: 'Wrong bolt order' },
   OVERDRIVE_NOT_READY: { ja: 'OVERDRIVE はまだ使えません', en: 'OVERDRIVE is not ready' },
+  NO_CRISIS: { ja: '炉心は正常です', en: 'The reactor is running' },
   NETWORK: { ja: '通信待ち。もう一度押してください', en: 'No answer. Tap again' },
 };
 

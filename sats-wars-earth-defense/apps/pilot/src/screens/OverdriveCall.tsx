@@ -69,7 +69,8 @@ export function OverdriveCall({ seat }: { seat: SeatId }) {
 
   return (
     <div
-      className={`od-call${od.status === 'READY' ? ' ready' : ''}`}
+      // While a blackout banner holds the top, the READY strip stays in the thumb zone.
+      className={`od-call${od.status === 'READY' && !s.crisis ? ' ready' : ''}`}
       role="dialog"
       aria-label="RAIJIN OVERDRIVE"
     >

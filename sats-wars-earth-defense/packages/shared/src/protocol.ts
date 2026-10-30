@@ -88,8 +88,8 @@ export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }
   PULSE_COOLDOWN: { ja: '少し待ってから（30秒に1回）', en: 'Once every 30 s' },
   PULSE_MATCH_LIMIT: { ja: 'この作戦全体の上限に達しました', en: 'Round-wide limit reached' },
   CAPACITOR_FULL: {
-    ja: 'CHARGE は満タンです。今は送っても増えません',
-    en: 'CHARGE is full; a pulse would add nothing now',
+    ja: 'CHARGE 満タン・オーバーチャージ中。今は送っても効果がありません',
+    en: 'CHARGE full and overcharged: a pulse would add nothing now',
   },
   BACKEND_UNAVAILABLE: {
     ja: '決済サーバーに接続できません。ゲームはそのまま続けられます',
@@ -121,8 +121,10 @@ export interface PaymentsStatus {
   remaining: number;
   cooldownUntil: string | null;
   inCombat: boolean;
-  /** TEAM CAPACITOR is at its cap: a pulse would add nothing, so none is offered. */
+  /** A pulse would add nothing right now (CHARGE full and already overcharged). */
   capacitorFull: boolean;
+  /** REACTOR BLACKOUT in progress: a pulse restores the reactor at once. */
+  crisis: boolean;
 }
 
 export interface SessionStatusMsg {
@@ -210,7 +212,8 @@ export type OperatorCommand =
   | { command: 'SANDBOX_SETTLE'; intentId: string }
   | { command: 'PAYMENTS_CHECK' }
   | { command: 'PAYMENTS_ENABLE_LIVE'; confirm: string }
-  | { command: 'PAYMENTS_DISABLE' };
+  | { command: 'PAYMENTS_DISABLE' }
+  | { command: 'SET_AUTO_SETTLE_VIRTUAL'; enabled: boolean };
 
 export type OperatorCommandName = OperatorCommand['command'];
 
@@ -239,6 +242,8 @@ export interface OperatorPaymentsView {
   provider: string;
   enabled: boolean;
   liveEnabled: boolean;
+  /** Sandbox: VIRTUAL invoices confirm themselves (operator opt-in for demos). */
+  autoSettleVirtual: boolean;
   recipient: string;
   amountSats: number;
   capacitorGain: number;

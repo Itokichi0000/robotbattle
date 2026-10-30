@@ -17,11 +17,18 @@ export const anim = {
   hatch: 0,
   /** Rotating amber warning beacon 0..1. */
   alarm: 0,
+  /** REACTOR BLACKOUT: 1 while the reactor is dark (lights eased toward it each frame). */
+  blackoutTarget: 0,
+  blackout: 0,
+  /** Reactor OVERCHARGE after a GRID PULSE or crew re-route. */
+  overcharge: false,
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
+  anim.blackoutTarget = s?.crisis ? 1 : 0;
+  anim.overcharge = !!s && mt < s.overchargeUntil;
   anim.alarm = 0;
   anim.hatch = 0;
   anim.liftY = 0;

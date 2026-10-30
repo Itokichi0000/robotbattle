@@ -80,6 +80,11 @@ function defense(
 }
 
 function router(pub: PublicMatchState, t: number): PilotActionInput | null {
+  // A blackout comes first: the whole mech is dark until the core circuit is re-routed.
+  if (pub.crisis && t - pub.crisis.startedAt > 4_500) {
+    const rotations = solvePuzzle(pub.crisis.puzzle);
+    if (rotations) return { actionType: 'BLACKOUT_ROUTE', payload: { rotations } };
+  }
   for (const lane of POWER_LANES) {
     const c = pub.circuits[lane];
     // A person needs a few seconds to read and turn the tiles.

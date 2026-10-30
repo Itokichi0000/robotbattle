@@ -68,6 +68,10 @@ export const pilotActionInputSchema = z.discriminatedUnion('actionType', [
       })
       .strict(),
   }),
+  z.object({
+    actionType: z.literal('BLACKOUT_ROUTE'),
+    payload: z.object({ rotations: z.array(z.number().int().min(0).max(3)).length(9) }).strict(),
+  }),
   z.object({ actionType: z.literal('SYNC_NOW'), payload: z.object({}).strict() }),
 ]);
 
@@ -138,6 +142,7 @@ export const operatorCommandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('PAYMENTS_CHECK') }).strict(),
   z.object({ command: z.literal('PAYMENTS_ENABLE_LIVE'), confirm: z.string().max(16) }).strict(),
   z.object({ command: z.literal('PAYMENTS_DISABLE') }).strict(),
+  z.object({ command: z.literal('SET_AUTO_SETTLE_VIRTUAL'), enabled: z.boolean() }).strict(),
 ]);
 
 export const syncFinisherReqSchema = z.object({ matchId: id, clientActionId: clientKey }).strict();

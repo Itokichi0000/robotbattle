@@ -13,7 +13,8 @@ import { Flow, PilotHeader, reasonText, SystemLine, useL } from '../ui';
  * how far the power reaches; the server judges the rotations you send.
  */
 
-const LANE: Record<PowerLane, { ja: string; en: string; color: string }> = {
+const LANE: Record<PowerLane | 'core', { ja: string; en: string; color: string }> = {
+  core: { ja: '炉心', en: 'CORE', color: COLORS.danger },
   weapon: { ja: '武器系', en: 'WEAPON', color: COLORS.action },
   shield: { ja: 'シールド系', en: 'SHIELD', color: COLORS.ally },
   mobility: { ja: '機動系', en: 'MOBILITY', color: COLORS.text },
@@ -113,9 +114,18 @@ export function Router() {
   const s = st.snap?.state as PublicMatchState;
   const mt = store.matchTime(now);
   const cut = POWER_LANES.filter((l) => s.circuits[l].broken);
-  const [lane, setLane] = useState<PowerLane | null>(null);
-  const active = lane && s.circuits[lane].broken ? lane : (cut[0] ?? null);
-  const puzzle = active ? s.circuits[active].puzzle : null;
+  const [lane, setLane] = useState<PowerLane | 'core' | null>(null);
+  // A REACTOR BLACKOUT comes first: the core circuit tab opens by itself.
+  const active: PowerLane | 'core' | null =
+    lane === 'core' && s.crisis
+      ? 'core'
+      : lane && lane !== 'core' && s.circuits[lane].broken
+        ? lane
+        : s.crisis
+          ? 'core'
+          : (cut[0] ?? null);
+  const puzzle =
+    active === 'core' ? (s.crisis?.puzzle ?? null) : active ? s.circuits[active].puzzle : null;
   const puzzleKey = puzzle
     ? `${active}:${puzzle.entryRow}:${puzzle.exitRow}:${puzzle.tiles.map((t) => t.type + t.rot).join('')}`
     : '';
@@ -168,10 +178,12 @@ export function Router() {
     if (!active || pending) return;
     haptic(20);
     setPending(true);
-    const r = await sendAction('POWER_ROUTER', {
-      actionType: 'ROUTE_SUBMIT',
-      payload: { lane: active, rotations },
-    });
+    const r = await sendAction(
+      'POWER_ROUTER',
+      active === 'core'
+        ? { actionType: 'BLACKOUT_ROUTE', payload: { rotations } }
+        : { actionType: 'ROUTE_SUBMIT', payload: { lane: active, rotations } },
+    );
     setPending(false);
     if (r.accepted) {
       haptic(40);
@@ -183,7 +195,26 @@ export function Router() {
   return (
     <div className="console" style={{ ['--acc' as string]: COLORS.power }}>
       <PilotHeader s={s} mt={mt} seat="POWER_ROUTER" connected={st.connected} />
-      <div className="circuits" role="tablist" aria-label={L('回路', 'Circuits')}>
+      <div
+        className={`circuits${s.crisis ? ' with-core' : ''}`}
+        role="tablist"
+        aria-label={L('回路', 'Circuits')}
+      >
+        {s.crisis ? (
+          <button
+            role="tab"
+            aria-selected={active === 'core'}
+            className={`circuit cut core${active === 'core' ? ' on' : ''}`}
+            style={{ ['--lane' as string]: LANE.core.color }}
+            onClick={() => setLane('core')}
+          >
+            <IconWarning size={14} />
+            <span>{L('炉心 BLACKOUT', 'CORE BLACKOUT')}</span>
+            <small className="sw-num">
+              {Math.max(0, (s.crisis.endsAt - mt) / 1000).toFixed(0)}s
+            </small>
+          </button>
+        ) : null}
         {POWER_LANES.map((l) => {
           const c = s.circuits[l];
           return (

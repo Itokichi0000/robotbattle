@@ -24,8 +24,8 @@ import {
   IconWrench,
   ROLE_VAR,
 } from '@swed/ui-tokens';
-import { useEffect, useMemo, useState } from 'react';
-import { CAPTURE } from '../capture';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { CAPTURE, FX_TIME_SCALE } from '../capture';
 import { store } from '../net';
 import { finisher } from '../scene/cameraBus';
 import { Lobby } from './Lobby';
@@ -172,6 +172,123 @@ function BossBar({ s, mt }: { s: PublicMatchState; mt: number }) {
  * RAIJIN OVERDRIVE call (spec §4.5, §6.7): READY, then the 5 s window with the four systems
  * locking in. AUTO SUPPORT stands in only for systems nobody is flying, and says so.
  */
+/**
+ * REACTOR BLACKOUT call (the GRID PULSE moment): countdown and both ways out, said plainly.
+ * The pulse is invited from the phones; it is never the only way and never shows who paid.
+ */
+function CrisisBanner({ s, mt }: { s: PublicMatchState; mt: number }) {
+  const c = s.crisis;
+  if (!c) return null;
+  const left = Math.max(0, c.endsAt - mt);
+  const crew =
+    c.autoAt !== null
+      ? `AUTO SUPPORT 復旧まで ${Math.max(0, Math.ceil((c.autoAt - mt) / 1000))}s`
+      : '電力B 回路修復中 POWER B RE-ROUTING';
+  return (
+    <div className="crisis-banner sw-frame">
+      <div className="title">
+        <IconWarning size={30} />
+        <b>REACTOR BLACKOUT</b>
+        <span className="ja">炉心停止</span>
+        <span className="secs sw-num">{(left / 1000).toFixed(1)}s</span>
+      </div>
+      <div className="ways">
+        <div className="way pulse">
+          <IconBolt size={22} />
+          <span>
+            GRID PULSE <small>スマホから即時復旧（任意）</small>
+          </span>
+        </div>
+        <span className="or">OR</span>
+        <div className="way crew">
+          <IconWrench size={22} />
+          <span>{crew}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type Moment = { big: string; sub: string; tone: 'bolt' | 'ok' | 'bad'; until: number };
+
+/** The few seconds after a blackout ends (or a pulse lands): what happened, in large type. */
+function useMoment(): Moment | null {
+  const [m, setM] = useState<Moment | null>(null);
+  useEffect(
+    () =>
+      store.onEvent(({ payload: e }) => {
+        // Stretched like every other effect in capture mode (slow software WebGL).
+        const until = performance.now() + 3_800 / FX_TIME_SCALE;
+        if (e.type === 'sats_pulse_settled') {
+          // The honest speed number: invoice issued → payment confirmed (real payments only).
+          const speed =
+            e.settleMs !== null
+              ? `請求から着金まで ${(e.settleMs / 1000).toFixed(1)}秒`
+              : 'VIRTUAL（テスト）';
+          setM({
+            big: 'LIGHTNING PULSE',
+            sub: `${speed}  ·  ${e.crisis ? '炉心復旧 REACTOR RESTORED' : 'CHARGE +' + e.gain}  ·  OVERCHARGE`,
+            tone: 'bolt',
+            until,
+          });
+        }
+        if (e.type === 'crisis_resolved' && e.by === 'ROUTE')
+          setM({
+            big: 'CORE RE-ROUTED',
+            sub: '電力B が炉心を復旧  ·  OVERCHARGE',
+            tone: 'ok',
+            until,
+          });
+        if (e.type === 'crisis_resolved' && e.by === 'AUTO')
+          setM({ big: 'REACTOR RESTORED', sub: 'AUTO SUPPORT が炉心を復旧', tone: 'ok', until });
+        if (e.type === 'crisis_failed')
+          setM({
+            big: 'BLACKOUT DAMAGE',
+            sub: `炉心停止の損傷  コア −${e.damage}`,
+            tone: 'bad',
+            until,
+          });
+      }),
+    [],
+  );
+  return m;
+}
+
+/** LINK CHAIN meter (spec §6.6): which systems are linked right now and how long it holds. */
+function LinkMeter({ s, mt }: { s: PublicMatchState; mt: number }) {
+  const link = s.link && s.link.expiresAt > mt ? s.link : null;
+  const n = link?.roles.length ?? 0;
+  return (
+    <div className={`link-meter${link ? ' live' : ''}`}>
+      <span className="k">LINK</span>
+      <div className="nodes">
+        {ROLE_IDS.map((r, i) => {
+          const Icon = ROLE_ICON[r];
+          const on = !!link?.roles.includes(r);
+          return (
+            <Fragment key={r}>
+              {i > 0 ? <i className={`edge${on && n > 1 ? ' on' : ''}`} /> : null}
+              <span
+                className={`node${on ? ' on' : ''}`}
+                style={{ ['--acc' as string]: ROLE_VAR[r] }}
+              >
+                <Icon size={18} />
+              </span>
+            </Fragment>
+          );
+        })}
+      </div>
+      <span className="v sw-num">{n >= 2 ? `×${n}` : n === 1 ? '…' : ''}</span>
+      {link ? (
+        <i
+          className="timer"
+          style={{ width: `${((link.expiresAt - mt) / s.hints.linkWindowMs) * 100}%` }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function OverdriveBanner({ s, mt }: { s: PublicMatchState; mt: number }) {
   const od = s.overdrive;
   if (od.status === 'IDLE') return null;
@@ -343,13 +460,21 @@ function SystemStrip({
       })}
       {sys(
         'POWER',
-        cut.length
-          ? `OVERLOAD ${cut.map((l) => l[0]!.toUpperCase()).join('/')}`
-          : `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
+        s.crisis
+          ? 'BLACKOUT 炉心停止'
+          : mt < s.overchargeUntil
+            ? `OVERCHARGE ${Math.ceil((s.overchargeUntil - mt) / 1000)}s`
+            : cut.length
+              ? `OVERLOAD ${cut.map((l) => l[0]!.toUpperCase()).join('/')}`
+              : `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
         lane((s.energy.weapon + s.energy.shield + s.energy.mobility + s.energy.repair) / 4),
         {
           POWER_CORE: `PLAN v${s.distributionVersion}`,
-          POWER_ROUTER: cut.length ? `RE-ROUTE ${cut.length}` : 'GRID OK',
+          POWER_ROUTER: s.crisis
+            ? 'CORE RE-ROUTE'
+            : cut.length
+              ? `RE-ROUTE ${cut.length}`
+              : 'GRID OK',
         },
       )}
       {sys('ENGINEER', `${PARTS[worst[0]].labelEn} ${Math.round(worst[1])}%`, avg, {
@@ -388,7 +513,12 @@ function useFeed() {
       const snap = store.getState().snap?.state;
       switch (e.type) {
         case 'team_combo':
-          push(`LINK ESTABLISHED  +${e.gain} SYNC  連携成立`, 'combo');
+          push(
+            e.link >= 4
+              ? `FULL LINK  全系統連携  +${e.gain} SYNC`
+              : `LINK ×${e.link}  +${e.gain} SYNC  連携`,
+            'combo',
+          );
           break;
         case 'enemy_destroyed':
           if (e.kind === 'NULL_CORE') push('NULL CORE DESTROYED  撃破', 'kill');
@@ -489,6 +619,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
   const st = useStore(store);
   const now = useTicker(100);
   const feed = useFeed();
+  const moment = useMoment();
   const flashes = useRoleFlashes();
   const snap = st.snap?.state;
   const mt = store.matchTime(now);
@@ -526,7 +657,9 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
           {combat ? (
             <>
               <BossBar s={snap} mt={mt} />
+              <CrisisBanner s={snap} mt={mt} />
               <OverdriveBanner s={snap} mt={mt} />
+              <LinkMeter s={snap} mt={mt} />
               <ContextAlert s={snap} mt={mt} />
               <Radar s={snap} mt={mt} />
               <WorldMarkers s={snap} mt={mt} />
@@ -568,6 +701,12 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
         <div className="banner">CONNECTING ゲームサーバーに接続中</div>
       ) : null}
       {finishing ? <div className="od-call-big">RAIJIN OVERDRIVE</div> : null}
+      {combat && !finishing && moment && now < moment.until ? (
+        <div className={`moment ${moment.tone}`} role="status">
+          <b>{moment.big}</b>
+          <span>{moment.sub}</span>
+        </div>
+      ) : null}
       <div className="provisional">PROVISIONAL 3D 仮モデル（Phase 5 で本番アートに差し替え）</div>
       {!audioReady ? (
         <div className="sound-hint">CLICK OR ANY KEY: SOUND ON クリックで音声有効化</div>

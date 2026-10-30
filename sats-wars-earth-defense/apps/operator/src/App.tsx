@@ -562,10 +562,18 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
           )}
         </div>
       ) : (
-        <p className="hint">
-          SANDBOX: 架空の請求書です。パイロットが申請したら下の SETTLE
-          で確定します（お金は動きません）。
-        </p>
+        <>
+          <p className="hint">
+            SANDBOX: 架空の請求書です。パイロットが申請したら下の SETTLE
+            で確定します（お金は動きません）。
+          </p>
+          <Toggle
+            checked={p.autoSettleVirtual}
+            onToggle={(v) => run({ command: 'SET_AUTO_SETTLE_VIRTUAL', enabled: v })}
+          >
+            VIRTUAL を自動確定（デモ用・約1.5秒後。お金は動きません）
+          </Toggle>
+        </>
       )}
       <table>
         <thead>

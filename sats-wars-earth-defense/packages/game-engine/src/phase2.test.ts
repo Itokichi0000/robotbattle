@@ -95,9 +95,13 @@ describe('POWER A — reactor plan', () => {
     sim.join('GUNNER_L');
     sim.launch();
     sim.act('POWER_CORE', plan(40, 30, 10, 20, sim.state.distributionVersion));
-    const first = sim.state.recentSuccesses.length;
-    sim.act('POWER_CORE', plan(45, 25, 10, 20, sim.state.distributionVersion));
-    expect(sim.state.recentSuccesses.length).toBe(first);
+    // A tweak under the minimum shift is not a success; a real change is, once per window.
+    expect(sim.state.link).toBeNull();
+    sim.act('POWER_CORE', plan(55, 25, 5, 15, sim.state.distributionVersion));
+    expect(sim.state.link?.roles).toEqual(['POWER']);
+    const first = sim.state.teamSync;
+    sim.act('POWER_CORE', plan(35, 30, 15, 20, sim.state.distributionVersion));
+    expect(sim.state.teamSync).toBe(first);
   });
 });
 
