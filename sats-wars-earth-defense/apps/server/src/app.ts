@@ -188,7 +188,8 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   const qrSvg = await QRCode.toString(joinUrl, {
     type: 'svg',
     errorCorrectionLevel: 'M',
-    margin: 2,
+    // 4-module quiet zone: phone cameras read a QR off a bright screen more reliably.
+    margin: 4,
     color: { dark: '#050B13', light: '#E5EEF3' },
   });
   app.get('/api/public/join', async (): Promise<JoinInfo> => ({

@@ -516,11 +516,14 @@
   margin-top: 8px;
   font-size: 18px;
 }
+/* Large enough to type by hand when a camera will not read the QR. */
 .qr .url {
   margin-top: 10px;
-  font-size: 14px;
-  color: var(--sw-muted);
-  word-break: break-all;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sw-text);
+  white-space: nowrap;
 }
 .qr .note {
   margin-top: 8px;

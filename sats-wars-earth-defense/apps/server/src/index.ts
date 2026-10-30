@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { buildApp } from './app';
-import { EnvError, loadDotEnv, parseEnv, publicBaseUrl } from './env';
+import { EnvError, lanAddresses, loadDotEnv, parseEnv, publicBaseUrl } from './env';
 
 loadDotEnv();
 
@@ -34,6 +34,16 @@ const lines = [
   `  operator   http://localhost:${env.PORT}/operator/`,
   `  health     http://localhost:${env.PORT}/health`,
 ];
+if (!env.PUBLIC_BASE_URL) {
+  // The join QR uses a guessed address. If phones cannot open it, pick the right one here.
+  const all = lanAddresses();
+  if (all.length > 1) {
+    lines.push('  other LAN addresses (if phones cannot open the QR, restart with one of these):');
+    for (const a of all.slice(1)) {
+      lines.push(`             PUBLIC_BASE_URL=http://${a.address}:${env.PORT}   (${a.name})`);
+    }
+  }
+}
 if (env.operatorPasswordGenerated) {
   lines.push(
     `  operator password (generated for this run, set OPERATOR_PASSWORD to fix it): ${env.operatorPassword}`,

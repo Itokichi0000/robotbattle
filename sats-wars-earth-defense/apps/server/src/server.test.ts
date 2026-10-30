@@ -13,7 +13,7 @@ import type {
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp, type BuiltApp } from './app';
-import { EnvError, parseEnv } from './env';
+import { EnvError, lanAddresses, parseEnv } from './env';
 
 const ORIGIN = 'http://localhost:4400';
 
@@ -125,6 +125,30 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const s of sockets.splice(0)) s.close();
   await built.app.close();
+});
+
+describe('join QR address', () => {
+  it('prefers the Wi-Fi/Ethernet address over VPN tunnels and sharing bridges', () => {
+    const v4 = (address: string) =>
+      ({
+        address,
+        family: 'IPv4',
+        internal: false,
+        netmask: '255.255.255.0',
+        mac: '',
+        cidr: null,
+      }) as const;
+    const ranked = lanAddresses({
+      lo0: [{ ...v4('127.0.0.1'), internal: true }],
+      utun4: [v4('10.8.0.2')],
+      bridge100: [v4('192.168.2.1')],
+      awdl0: [v4('169.254.10.1')],
+      en0: [v4('192.168.114.24')],
+    });
+    expect(ranked[0]).toEqual({ name: 'en0', address: '192.168.114.24' });
+    expect(ranked.map((a) => a.name)).not.toContain('lo0');
+    expect(ranked.map((a) => a.name)).not.toContain('awdl0');
+  });
 });
 
 describe('http', () => {

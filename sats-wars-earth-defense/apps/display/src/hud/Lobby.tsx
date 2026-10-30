@@ -161,7 +161,8 @@ export function Lobby({ s, attract }: { s: PublicMatchState | undefined; attract
         <div>
           <div className="scan">SCAN TO BECOME A PILOT</div>
           <div className="ja">パイロットとして参加する</div>
-          <div className="url">{join?.joinUrl ?? '...'}</div>
+          {/* Typed by hand when a camera will not read the QR: no scheme, one line. */}
+          <div className="url">{join ? join.joinUrl.replace(/^https?:\/\//, '') : '...'}</div>
           <div className="note">
             {join?.mode === 'sandbox'
               ? 'SANDBOX: DEMO GUEST で搭乗（テスト用・無料）'

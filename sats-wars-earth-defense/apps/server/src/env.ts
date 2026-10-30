@@ -62,13 +62,38 @@ export type Env = z.infer<typeof schema> & {
 
 export class EnvError extends Error {}
 
-function lanAddress(): string | null {
-  for (const list of Object.values(networkInterfaces())) {
+/** Virtual adapters phones cannot reach: VPN tunnels, VM/Docker bridges, Apple peer links. */
+const VIRTUAL_IF =
+  /^(utun|tun|tap|ppp|ipsec|bridge|vmnet|vboxnet|docker|br-|veth|virbr|awdl|llw|anpi|gif|stf|zt|tailscale|wg)/i;
+
+function isPrivateV4(ip: string): boolean {
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+}
+
+/**
+ * LAN addresses phones on the same Wi-Fi may reach, best first: physical Wi-Fi/Ethernet
+ * (en*, eth*, wlan*) with a private address, then other non-virtual adapters. The first is
+ * used for the join QR when PUBLIC_BASE_URL is not set; all are printed at startup.
+ */
+export function lanAddresses(
+  ifaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): Array<{ name: string; address: string }> {
+  const out: Array<{ name: string; address: string; score: number }> = [];
+  for (const [name, list] of Object.entries(ifaces)) {
     for (const a of list ?? []) {
-      if (a.family === 'IPv4' && !a.internal) return a.address;
+      if (a.family !== 'IPv4' || a.internal || a.address.startsWith('169.254.')) continue;
+      let score = 0;
+      if (/^(en|eth|wlan|wl)/i.test(name)) score += 2;
+      if (isPrivateV4(a.address)) score += 1;
+      if (VIRTUAL_IF.test(name)) score -= 4;
+      out.push({ name, address: a.address, score });
     }
   }
-  return null;
+  return out.sort((x, y) => y.score - x.score).map(({ name, address }) => ({ name, address }));
+}
+
+function lanAddress(): string | null {
+  return lanAddresses()[0]?.address ?? null;
 }
 
 /** Loads ./.env (project root) when present. Real environment variables win. */
