@@ -144,10 +144,28 @@ await power.getByRole('button', { name: '機動系 を5%下げる' }).click();
 await power.screenshot({ path: path.join(out, '13_phone_power_a.png') });
 log('power captured');
 
+// Shared energy pulse early in WAVE 1, while CHARGE still has room (refused when full).
+await gunner.getByRole('button', { name: '共有エネルギー' }).click();
+await sleep(800);
+await gunner.screenshot({ path: path.join(out, '18_phone_pulse_terms.png') });
+await gunner.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
+await sleep(1_000);
+await gunner.screenshot({ path: path.join(out, '19_phone_pulse_virtual_invoice.png') });
+await op.screenshot({ path: path.join(out, '31_operator_payments_pending.png'), fullPage: true });
+await op.locator('.payments').getByRole('button', { name: 'SETTLE' }).click();
+await sleep(700);
+await frozenShot('05_display_sats_pulse.png');
+await sleep(1_500);
+await gunner.screenshot({ path: path.join(out, '20_phone_pulse_applied.png') });
+await gunner
+  .getByRole('button', { name: '閉じる' })
+  .click({ timeout: 5_000 })
+  .catch(() => undefined);
+log('pulse captured');
+
 let shotRouter = false;
 let shotRouterSolved = false;
 let shotEngineer = false;
-let shotPulse = false;
 let shotOdReady = false;
 let shotOdFired = false;
 let shotBoss = false;
@@ -209,27 +227,6 @@ while (Date.now() < deadline) {
     shotEngineer = true;
     log('repair captured');
   }
-  // A pulse is only offered while CHARGE has room (it is refused when full).
-  if (!shotPulse && s.teamCapacitor <= s.hints.overdriveCapacitorMin - 30) {
-    await gunner.getByRole('button', { name: '共有エネルギー' }).click();
-    await sleep(800);
-    await gunner.screenshot({ path: path.join(out, '18_phone_pulse_terms.png') });
-    await gunner.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
-    await sleep(1_000);
-    await gunner.screenshot({ path: path.join(out, '19_phone_pulse_virtual_invoice.png') });
-    await op.screenshot({
-      path: path.join(out, '31_operator_payments_pending.png'),
-      fullPage: true,
-    });
-    await op.locator('.payments').getByRole('button', { name: 'SETTLE' }).click();
-    await sleep(700);
-    await frozenShot('05_display_sats_pulse.png');
-    await sleep(1_500);
-    await gunner.screenshot({ path: path.join(out, '20_phone_pulse_applied.png') });
-    await gunner.getByRole('button', { name: '閉じる' }).click();
-    shotPulse = true;
-    log('pulse captured');
-  }
   if (
     !shotBoss &&
     s.phase === 'BOSS' &&
@@ -240,8 +237,8 @@ while (Date.now() < deadline) {
     shotBoss = true;
   }
   if (!shotOdReady && s.overdrive.status !== 'IDLE') {
-    await frozenShot('07_display_overdrive_ready.png');
     await power.screenshot({ path: path.join(out, '21_phone_overdrive_call.png') });
+    await frozenShot('07_display_overdrive_ready.png');
     await power
       .getByRole('button', { name: /SYNC NOW/ })
       .click()
@@ -263,7 +260,7 @@ while (Date.now() < deadline) {
   lastOverdrives = s.stats.overdrives;
   await sleep(250);
 }
-log({ shotRouter, shotRouterSolved, shotEngineer, shotPulse, shotBoss, shotOdReady, shotOdFired });
+log({ shotRouter, shotRouterSolved, shotEngineer, shotBoss, shotOdReady, shotOdFired });
 while (!['RESULTS'].includes((await state()).phase)) await sleep(1_000);
 await sleep(3_000);
 await display.screenshot({ path: path.join(out, '09_display_results.png'), ...SHOT });

@@ -33,6 +33,6 @@
 - 認証：LNURL-auth（LUD-04、`@noble/curves`）。同じスマホのウォレット起動・コピー・個人 QR、ポーリング、1ウォレット1台、コールサイン（任意）。
 - 共有エネルギーパルス：sandbox（VIRTUAL・運営 SETTLE）と LNbits（invoice key のみ・起動時 OFF・確認＋`LIVE` 入力で ON）。
 - 運営：DEMO BOTS（展示の自動ループ）、HIDE CALLSIGNS、SHARED ENERGY パネル。
-- テスト：ユニット/統合 93件、Playwright E2E 4件（8席フルソーティーを含む）、負荷試験スクリプト。詳細は `05_qa_results.md`。
+- テスト：ユニット/統合 95件、Playwright E2E 4件（8席フルソーティーを含む）、負荷試験（8人・連打・30台）。詳細は `05_qa_results.md`。
 
 次の作業は [`../NEXT_ACTIONS.md`](../NEXT_ACTIONS.md)。

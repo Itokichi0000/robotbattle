@@ -122,4 +122,5 @@ pnpm --filter @swed/server lnurl-wallet 'LNURL1...' 'rehearsal-wallet-1'
 ## 本番前日以降
 
 - 24時間前から大きな変更は凍結（仕様 §13.4）。起動コマンドと URL を紙に書いて機材に貼る。
-- バックアップ映像（キャプチャ）を用意。負荷試験：`OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --pilots 8 --displays 3 --seconds 90`。
+- バックアップ映像（キャプチャ）を用意。負荷試験：`OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://<サーバー>:4400 --pilots 8 --displays 3 --seconds 90`
+  （連打の確認は `--mash`。会場 Wi-Fi で一度実行し、`05_qa_results.md` のコンテナ内の値と比べる）。

@@ -4,7 +4,7 @@
  * same bot logic as the demo bots, through the real pilot socket (cookies, acks, limits).
  *
  *   OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://127.0.0.1:4400 \
- *     --pilots 8 --displays 3 --seconds 90
+ *     --pilots 8 --displays 3 --seconds 90 [--mash]
  *
  * Reports action round-trip latency, refusals, snapshot cadence and size per screen.
  * Sandbox only: it signs in with DEMO GUEST and never touches payments.
@@ -23,6 +23,10 @@ const url = arg('url', 'http://127.0.0.1:4400');
 const pilots = Number(arg('pilots', '8'));
 const displays = Number(arg('displays', '2'));
 const seconds = Number(arg('seconds', '60'));
+// --mash: every seated phone sends every 50 ms (a crowd hammering buttons). Whatever the bot
+// would not do is sent as SYNC_NOW, which the server refuses cheaply. Checks the rate limit.
+const mash = process.argv.includes('--mash');
+const everyMs = mash ? 50 : 300;
 const password = process.env.OPERATOR_PASSWORD;
 if (!password) throw new Error('Set OPERATOR_PASSWORD');
 const origin = new URL(url).origin;
@@ -130,10 +134,12 @@ await Promise.all(
     .filter((p) => p.seat)
     .map(async (ph) => {
       while (performance.now() < until) {
-        await sleep(250 + Math.random() * 100);
+        await sleep(everyMs + Math.random() * 50);
         const st = ph.state;
         if (!st || !ph.seat) continue;
-        const action = botDecide(st, ph.seat, st.t, 1, ph.mem);
+        const action =
+          botDecide(st, ph.seat, st.t, 1, ph.mem) ??
+          (mash ? { actionType: 'SYNC_NOW' as const, payload: {} } : null);
         if (!action) continue;
         const t0 = performance.now();
         sent += 1;
@@ -157,6 +163,7 @@ await Promise.all(
 const health = (await (await fetch(`${url}/health`)).json()) as { phase: string };
 const end = phones[0]?.state;
 const report = {
+  mode: mash ? 'mash (every 50 ms)' : 'attentive pilots',
   pilots,
   displays,
   seconds,
@@ -172,7 +179,7 @@ const report = {
   refused: Object.fromEntries(refused),
   screens: screens.map(({ stat }) => ({
     snapshotsPerSec: +(stat.snaps / seconds).toFixed(1),
-    avgSnapshotKB: +(stat.bytes / Math.max(1, stat.snaps) / 1024).toFixed(1),
+    avgSnapshotJsonKB: +(stat.bytes / Math.max(1, stat.snaps) / 1024).toFixed(1),
     gapP95ms: Math.round(pct(stat.gaps, 0.95)),
     gapMaxms: Math.round(Math.max(0, ...stat.gaps)),
     events: stat.events,

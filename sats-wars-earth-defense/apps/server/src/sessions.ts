@@ -165,6 +165,18 @@ export function passwordMatches(given: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Rate-limit key for per-browser endpoints: the browser's own cookie when it has one, else
+ * its IP. At a venue every phone on the Wi-Fi shares one public IP, so per-IP limits alone
+ * would throttle the whole crowd (several phones polling sign-in status at once).
+ */
+export function perBrowserKey(cookieName: string) {
+  return (req: { headers: { cookie?: string }; ip: string }): string => {
+    const v = parseCookies(req.headers.cookie)[cookieName];
+    return v ? `c:${createHash('sha256').update(v).digest('hex').slice(0, 32)}` : `ip:${req.ip}`;
+  };
+}
+
 export function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;

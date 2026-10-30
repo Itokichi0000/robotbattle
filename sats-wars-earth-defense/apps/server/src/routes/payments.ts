@@ -3,7 +3,7 @@ import { pulseIntentReqSchema } from '@swed/shared/schemas';
 import type { PaymentIntentView } from '@swed/shared';
 import type { FastifyInstance } from 'fastify';
 import QRCode from 'qrcode';
-import { parseCookies, PILOT_COOKIE, pilotForToken } from '../sessions';
+import { parseCookies, perBrowserKey, PILOT_COOKIE, pilotForToken } from '../sessions';
 import type { RouteContext } from './context';
 
 export const LNBITS_WEBHOOK_PATH = '/api/payments/webhook/lnbits';
@@ -37,7 +37,12 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: RouteContext): 
 
   app.post(
     '/api/payments/intent',
-    { preHandler: sameOrigin, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    {
+      preHandler: sameOrigin,
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute', keyGenerator: perBrowserKey(PILOT_COOKIE) },
+      },
+    },
     async (req, reply) => {
       const pilot = pilotOf(req.headers.cookie);
       if (!pilot) return reply.code(401).send({ error: 'NOT_AUTHENTICATED' });

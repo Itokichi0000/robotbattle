@@ -42,6 +42,7 @@ async function operator(browser: Browser): Promise<{ ctx: BrowserContext; page: 
 
 async function resetMatch(op: Page): Promise<void> {
   // Specs share one server: no demo bots or seats left over from an earlier test.
+  await expect(op.locator('.payments')).toBeVisible(); // operator status has arrived
   if (await op.getByLabel(/DEMO BOTS/).isChecked()) await op.getByLabel(/DEMO BOTS/).uncheck();
   await op.getByRole('button', { name: /^RESET$/ }).click();
   await expect.poll(async () => (await publicMatch(op)).state.humans, { timeout: 15_000 }).toBe(0);
@@ -207,8 +208,9 @@ test('eight seats, one sortie: people and labelled demo bots fly to the debrief'
   const lobby = (await publicMatch(op)).state;
   expect(lobby.seats.GUNNER_L.bot).toBe(true);
   expect(lobby.seats.POWER_CORE.bot).toBe(false);
-  await expect(display.locator('.seat-plate.auto').filter({ hasText: 'DEMO-BOT' })).toHaveCount(5);
-  await expect(display.locator('.seat-plate.on')).toHaveCount(3);
+  // The big screen names the bots as bots (lobby plate or, if the 12 s auto start already
+  // launched the sortie, the C1–C4 strip).
+  await expect(display.getByText('DEMO-BOT 1').first()).toBeVisible();
 
   if ((await publicMatch(op)).phase === 'LOBBY')
     await op.getByRole('button', { name: /START/ }).click();

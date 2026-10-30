@@ -163,7 +163,9 @@ export class MatchRuntime {
       if (input.type === 'RESUME') this.clock.resume();
     }
     this.commit(r.state, r.events);
-    this.urgent = true;
+    // Push at once only when something happened; a refused tap waits for the 10 Hz snapshot,
+    // so a crowd mashing buttons cannot double the screens' snapshot rate.
+    if (r.events.length > 0) this.urgent = true;
     return r;
   }
 

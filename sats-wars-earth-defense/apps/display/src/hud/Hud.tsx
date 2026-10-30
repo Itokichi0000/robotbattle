@@ -499,7 +499,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
       : 0;
   const outcome = useMemo(() => snap?.result, [snap?.result]);
   // During the OVERDRIVE finisher the picture leads: HUD fades almost out (spec §9.1).
-  const finishing = now < finisher.until;
+  const finishing = combat && now < finisher.until;
 
   return (
     <>

@@ -39,7 +39,9 @@ test('two phones, one mech: gunner damages on the server, shield blocks a telegr
   await op.goto('/operator/');
   await expect(op.getByText('MATCH CONTROL')).toBeVisible();
   await expect(op.getByText('SANDBOX（架空のお金・テスト）')).toBeVisible();
-  // Specs share one server: start from an empty mech whatever ran before.
+  // Specs share one server: start from an empty mech whatever ran before (bots off too).
+  await expect(op.locator('.payments')).toBeVisible(); // operator status has arrived
+  if (await op.getByLabel(/DEMO BOTS/).isChecked()) await op.getByLabel(/DEMO BOTS/).uncheck();
   await op.getByRole('button', { name: /^RESET$/ }).click();
   await expect.poll(async () => (await publicMatch(op)).state.humans, { timeout: 15_000 }).toBe(0);
 

@@ -9,6 +9,7 @@ import {
   createDemoGuest,
   issuePilotSession,
   parseCookies,
+  perBrowserKey,
   PILOT_COOKIE,
   PILOT_COOKIE_MAX_AGE,
   pilotForToken,
@@ -48,7 +49,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext): voi
 
   app.post(
     '/api/auth/demo-guest',
-    { preHandler: sameOrigin, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    // Per IP: phones behind venue NAT share one, so the cap is generous (sandbox only).
+    { preHandler: sameOrigin, config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
     async (req, reply) => {
       if (!env.demoGuestEnabled) return reply.code(403).send({ error: 'DEMO_GUEST_DISABLED' });
       const existing = pilotOf(req.headers.cookie);
@@ -80,7 +82,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext): voi
   // 1. The phone asks for a challenge. The k1 is bound to this browser by an HttpOnly cookie.
   app.post(
     '/api/auth/attempt',
-    { preHandler: sameOrigin, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    { preHandler: sameOrigin, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
     async (_req, reply) => {
       const a = createAttempt(db, base);
       reply.header(
@@ -110,7 +112,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext): voi
   // 2. The wallet calls back with the signature (LUD-04). No cookies, any origin: wallets.
   app.get(
     '/api/auth/lnurl',
-    { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
     async (req, reply) => {
       const result = handleCallback(db, req.query as Record<string, unknown>);
       if (result.status === 'OK') audit(db, 'lnurl-auth', 'LNURL_VERIFIED');
@@ -123,7 +125,11 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext): voi
   // 3. The same browser polls; on success it receives the pilot session.
   app.get<{ Params: { id: string } }>(
     '/api/auth/attempt/:id/status',
-    { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: perBrowserKey(AUTH_COOKIE) },
+      },
+    },
     async (req, reply) => {
       const token = parseCookies(req.headers.cookie)[AUTH_COOKIE];
       const st = claimAttempt(db, req.params.id.slice(0, 64), token);

@@ -83,6 +83,18 @@ describe('LNURL-auth (LUD-04)', () => {
     expect((await status(a.attemptId, authCookie)).body.status).toBe('NOT_FOUND');
   });
 
+  it('status polling is limited per browser, not per venue IP', async () => {
+    // Every phone on venue Wi-Fi shares one public IP; one busy phone must not lock out the rest.
+    const busy = await attempt();
+    const calm = await attempt();
+    let limited = 0;
+    for (let i = 0; i < 125; i++) {
+      if ((await status(busy.a.attemptId, busy.authCookie)).res.status === 429) limited += 1;
+    }
+    expect(limited).toBeGreaterThan(0);
+    expect((await status(calm.a.attemptId, calm.authCookie)).body.status).toBe('PENDING');
+  });
+
   it('the same wallet always maps to the same pseudonymous pilot; the key is never exposed', async () => {
     const one = await attempt();
     await walletCall(signedCallback(one.a.lnurl, 'bob-wallet'));
