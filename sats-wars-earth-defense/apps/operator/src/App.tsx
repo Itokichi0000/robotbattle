@@ -1,13 +1,19 @@
 import { useStore, useTicker } from '@swed/client';
 import { percent } from '@swed/game-engine';
 import { CITIES, CITY_IDS, formatClock, PHASE_LABEL, SEAT_IDS, SEATS } from '@swed/shared';
-import type { OperatorCommand, PublicMatchState, QualityPreset } from '@swed/shared';
+import type {
+  OperatorCommand,
+  OperatorPaymentsView,
+  PublicMatchState,
+  QualityPreset,
+} from '@swed/shared';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { checkSession, command, login, logout, socket, statusStore, store } from './net';
 
 /**
  * OPERATOR console (spec §4.8). Staff only: password-protected, every command server-checked
- * and written to the audit log. Live payments do not exist yet; the mode shows SANDBOX.
+ * and written to the audit log. LIVE payments are never on at start: staff run the checks
+ * and type LIVE to turn them on (spec §4.8, §8).
  */
 
 function Login({ onOk }: { onOk: () => void }) {
@@ -46,11 +52,46 @@ function Login({ onOk }: { onOk: () => void }) {
   );
 }
 
+/**
+ * A checkbox bound to server state. The click shows at once and holds until the server's
+ * status agrees (or the command fails), instead of flicking back for a round trip.
+ */
+function Toggle({
+  checked,
+  onToggle,
+  children,
+}: {
+  checked: boolean;
+  onToggle: (v: boolean) => Promise<boolean>;
+  children: React.ReactNode;
+}) {
+  const [pending, setPending] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (pending !== null && pending === checked) setPending(null);
+  }, [checked, pending]);
+  return (
+    <label className="toggle">
+      <input
+        type="checkbox"
+        checked={pending ?? checked}
+        onChange={async (e) => {
+          const v = e.target.checked;
+          setPending(v);
+          if (!(await onToggle(v))) setPending(null);
+        }}
+      />
+      {children}
+    </label>
+  );
+}
+
 function Controls({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => void }) {
+  const st = useSyncExternalStore(statusStore.subscribe, statusStore.get, statusStore.get);
   const run = async (cmd: OperatorCommand, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !window.confirm(confirmText)) return false;
     const r = await command(cmd);
     onResult(`${r.ok ? 'OK' : 'NG'} — ${r.message ?? cmd.command}`);
+    return r.ok;
   };
   const p = s.phase;
   const pre = p === 'ATTRACT' || p === 'LOBBY';
@@ -114,18 +155,28 @@ function Controls({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         </button>
       </div>
       <div className="row">
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={s.autoSupport}
-            onChange={(e) => run({ command: 'SET_AUTO_SUPPORT', enabled: e.target.checked })}
-          />
+        <Toggle
+          checked={s.autoSupport}
+          onToggle={(v) => run({ command: 'SET_AUTO_SUPPORT', enabled: v })}
+        >
           AUTO SUPPORT（空席をAIが補助）
-        </label>
+        </Toggle>
+        <Toggle
+          checked={st?.demoBots ?? false}
+          onToggle={(v) => run({ command: 'SET_DEMO_BOTS', enabled: v })}
+        >
+          DEMO BOTS（空席にBOT・人が乗ると交代）
+        </Toggle>
+        <Toggle
+          checked={st?.hideCallsigns ?? false}
+          onToggle={(v) => run({ command: 'SET_HIDE_CALLSIGNS', hidden: v })}
+        >
+          HIDE CALLSIGNS（全員 PILOT-XXXX 表示）
+        </Toggle>
         <label>
           PRESET
           <select
-            value={statusStore.get()?.nextPresetId ?? s.presetId}
+            value={st?.nextPresetId ?? s.presetId}
             onChange={(e) =>
               run({ command: 'SET_PRESET', presetId: e.target.value as 'STANDARD' | 'SHORT' })
             }
@@ -164,7 +215,9 @@ function Seats({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => 
                 </td>
                 <td>
                   {seat.occupied ? (
-                    seat.displayName
+                    <>
+                      {seat.displayName} {seat.bot ? <em>BOT</em> : null}
+                    </>
                   ) : seat.auto ? (
                     <em>AUTO SUPPORT</em>
                   ) : (
@@ -180,7 +233,7 @@ function Seats({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => 
                       : 'RECONNECTING'
                     : seat.open
                       ? 'OPEN'
-                      : 'PHASE 2'}
+                      : 'CLOSED'}
                 </td>
                 <td>
                   {seat.occupied ? (
@@ -316,7 +369,11 @@ function Status({ s, mt }: { s: PublicMatchState; mt: number }) {
         <div>
           <span>MODE</span>
           <b className={st?.mode === 'live' ? 'danger' : 'ally'}>
-            {st?.mode === 'live' ? 'LIVE' : 'SANDBOX（架空のお金・テスト）'}
+            {st?.mode === 'live'
+              ? st.payments.liveEnabled
+                ? 'LIVE（実決済 ON）'
+                : 'LIVE（実決済は停止中）'
+              : 'SANDBOX（架空のお金・テスト）'}
           </b>
         </div>
         <div>
@@ -383,6 +440,182 @@ function Status({ s, mt }: { s: PublicMatchState; mt: number }) {
   );
 }
 
+function CheckLine({ name, c }: { name: string; c: OperatorPaymentsView['checks']['backend'] }) {
+  return (
+    <div>
+      <span>{name}</span>
+      <b className={c ? (c.ok ? 'ally' : 'danger') : undefined}>
+        {c ? `${c.ok ? 'PASS' : 'FAIL'} — ${c.detail} (${c.at.slice(11, 19)})` : 'not run 未実施'}
+      </b>
+    </div>
+  );
+}
+
+/**
+ * Shared energy pulses (spec §8). Sandbox: staff settle VIRTUAL invoices here. Live: the
+ * operator checks the backend and the public webhook, then types LIVE; OFF is one click.
+ */
+function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => void }) {
+  const st = useSyncExternalStore(statusStore.subscribe, statusStore.get, statusStore.get);
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!st) return null;
+  const p = st.payments;
+  const live = p.mode === 'live';
+  const run = async (cmd: OperatorCommand) => {
+    setBusy(true);
+    const r = await command(cmd);
+    setBusy(false);
+    onResult(`${r.ok ? 'OK' : 'NG'} — ${r.message ?? cmd.command}`);
+    return r.ok;
+  };
+  return (
+    <section className="panel sw-frame payments">
+      <h2>
+        SHARED ENERGY 共有エネルギー{' '}
+        <b className={live ? (p.liveEnabled ? 'danger' : 'muted') : 'ally'}>
+          {live
+            ? p.liveEnabled
+              ? 'LIVE ON 実決済中'
+              : 'LIVE OFF（停止中）'
+            : 'SANDBOX（VIRTUAL）'}
+        </b>
+      </h2>
+      <div className="kv">
+        <div>
+          <span>PROVIDER</span>
+          <b>{p.provider}</b>
+        </div>
+        <div>
+          <span>RECIPIENT 受取先</span>
+          <b>{p.recipient}</b>
+        </div>
+        <div>
+          <span>PULSE</span>
+          <b className="sw-num">
+            {p.amountSats} sats → CAPACITOR +{p.capacitorGain}
+          </b>
+        </div>
+        <div>
+          <span>LIMITS 上限</span>
+          <b className="sw-num">
+            {p.perPilotPerMatch}/pilot/match · {p.cooldownSec}s cooldown · {p.maxPerMatch}/match ·
+            used {s.stats.pulses}
+          </b>
+        </div>
+        <div>
+          <span>SETTLED 確定済み</span>
+          <b className="sw-num">
+            {p.settledTotal.n} 件 / {p.settledTotal.sats} sats{live ? '' : '（架空）'}
+          </b>
+        </div>
+        {live ? (
+          <>
+            <CheckLine name="BACKEND" c={p.checks.backend} />
+            <CheckLine name="WEBHOOK" c={p.checks.webhook} />
+          </>
+        ) : null}
+      </div>
+      {live ? (
+        <div className="row">
+          <button
+            className="b"
+            disabled={busy}
+            onClick={() => void run({ command: 'PAYMENTS_CHECK' })}
+          >
+            RUN CHECKS 接続確認
+          </button>
+          {p.liveEnabled ? (
+            <button
+              className="b danger"
+              disabled={busy}
+              onClick={() => void run({ command: 'PAYMENTS_DISABLE' })}
+            >
+              LIVE OFF 実決済を停止
+            </button>
+          ) : (
+            <>
+              <label>
+                確認のため LIVE と入力 / type LIVE
+                <input
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
+              <button
+                className="b warn"
+                disabled={busy || confirm !== 'LIVE'}
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      `実際の Lightning 決済を開始します。\n受取先: ${p.recipient}\n金額: ${p.amountSats} sats / 回\nよろしいですか？`,
+                    )
+                  )
+                    return;
+                  if (await run({ command: 'PAYMENTS_ENABLE_LIVE', confirm })) setConfirm('');
+                }}
+              >
+                LIVE ON 実決済を開始
+              </button>
+            </>
+          )}
+        </div>
+      ) : (
+        <p className="hint">
+          SANDBOX: 架空の請求書です。パイロットが申請したら下の SETTLE
+          で確定します（お金は動きません）。
+        </p>
+      )}
+      <table>
+        <thead>
+          <tr>
+            <th>TIME</th>
+            <th>SEAT</th>
+            <th>STATUS</th>
+            <th>APPLIED</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {p.recent.length === 0 ? (
+            <tr>
+              <td colSpan={5}>
+                <em>まだありません / none yet</em>
+              </td>
+            </tr>
+          ) : (
+            p.recent.map((r) => (
+              <tr key={r.intentId}>
+                <td className="sw-num">{r.createdAt.slice(11, 19)}</td>
+                <td>{r.seatId ?? '—'}</td>
+                <td className={r.status === 'settled' ? 'ally' : undefined}>
+                  {r.status} {r.mode === 'sandbox' ? <em>VIRTUAL</em> : null}
+                </td>
+                <td>
+                  {r.applied}
+                  {r.note ? <em> {r.note}</em> : null}
+                </td>
+                <td>
+                  {r.mode === 'sandbox' && r.status === 'pending' ? (
+                    <button
+                      className="b small"
+                      disabled={busy}
+                      onClick={() => void run({ command: 'SANDBOX_SETTLE', intentId: r.intentId })}
+                    >
+                      SETTLE
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function Audit() {
   const st = useSyncExternalStore(statusStore.subscribe, statusStore.get, statusStore.get);
   return (
@@ -442,6 +675,7 @@ export function App() {
           <Status s={s} mt={store.matchTime(now)} />
           <Controls s={s} onResult={setToast} />
           <Seats s={s} onResult={setToast} />
+          <Payments s={s} onResult={setToast} />
           <Display onResult={setToast} />
           <Audit />
         </div>

@@ -49,9 +49,10 @@ body {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.18em;
+  white-space: nowrap;
 }
 .ph-wave {
-  margin-left: auto;
+  margin-right: auto;
   font-size: 12px;
   color: var(--sw-muted);
   letter-spacing: 0.1em;
@@ -665,4 +666,496 @@ body {
   margin: 0;
   font-size: 24px;
   font-weight: 700;
+}
+
+/* ------------------------------------------------------ header pulse */
+/* Header items keep their size; only the phase label may wrap on narrow phones. */
+.ph-top > *:not(.ph-wave),
+.ph-top svg {
+  flex-shrink: 0;
+}
+.ph-pulse {
+  min-width: 44px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--sw-ally);
+  background: transparent;
+  color: var(--sw-ally);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.banner-note {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--sw-danger);
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------ action buttons */
+.btn.primary.action {
+  --acc: var(--sw-action);
+  flex-direction: row;
+  text-decoration: none;
+}
+.btn.primary.ally span,
+.btn.primary.action span {
+  display: flex;
+  flex-direction: column;
+}
+.btn.power,
+.btn.repair,
+.btn.od {
+  min-height: 84px;
+  flex-direction: column;
+  gap: 2px;
+  border: none;
+  color: var(--sw-void);
+  background: var(--acc);
+}
+.btn.power .lbl,
+.btn.repair .lbl,
+.btn.od .lbl {
+  font-size: 26px;
+  letter-spacing: 0.1em;
+}
+.btn.power:disabled,
+.btn.repair:disabled,
+.btn.od:disabled {
+  background: rgba(38, 56, 68, 0.9);
+  color: var(--sw-muted);
+}
+a.btn {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* --------------------------------------------------------- power A */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0;
+}
+.lane {
+  --lane: var(--sw-text);
+}
+.lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--lane);
+  letter-spacing: 0.06em;
+}
+.lane-head .sw-num {
+  font-size: 20px;
+}
+.lane-head small {
+  font-size: 12px;
+  color: var(--sw-muted);
+  font-weight: 600;
+}
+.lane-head em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--sw-danger);
+  border: 1px solid var(--sw-danger);
+  padding: 0 4px;
+  margin-left: 6px;
+}
+.lane-ctrl {
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+.step {
+  min-height: 48px;
+  border: 1px solid var(--sw-line);
+  background: rgba(10, 26, 39, 0.9);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--sw-text);
+}
+.step:disabled {
+  opacity: 0.4;
+}
+.lane-bar {
+  position: relative;
+  height: 18px;
+  background: rgba(38, 56, 68, 0.9);
+}
+.lane-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--lane);
+  opacity: 0.85;
+}
+.lane-bar b {
+  position: absolute;
+  left: 0;
+  bottom: -5px;
+  height: 3px;
+  background: var(--sw-text);
+}
+.lane.cut .lane-bar {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(239, 89, 107, 0.35) 0 6px,
+    rgba(38, 56, 68, 0.9) 6px 12px
+  );
+}
+.plans {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.plans .chip {
+  grid-template-columns: 1fr;
+}
+.plans .chip small {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sw-muted);
+}
+
+/* --------------------------------------------------------- power B */
+.circuits {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.circuit {
+  --lane: var(--sw-text);
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--sw-line);
+  background: rgba(10, 26, 39, 0.8);
+  font-size: 11px;
+  text-align: left;
+  color: var(--sw-muted);
+}
+.circuit small {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 700;
+}
+.circuit.cut {
+  border-color: var(--sw-danger);
+  color: var(--sw-danger);
+}
+.circuit.on {
+  box-shadow: inset 0 0 0 2px var(--acc);
+  color: var(--sw-text);
+}
+.router-grid {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  margin: 8px auto;
+  height: auto;
+}
+.router-grid .tappable {
+  cursor: pointer;
+}
+.router-grid .tappable {
+  outline: none;
+}
+.router-grid .tappable:focus-visible rect {
+  stroke: var(--sw-action);
+  stroke-width: 3;
+}
+.router-idle {
+  min-height: 200px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: var(--sw-muted);
+  text-align: center;
+  font-size: 14px;
+}
+.router-idle p {
+  margin: 0;
+}
+
+/* --------------------------------------------------------- engineer */
+.bolts {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  margin: 8px auto;
+  height: auto;
+}
+.bolts .tappable,
+.mechmap .tappable {
+  cursor: pointer;
+}
+.parts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 6px;
+}
+.parts .chip {
+  grid-template-columns: 1fr;
+}
+
+/* --------------------------------------------------------- callsign */
+.callsign {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.callsign label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sw-muted);
+}
+.callsign input[type='text'],
+.callsign input:not([type]) {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--sw-line);
+  background: var(--sw-void);
+  color: var(--sw-text);
+  font: inherit;
+  font-size: 17px;
+  letter-spacing: 0.08em;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.callsign label.check {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+  color: var(--sw-text);
+}
+.callsign label.check input {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--sw-ally);
+}
+
+/* ---------------------------------------------------- LNURL sign-in */
+.lnurl {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lnurl-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.lnurl-row .btn {
+  font-size: 14px;
+  min-height: 48px;
+}
+.lnurl-qr,
+.pay-qr {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 10px;
+  background: #fff;
+}
+/* The payment QR is framed in amber so it never looks like the free sign-in QR (spec §9.7). */
+.pay-qr {
+  outline: 4px solid var(--sw-action);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------- overdrive */
+.od-call {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(480px, 100%);
+  padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(5, 11, 19, 0.96);
+  border-top: 2px solid var(--sw-action);
+  z-index: 8;
+  --acc: var(--sw-action);
+}
+.od-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sw-action);
+  font-size: 18px;
+  letter-spacing: 0.14em;
+}
+.od-head span {
+  margin-left: auto;
+  font-size: 22px;
+  font-weight: 700;
+}
+.od-roles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.od-role {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 2px;
+  border: 1px solid var(--sw-line);
+  font-size: 12px;
+  color: var(--sw-muted);
+}
+.od-role small {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+.od-role.done {
+  border-color: var(--sw-ally);
+  color: var(--sw-ally);
+}
+.od-role.me {
+  box-shadow: inset 0 0 0 1px var(--sw-action);
+}
+.btn.od {
+  min-height: 96px;
+}
+/* READY waits for someone to call it: the strip sits over the header so the console's own
+   thumb-zone controls stay usable. The 5 s window then takes the thumb zone. */
+.od-call.ready {
+  top: 0;
+  bottom: auto;
+  gap: 8px;
+  padding: max(10px, env(safe-area-inset-top)) 14px 12px;
+  border-top: none;
+  border-bottom: 2px solid var(--sw-action);
+}
+.od-call.ready .btn.od {
+  min-height: 64px;
+}
+.od-call.ready .btn.od .lbl {
+  font-size: 22px;
+}
+.od-flash {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  width: min(440px, 92%);
+  padding: 18px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--sw-void);
+  background: var(--sw-action);
+  z-index: 9;
+}
+.od-flash.fail {
+  color: var(--sw-text);
+  background: rgba(5, 11, 19, 0.95);
+  border: 2px solid var(--sw-danger);
+}
+
+/* ---------------------------------------------------- energy pulse */
+.sheet-back {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(5, 11, 19, 0.72);
+  z-index: 11;
+}
+.sheet {
+  width: min(480px, 100%);
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding: 14px 14px max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--sw-surface);
+  --sw-frame-accent: var(--sw-ally);
+}
+.sheet.live {
+  --sw-frame-accent: var(--sw-action);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sw-ally);
+  letter-spacing: 0.14em;
+}
+.sheet.live .sheet-head {
+  color: var(--sw-action);
+}
+.sheet-head .ph-lang {
+  margin-left: auto;
+  font-size: 18px;
+}
+.pulse-what {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.pulse-terms {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.pulse-terms dt {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--sw-muted);
+}
+.pulse-terms dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.pulse-terms .real {
+  color: var(--sw-action);
+}
+.pulse-terms .virtual,
+.virtual {
+  color: var(--sw-ally);
+}
+p.virtual {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--sw-ally);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.pulse-amount {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--sw-action);
+}
+.pulse-ok {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--sw-repair);
 }

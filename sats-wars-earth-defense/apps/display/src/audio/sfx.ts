@@ -208,7 +208,59 @@ class Sfx {
           );
         break;
       case 'part_repaired':
-        if (this.gate('repair', 400)) this.tone('sine', 880, 1320, 0.04, 0.01, 0.25);
+        if (this.gate('repair', 400)) this.tone('sine', 880, 1320, e.auto ? 0.03 : 0.07, 0.01, 0.3);
+        break;
+      case 'repair_started':
+        if (this.gate('ratchet', 300))
+          [0, 0.07, 0.14].forEach((at) => this.hiss('bandpass', 3200, 2400, 0.06, 0.002, 0.04, at));
+        break;
+      case 'power_routed':
+        // Distribution relays: a short rising electrical sweep.
+        if (!this.gate('route', 500)) return;
+        this.tone('sawtooth', 180, 720, e.auto ? 0.03 : 0.06, 0.02, 0.3);
+        this.hiss('bandpass', 1200, 4200, 0.05, 0.01, 0.3);
+        break;
+      case 'circuit_overload':
+        if (!this.gate('overload', 600)) return;
+        this.hiss('highpass', 6000, 2000, 0.25, 0.002, 0.4);
+        this.tone('square', 98, 60, 0.12, 0.005, 0.5);
+        break;
+      case 'circuit_restored':
+        if (this.gate('restored', 400)) this.tone('triangle', 440, 880, 0.08, 0.01, 0.35);
+        break;
+      case 'sats_pulse_settled':
+        // The shared pulse: a bright rising chime on top of a low swell.
+        this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
+        [784, 1046.5, 1318.5].forEach((f, i) =>
+          this.tone('sine', f, f, 0.06, 0.01, 0.8, 0.6 + i * 0.09),
+        );
+        break;
+      case 'overdrive_ready':
+        [392, 587.3, 784].forEach((f, i) => this.tone('sawtooth', f, f, 0.06, 0.03, 0.7, i * 0.18));
+        break;
+      case 'overdrive_sync':
+        if (this.gate(`od${e.role}`, 200))
+          this.tone(
+            'square',
+            660 + ['GUNNER', 'DEFENSE', 'POWER', 'ENGINEER'].indexOf(e.role) * 110,
+            990,
+            0.05,
+            0.005,
+            0.18,
+          );
+        break;
+      case 'overdrive_fired':
+        // Convergence (≈1 s) then the main cannon thunder.
+        this.tone('sawtooth', 80, 640, 0.12, 0.9, 0.2);
+        this.hiss('bandpass', 400, 6000, 0.2, 0.9, 0.2);
+        this.tone('sine', 70, 22, 1, 0.005, 2.6, 1.05);
+        this.hiss('lowpass', 5000, 90, 0.9, 0.005, 2.8, 1.05);
+        this.tone('square', 1800, 200, 0.12, 0.003, 0.5, 1.05);
+        break;
+      case 'overdrive_failed':
+        [330, 247, 185].forEach((f, i) =>
+          this.tone('triangle', f, f * 0.95, 0.06, 0.02, 0.35, i * 0.14),
+        );
         break;
     }
   }

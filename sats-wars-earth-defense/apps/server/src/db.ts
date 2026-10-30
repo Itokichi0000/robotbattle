@@ -71,6 +71,44 @@ const MIGRATIONS: string[] = [
    )`,
   `CREATE INDEX idx_pilot_sessions_pilot ON pilot_sessions(pilot_id)`,
   `CREATE INDEX idx_action_events_match ON action_events(match_id)`,
+  // Phase 3: LNURL-auth. Only a hash of the wallet's linking key is stored (a pseudonym).
+  `ALTER TABLE pilots ADD COLUMN linking_key_hash TEXT`,
+  `CREATE UNIQUE INDEX idx_pilots_linking_key ON pilots(linking_key_hash) WHERE linking_key_hash IS NOT NULL`,
+  `ALTER TABLE pilots ADD COLUMN callsign TEXT`,
+  `ALTER TABLE pilots ADD COLUMN show_callsign INTEGER NOT NULL DEFAULT 0`,
+  `CREATE TABLE auth_attempts (
+     id TEXT PRIMARY KEY,
+     k1 TEXT NOT NULL UNIQUE,
+     browser_token_hash TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('pending','verified','claimed','failed')),
+     pilot_id TEXT REFERENCES pilots(id),
+     error TEXT,
+     created_at TEXT NOT NULL,
+     expires_at TEXT NOT NULL,
+     verified_at TEXT,
+     claimed_at TEXT
+   )`,
+  // Phase 4: shared energy pulses. One row per invoice; payment_hash is unique so a
+  // duplicate webhook can never apply a pulse twice.
+  `CREATE TABLE payment_intents (
+     id TEXT PRIMARY KEY,
+     pilot_id TEXT NOT NULL REFERENCES pilots(id),
+     match_id TEXT NOT NULL,
+     seat_id TEXT,
+     amount_sats INTEGER NOT NULL,
+     mode TEXT NOT NULL CHECK (mode IN ('sandbox','live')),
+     provider TEXT NOT NULL,
+     payment_hash TEXT NOT NULL UNIQUE,
+     payment_request TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('pending','settled','expired','failed','canceled')),
+     applied TEXT CHECK (applied IN ('applied','unapplied')),
+     created_at TEXT NOT NULL,
+     expires_at TEXT NOT NULL,
+     settled_at TEXT,
+     note TEXT
+   )`,
+  `CREATE INDEX idx_payment_intents_match ON payment_intents(match_id, pilot_id)`,
+  `CREATE INDEX idx_payment_intents_status ON payment_intents(status)`,
 ];
 
 export type Db = DatabaseSync;

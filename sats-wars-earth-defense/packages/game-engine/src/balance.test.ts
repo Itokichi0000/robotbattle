@@ -4,45 +4,48 @@ import { describe, expect, it } from 'vitest';
 import { playMatch } from './sim';
 
 /**
- * Full-match balance smoke test with bot pilots. The numbers are a floor, not a target:
- * real tuning happens with the simulation report, but a regression that makes the game
- * unwinnable (or winnable with nobody aboard) should fail CI.
+ * Full-match balance floors with bot pilots. The numbers are floors, not targets: real
+ * tuning happens with people, but a regression that makes the game unwinnable (or winnable
+ * with nobody aboard) must fail CI.
  */
-
-function winRate(config: GameConfig, crew: SeatId[], runs: number, autoSupport = true) {
+function run(config: GameConfig, crew: SeatId[], runs: number) {
   let wins = 0;
-  let cities = 0;
+  let overdrives = 0;
+  let repairs = 0;
   for (let i = 0; i < runs; i++) {
-    const s = playMatch(config, crew, 1000 + i, autoSupport);
+    const s = playMatch(config, crew, 1000 + i);
     if (s.result?.outcome === 'VICTORY') wins += 1;
-    cities += Object.values(s.cities).filter((c) => !c.lost).length;
+    overdrives += s.stats.overdrives;
+    repairs += s.stats.repairs;
   }
-  return { rate: wins / runs, avgCities: cities / runs };
+  return { rate: wins / runs, overdrives: overdrives / runs, repairs: repairs / runs };
 }
 
-const OPEN: SeatId[] = ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'];
+const FOUR: SeatId[] = ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'];
 
-describe('balance (STANDARD, bot pilots)', () => {
+describe('balance (STANDARD, bot pilots)', { timeout: 120_000 }, () => {
   const cfg = PRESETS.STANDARD;
+
+  it('AUTO SUPPORT alone does not win: people are the point', () => {
+    expect(run(cfg, [], 12).rate).toBeLessThanOrEqual(0.1);
+  });
+
   it('two pilots (one gunner, one shield) with AUTO SUPPORT can win', () => {
-    const r = winRate(cfg, ['GUNNER_L', 'SHIELD_L'], 12);
-    console.info('2 pilots', r);
-    expect(r.rate).toBeGreaterThanOrEqual(0.5);
+    expect(run(cfg, ['GUNNER_L', 'SHIELD_L'], 12).rate).toBeGreaterThanOrEqual(0.5);
   });
 
-  it('four pilots win more comfortably than two', () => {
-    const r = winRate(cfg, OPEN, 12);
-    console.info('4 pilots', r);
+  it('four pilots win comfortably', () => {
+    expect(run(cfg, FOUR, 12).rate).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it('a full crew of eight wins, fires OVERDRIVE and keeps the engineers busy', () => {
+    const r = run(cfg, [...SEAT_IDS], 12);
     expect(r.rate).toBeGreaterThanOrEqual(0.75);
+    expect(r.overdrives).toBeGreaterThanOrEqual(1);
+    expect(r.repairs).toBeGreaterThanOrEqual(5);
   });
 
-  it('AUTO SUPPORT alone does not win: humans are the point', () => {
-    const r = winRate(cfg, [], 12);
-    console.info('0 pilots', r);
-    expect(r.rate).toBeLessThanOrEqual(0.1);
-  });
-
-  it('every seat id is a real seat', () => {
-    for (const s of OPEN) expect(SEAT_IDS).toContain(s);
+  it('SHORT preset stays winnable for a full crew', () => {
+    expect(run(PRESETS.SHORT, [...SEAT_IDS], 8).rate).toBeGreaterThanOrEqual(0.6);
   });
 });

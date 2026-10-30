@@ -324,6 +324,13 @@ export function Raijin() {
     () =>
       fxBus.on((e) => {
         if (e.type === 'seat_assigned') pulse.current[e.seatId] = 1;
+        // Every confirmed station action lights its station once (power, router, repair, sync).
+        if ((e.type === 'power_routed' || e.type === 'circuit_restored') && !e.auto && e.seatId)
+          pulse.current[e.seatId] = 0.8;
+        if ((e.type === 'part_repaired' || e.type === 'threat_blocked') && !e.auto && e.seatId)
+          pulse.current[e.seatId] = 0.8;
+        if (e.type === 'overdrive_sync' && e.seatId) pulse.current[e.seatId] = 1;
+        if (e.type === 'sats_pulse_settled' && e.seatId) pulse.current[e.seatId] = 1;
         if (e.type === 'weapon_fired' && (e.seatId === 'GUNNER_L' || e.seatId === 'GUNNER_R'))
           kick.current[e.seatId] = 1;
       }),
@@ -411,8 +418,12 @@ export function Raijin() {
       pulse.current[seat] = Math.max(0, p - dt * 1.2);
     }
     thrusterMat.emissiveIntensity = 0.4 + thrust * 6 + Math.sin(t * 40) * thrust * 0.6;
+    // The chest reactor brightens with SYNC and the shared CHARGE, and burns at OVERDRIVE READY.
+    const charge = snap ? Math.min(1, snap.teamCapacitor / snap.hints.overdriveCapacitorMin) : 0;
+    const od = snap && snap.overdrive.status !== 'IDLE' ? 3 + Math.sin(t * 5) * 0.8 : 0;
     coreMat.emissiveIntensity =
-      (1.2 + (snap ? (snap.teamSync / 100) * 4 : 0) + Math.sin(t * 2) * 0.25) * powered;
+      (1.2 + (snap ? (snap.teamSync / 100) * 3 : 0) + charge * 2 + od + Math.sin(t * 2) * 0.25) *
+      powered;
     visorMat.emissiveIntensity = 3.2 * powered;
   });
 

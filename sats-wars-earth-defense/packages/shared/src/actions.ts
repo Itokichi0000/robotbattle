@@ -1,4 +1,6 @@
-import type { Direction, SeatId } from './seats';
+import type { PowerDistribution } from './config';
+import type { Direction, MechPartId, SeatId } from './seats';
+import type { PowerLane } from './state';
 
 /**
  * Pilot intents. Clients send raw intent only; the engine decides success and effect.
@@ -7,7 +9,16 @@ import type { Direction, SeatId } from './seats';
 export type PilotActionInput =
   | { actionType: 'LOCK'; payload: { targetId?: string } }
   | { actionType: 'FIRE'; payload: Record<string, never> }
-  | { actionType: 'DEPLOY_SHIELD'; payload: { dir: Direction } };
+  | { actionType: 'DEPLOY_SHIELD'; payload: { dir: Direction } }
+  /** POWER A: a whole plan (sum 100) against the version it was drawn from. */
+  | { actionType: 'SET_POWER'; payload: { distribution: PowerDistribution; baseVersion: number } }
+  /** POWER B: the tile rotations the pilot set on a cut circuit. */
+  | { actionType: 'ROUTE_SUBMIT'; payload: { lane: PowerLane; rotations: number[] } }
+  /** ENGINEER: pick a damaged part (opens a bolt job), then tighten bolts in order. */
+  | { actionType: 'REPAIR_START'; payload: { part: MechPartId } }
+  | { actionType: 'REPAIR_FINISH'; payload: { part: MechPartId; order: number[] } }
+  /** Anyone: confirm RAIJIN OVERDRIVE for your role. */
+  | { actionType: 'SYNC_NOW'; payload: Record<string, never> };
 
 export type PilotActionType = PilotActionInput['actionType'];
 
@@ -34,6 +45,16 @@ export const REASON_CODES = [
   'WEAPON_BROKEN',
   'BAD_DIRECTION',
   'ROUND_CLOSED',
+  'STALE_VERSION',
+  'BAD_DISTRIBUTION',
+  'CIRCUIT_OK',
+  'ROUTE_INCOMPLETE',
+  'PART_OK',
+  'NOT_YOUR_PART',
+  'NO_JOB',
+  'JOB_EXPIRED',
+  'WRONG_ORDER',
+  'OVERDRIVE_NOT_READY',
   /** Client-side only: no answer from the server in time. */
   'NETWORK',
 ] as const;
@@ -63,6 +84,22 @@ export const REASON_TEXT: Record<ReasonCode, { ja: string; en: string }> = {
   WEAPON_BROKEN: { ja: '主砲が故障。整備を待て', en: 'Gun is down. Needs repair' },
   BAD_DIRECTION: { ja: 'その方向はあなたの担当外', en: 'Not your sector' },
   ROUND_CLOSED: { ja: '作戦は終了しています', en: 'The round has ended' },
+  STALE_VERSION: {
+    ja: '配分が更新されました。最新の値で再送信',
+    en: 'Plan changed meanwhile. Send again',
+  },
+  BAD_DISTRIBUTION: {
+    ja: '配分の合計は100%（各レーン上限あり）',
+    en: 'Shares must total 100 % (per-lane cap)',
+  },
+  CIRCUIT_OK: { ja: 'その回路は正常です', en: 'That circuit is fine' },
+  ROUTE_INCOMPLETE: { ja: '経路がつながっていません', en: 'The route is not connected' },
+  PART_OK: { ja: 'その部位は損傷していません', en: 'That part is not damaged' },
+  NOT_YOUR_PART: { ja: 'その部位は担当外です', en: 'Not your section' },
+  NO_JOB: { ja: '先に修理する部位を選んでください', en: 'Pick a part first' },
+  JOB_EXPIRED: { ja: '時間切れ。もう一度選び直し', en: 'Too slow. Pick the part again' },
+  WRONG_ORDER: { ja: 'ボルトの順番が違います', en: 'Wrong bolt order' },
+  OVERDRIVE_NOT_READY: { ja: 'OVERDRIVE はまだ使えません', en: 'OVERDRIVE is not ready' },
   NETWORK: { ja: '通信待ち。もう一度押してください', en: 'No answer. Tap again' },
 };
 

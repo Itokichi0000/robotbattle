@@ -96,15 +96,46 @@ export interface GameConfig {
     cooldownMs: number;
   };
   energy: { regenPerSec: number; start: number; laneMax: number };
-  power: { defaultDistribution: PowerDistribution };
+  power: {
+    defaultDistribution: PowerDistribution;
+    /** Per-lane share limits for POWER A's plan (sum is always 100). */
+    laneMin: number;
+    laneMax: number;
+    /** A plan counts as a teamwork success at most this often, and only if it moves this much. */
+    successEveryMs: number;
+    minShift: number;
+  };
+  router: {
+    /** First overload in each wave (offset from wave start), then every `everyMs` ±20 %. */
+    firstAtMs: Record<'WAVE_1' | 'WAVE_2' | 'BOSS', number | null>;
+    everyMs: Record<'WAVE_1' | 'WAVE_2' | 'BOSS', number | null>;
+    /** Regen multiplier of a lane while its circuit is cut. */
+    brokenRegenFactor: number;
+    maxBroken: number;
+  };
   mech: {
     /** Mech-targeted hits are softened by this ratio when the mobility lane can pay. */
     evadeRatio: number;
     evadeCost: number;
     /** Share of a mech hit that also chips CORE integrity. */
     coreShareOfMechHit: number;
+    /** Part HP lost per point of mech-hit damage. */
+    partDamageRatio: number;
+    /**
+     * Wear from normal work, so the engineers always have a job: gun barrels per shot,
+     * shoulder emitters per block, legs per evasive step, core per circuit overload.
+     */
+    wear: { perShot: number; perBlock: number; perEvade: number; perOverload: number };
   };
-  repair: { energyCost: number; amount: number; cooldownMs: number };
+  repair: {
+    energyCost: number;
+    amount: number;
+    cooldownMs: number;
+    /** A started job must be finished within this time. */
+    jobMs: number;
+    bolts: number;
+    slots: number;
+  };
   sync: {
     windowMs: number;
     gainByRoles: Record<2 | 3 | 4, number>;
@@ -119,7 +150,26 @@ export interface GameConfig {
     perCombo: number;
     max: number;
   };
-  overdrive: { syncMin: number; capacitorMin: number; damage: number; windowMs: number };
+  overdrive: {
+    syncMin: number;
+    capacitorMin: number;
+    damage: number;
+    windowMs: number;
+    /** AUTO SUPPORT confirms roles with nobody aboard this long after the window opens. */
+    autoConfirmMs: number;
+    /** TEAM SYNC after a successful OVERDRIVE (the crew starts building again). */
+    syncAfter: number;
+    /** Share of CAPACITOR kept when the window closes incomplete. */
+    failCapacitorKeep: number;
+  };
+  /** Shared energy pulses (Lightning, spec §8.2). Fixed size: more money never means more power. */
+  pulses: {
+    capacitorGain: number;
+    amountSats: number;
+    perPilotPerMatch: number;
+    cooldownMs: number;
+    maxPerMatch: number;
+  };
   auto: {
     gunnerEveryMs: number;
     gunnerDamageRatio: number;
@@ -127,6 +177,8 @@ export interface GameConfig {
     shieldCooldownMs: number;
     engineerEveryMs: number;
     engineerAmount: number;
+    /** AUTO SUPPORT re-routes a cut circuit after this long. */
+    routerFixMs: number;
   };
   waves: Record<'WAVE_1' | 'WAVE_2' | 'BOSS', WaveScript>;
 }
@@ -164,9 +216,8 @@ const ENEMIES: Record<EnemyKind, EnemyDef> = {
 
 const STANDARD: GameConfig = {
   presetId: 'STANDARD',
-  // Phase 1 vertical slice: gunners and shields are boardable; power and engineer seats are
-  // flown by the clearly labelled AUTO SUPPORT until their consoles land in Phase 2.
-  openSeats: ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'],
+  // All eight stations are boardable; empty ones are flown by the labelled AUTO SUPPORT.
+  openSeats: [...SEAT_IDS],
   timings: {
     countdownMs: 3_000,
     deploymentMs: 8_000,
@@ -195,9 +246,27 @@ const STANDARD: GameConfig = {
   },
   shields: { energyCost: 18, activeMs: 2_500, perfectMs: 1_200, cooldownMs: 8_000 },
   energy: { regenPerSec: 24, start: 60, laneMax: 100 },
-  power: { defaultDistribution: { weapon: 35, shield: 30, mobility: 15, repair: 20 } },
-  mech: { evadeRatio: 0.6, evadeCost: 20, coreShareOfMechHit: 0.6 },
-  repair: { energyCost: 10, amount: 25, cooldownMs: 8_000 },
+  power: {
+    defaultDistribution: { weapon: 35, shield: 30, mobility: 15, repair: 20 },
+    laneMin: 0,
+    laneMax: 70,
+    successEveryMs: 6_000,
+    minShift: 10,
+  },
+  router: {
+    firstAtMs: { WAVE_1: 24_000, WAVE_2: 12_000, BOSS: 15_000 },
+    everyMs: { WAVE_1: null, WAVE_2: 22_000, BOSS: 20_000 },
+    brokenRegenFactor: 0.1,
+    maxBroken: 2,
+  },
+  mech: {
+    evadeRatio: 0.6,
+    evadeCost: 20,
+    coreShareOfMechHit: 0.6,
+    partDamageRatio: 0.45,
+    wear: { perShot: 2.5, perBlock: 5, perEvade: 4, perOverload: 6 },
+  },
+  repair: { energyCost: 10, amount: 25, cooldownMs: 8_000, jobMs: 9_000, bolts: 3, slots: 6 },
   sync: {
     windowMs: 10_000,
     gainByRoles: { 2: 6, 3: 10, 4: 15 },
@@ -206,7 +275,22 @@ const STANDARD: GameConfig = {
     decayAfterMs: 8_000,
   },
   capacitor: { perHit: 2, perBlock: 3, perPerfect: 5, perCombo: 4, max: 100 },
-  overdrive: { syncMin: 80, capacitorMin: 100, damage: 300, windowMs: 5_000 },
+  overdrive: {
+    syncMin: 80,
+    capacitorMin: 100,
+    damage: 300,
+    windowMs: 5_000,
+    autoConfirmMs: 1_200,
+    syncAfter: 40,
+    failCapacitorKeep: 0.5,
+  },
+  pulses: {
+    capacitorGain: 20,
+    amountSats: 21,
+    perPilotPerMatch: 3,
+    cooldownMs: 30_000,
+    maxPerMatch: 24,
+  },
   auto: {
     gunnerEveryMs: 4_500,
     gunnerDamageRatio: 0.4,
@@ -214,6 +298,7 @@ const STANDARD: GameConfig = {
     shieldCooldownMs: 10_000,
     engineerEveryMs: 6_000,
     engineerAmount: 8,
+    routerFixMs: 10_000,
   },
   waves: {
     WAVE_1: {
@@ -341,7 +426,5 @@ export function configHash(c: GameConfig): string {
   }
   return h.toString(16).padStart(8, '0');
 }
-
-export const ALL_SEATS_OPEN: SeatId[] = [...SEAT_IDS];
 
 export type { Direction };

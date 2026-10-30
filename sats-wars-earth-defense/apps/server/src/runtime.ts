@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
   advanceTo,
+  botDecide,
   createMatch,
   isRoundOver,
   reduce,
   toPublicState,
+  type BotMemory,
   type EngineCommand,
   type ReduceResult,
 } from '@swed/game-engine';
-import { PRESETS, SEAT_IDS } from '@swed/shared';
+import { isSeatOpen, PRESETS, SEAT_IDS, SEATS } from '@swed/shared';
 import type {
   ActionResult,
   MatchEvent,
@@ -32,6 +34,10 @@ import type { PilotRow } from './sessions';
 
 export const TICK_MS = 50;
 const SNAPSHOT_MS = 100;
+/** Demo bots act about three times a second, like attentive people. */
+const BOT_EVERY_MS = 300;
+/** Demo mode starts a sortie when the lobby has been quiet this long. */
+const DEMO_IDLE_START_MS = 12_000;
 
 /** Monotonic match clock that stops while the operator has the match paused. */
 export class MatchClock {
@@ -92,6 +98,11 @@ export class MatchRuntime {
   private readonly source: () => number;
   private readonly seed: () => number;
   private readonly row: ReturnType<Db['prepare']>;
+  demoBots = false;
+  private botMemory = new Map<SeatId, BotMemory>();
+  private lastBotAt = -Infinity;
+  private lobbyQuietSince = 0;
+  private botActionSeq = 0;
 
   constructor(private readonly deps: RuntimeDeps) {
     this.source = deps.source ?? (() => performance.now());
@@ -134,6 +145,7 @@ export class MatchRuntime {
       this.replaceMatch('ROUND_OVER', { attract: true });
       return;
     }
+    if (this.demoBots) this.runDemoBots();
     const now = this.source();
     if (this.urgent || now - this.lastSnapshotAt >= SNAPSHOT_MS) {
       this.urgent = false;
@@ -253,6 +265,7 @@ export class MatchRuntime {
           seatId: id,
           pilotId: seat.pilotId,
           displayName: seat.displayName ?? '',
+          bot: seat.bot,
         });
         if (!seat.connected)
           this.command({ type: 'SEAT_CONNECTION', pilotId: seat.pilotId, connected: false });
@@ -272,15 +285,86 @@ export class MatchRuntime {
     return SEAT_IDS.find((id) => this.state.seats[id].pilotId === pilotId) ?? null;
   }
 
-  joinSeat(pilot: PilotRow, matchId: string, seatId: SeatId): SeatRequestResult {
+  joinSeat(
+    pilot: PilotRow,
+    matchId: string,
+    seatId: SeatId,
+    displayName: string,
+  ): SeatRequestResult {
     if (matchId !== this.state.matchId) return { ok: false, reasonCode: 'STALE_MATCH' };
-    const r = this.command({
-      type: 'SEAT_JOIN',
-      seatId,
-      pilotId: pilot.id,
-      displayName: pilot.public_name,
-    });
+    const r = this.command({ type: 'SEAT_JOIN', seatId, pilotId: pilot.id, displayName });
+    this.lobbyQuietSince = this.source();
     return r.outcome.kind === 'seat' ? r.outcome.result : { ok: false, reasonCode: 'INVALID' };
+  }
+
+  rename(pilotId: string, displayName: string): void {
+    const seat = this.seatOf(pilotId);
+    if (seat) this.command({ type: 'SEAT_RENAME', seatId: seat, displayName });
+  }
+
+  /** Applies a settled energy pulse to the live match; false if the engine refused it. */
+  applyPulse(intentId: string, seatId: string | null, virtual: boolean): boolean {
+    const seat = SEAT_IDS.find((s) => s === seatId) ?? null;
+    const r = this.command({ type: 'SATS_PULSE', intentId, seatId: seat, virtual });
+    return r.outcome.kind === 'control' && r.outcome.ok;
+  }
+
+  /* ------------------------------------------------------------ demo bots */
+
+  setDemoBots(enabled: boolean): void {
+    this.demoBots = enabled;
+    this.lobbyQuietSince = this.source();
+    if (!enabled) {
+      for (const id of SEAT_IDS) {
+        if (this.state.seats[id].bot) this.command({ type: 'SEAT_KICK', seatId: id });
+      }
+    }
+  }
+
+  /**
+   * Exhibition loop: labelled bots fill empty seats before a sortie, start it after a quiet
+   * lobby, and play with the same raw intents a phone sends. People can take any bot seat.
+   */
+  private runDemoBots(): void {
+    const s = this.state;
+    const now = this.source();
+    if (s.phase === 'ATTRACT' || s.phase === 'LOBBY') {
+      SEAT_IDS.forEach((id) => {
+        if (!s.seats[id].pilotId && isSeatOpen(s.config, id)) {
+          this.command({
+            type: 'SEAT_JOIN',
+            seatId: id,
+            pilotId: `bot:${id}`,
+            displayName: `DEMO-BOT ${SEATS[id].no}`,
+            bot: true,
+          });
+          this.command({ type: 'SEAT_READY', pilotId: `bot:${id}` });
+          this.botMemory.set(id, {});
+        }
+      });
+      if (now - this.lobbyQuietSince >= DEMO_IDLE_START_MS) {
+        this.command({ type: 'START' });
+        this.lobbyQuietSince = now;
+      }
+      return;
+    }
+    if (now - this.lastBotAt < BOT_EVERY_MS) return;
+    this.lastBotAt = now;
+    const pub = toPublicState(this.state);
+    for (const id of SEAT_IDS) {
+      const seat = this.state.seats[id];
+      if (!seat.bot || !seat.pilotId) continue;
+      const action = botDecide(pub, id, this.state.t, 0.85, this.botMemory.get(id) ?? {});
+      if (!action) continue;
+      this.botActionSeq += 1;
+      this.command({
+        type: 'PILOT_ACTION',
+        pilotId: seat.pilotId,
+        seatId: id,
+        clientActionId: `demo-${this.state.matchId}-${this.botActionSeq}`,
+        action,
+      });
+    }
   }
 
   ready(pilot: PilotRow, matchId: string): SeatRequestResult {

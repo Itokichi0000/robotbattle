@@ -1,7 +1,15 @@
 import type { EnemyKind, GameConfig, PowerDistribution, PresetId } from './config';
 import type { CityId } from './japan';
 import type { Phase } from './phases';
-import type { Direction, GunnerSeatId, MechPartId, SeatId, ShieldSeatId } from './seats';
+import type {
+  Direction,
+  EngineerSeatId,
+  GunnerSeatId,
+  MechPartId,
+  RoleId,
+  SeatId,
+  ShieldSeatId,
+} from './seats';
 
 /**
  * Engine-internal match state. Authoritative and server-only: it carries pilot ids and the
@@ -16,6 +24,10 @@ export interface SeatStats {
   perfect: number;
   repairs: number;
   combos: number;
+  /** Circuits re-routed (POWER B) and power plans sent (POWER A). */
+  routes: number;
+  /** OVERDRIVE confirmations. */
+  syncs: number;
 }
 
 export interface SeatState {
@@ -27,6 +39,8 @@ export interface SeatState {
   ready: boolean;
   /** Match clock when the pilot dropped; the seat is held for timings.seatHoldMs. */
   disconnectedAt: number | null;
+  /** Operator demo bot (clearly labelled); a human taking the seat replaces it. */
+  bot: boolean;
   stats: SeatStats;
 }
 
@@ -98,6 +112,58 @@ export interface EnergyLanes {
   repair: number;
 }
 
+export const POWER_LANES = ['weapon', 'shield', 'mobility', 'repair'] as const;
+export type PowerLane = (typeof POWER_LANES)[number];
+
+/** One router tile: I = straight, L = corner. rot is quarter turns clockwise. */
+export interface RouterTile {
+  type: 'I' | 'L';
+  rot: number;
+}
+
+/**
+ * POWER B's puzzle: rotate tiles on a 3×3 grid so power flows from the left edge at
+ * entryRow to the right edge at exitRow. Tiles are row-major (index = row * 3 + col).
+ */
+export interface RouterPuzzle {
+  entryRow: number;
+  exitRow: number;
+  tiles: RouterTile[];
+}
+
+export interface CircuitState {
+  broken: boolean;
+  brokenAt: number;
+  puzzle: RouterPuzzle | null;
+}
+
+/** ENGINEER job: tap the numbered bolts in order before it expires. */
+export interface RepairJob {
+  part: MechPartId;
+  /** Bolt slots (0..slots-1) in the order they must be tightened. */
+  bolts: number[];
+  startedAt: number;
+  expiresAt: number;
+}
+
+export interface EngineerState {
+  job: RepairJob | null;
+  cooldownUntil: number;
+}
+
+export type OverdriveStatus = 'IDLE' | 'READY' | 'CHARGING';
+
+export interface OverdriveState {
+  status: OverdriveStatus;
+  readyAt: number;
+  windowStartedAt: number;
+  windowEndsAt: number;
+  /** Roles that pressed SYNC NOW (or were proxied by AUTO SUPPORT) in this window. */
+  confirmed: RoleId[];
+  /** Roles with nobody aboard, confirmed by the clearly labelled AUTO SUPPORT. */
+  autoRoles: RoleId[];
+}
+
 export interface MatchStats {
   enemiesDestroyed: number;
   threatsBlocked: number;
@@ -107,6 +173,12 @@ export interface MatchStats {
   combos: number;
   bestSync: number;
   damageToBoss: number;
+  repairs: number;
+  routesFixed: number;
+  overloads: number;
+  overdrives: number;
+  overdriveFails: number;
+  pulses: number;
 }
 
 export type MatchOutcome = 'VICTORY' | 'DEFEAT';
@@ -165,10 +237,20 @@ export interface MatchState {
   recentSuccesses: RecentSuccess[];
   lastComboAt: number;
   spawn: { scriptedDone: number; nextSpawnAt: number };
+  circuits: Record<PowerLane, CircuitState>;
+  /** Next circuit overload (match clock); null when none is scheduled in this wave. */
+  nextOverloadAt: number | null;
+  /** POWER A: last plan that counted as a teamwork success (anti-spam). */
+  powerSuccessAt: number;
+  engineers: Record<EngineerSeatId, EngineerState>;
+  overdrive: OverdriveState;
+  /** Shared energy pulses (Lightning) applied to this match, by payment intent id. */
+  pulsesApplied: string[];
   autoTimers: {
     gunner: Record<GunnerSeatId, number>;
     engineer: number;
     shield: Record<ShieldSeatId, number>;
+    power: number;
   };
   /** Humans aboard when combat began; scales enemy HP for this match. */
   crewAtLaunch: number;
@@ -189,6 +271,8 @@ export interface PublicSeat {
   ready: boolean;
   /** Seat currently flown by AUTO SUPPORT (empty seat and auto support enabled). */
   auto: boolean;
+  /** Operator demo bot. */
+  bot: boolean;
   open: boolean;
   stats: SeatStats;
 }
@@ -228,9 +312,14 @@ export interface PublicMatchState {
   cities: Record<CityId, CityState>;
   parts: Record<MechPartId, number>;
   distribution: PowerDistribution;
+  /** POWER A sends plans against this version; a stale plan is refused (spec §5.5). */
+  distributionVersion: number;
   energy: EnergyLanes;
   gunners: Record<GunnerSeatId, Omit<GunnerState, 'chargedNotified'>>;
   shields: Record<ShieldSeatId, ShieldState>;
+  circuits: Record<PowerLane, CircuitState>;
+  engineers: Record<EngineerSeatId, EngineerState>;
+  overdrive: OverdriveState;
   teamSync: number;
   teamCapacitor: number;
   stats: MatchStats;
@@ -249,5 +338,12 @@ export interface PublicMatchState {
     citiesLostForDefeat: number;
     overdriveSyncMin: number;
     overdriveCapacitorMin: number;
+    overdriveWindowMs: number;
+    repairCooldownMs: number;
+    repairAmount: number;
+    repairSlots: number;
+    powerLaneMax: number;
+    pulseGain: number;
+    pulseAmountSats: number;
   };
 }

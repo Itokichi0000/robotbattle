@@ -19,8 +19,23 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4400),
   /** Public origin phones and wallets reach, e.g. https://sats-wars.example. */
   PUBLIC_BASE_URL: z.string().url().optional(),
-  /** sandbox = fake money only, no keys needed. live = real Lightning (Phase 3/4, needs approval). */
+  /**
+   * sandbox = VIRTUAL energy pulses only (no keys, nothing is ever charged).
+   * live = real Lightning invoices through LNbits. Even then, payments stay OFF until the
+   * operator runs the checks and approves them in /operator for this server run (spec §4.8).
+   */
   APP_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+  /** Receiving backend for live mode. Only LNbits is implemented (invoice/read key only). */
+  LIGHTNING_PROVIDER: z.enum(['lnbits']).default('lnbits'),
+  LNBITS_URL: z.string().url().optional(),
+  /** Invoice/read key. Never an admin key: the server only creates and reads invoices. */
+  LNBITS_INVOICE_KEY: z.string().min(16).max(128).optional(),
+  /** Shown to the payer before every payment: who receives the sats (spec §8.3). */
+  PAYMENT_RECIPIENT_LABEL: z.string().min(2).max(80).optional(),
+  /** Fixed size of one shared energy pulse in sats (default 21). Bigger never means stronger. */
+  PULSE_AMOUNT_SATS: z.coerce.number().int().min(1).max(10_000).optional(),
+  /** Secret in the LNbits webhook URL; generated per run when unset. */
+  LNBITS_WEBHOOK_SECRET: z.string().min(16).max(128).optional(),
   OPERATOR_PASSWORD: z.string().optional(),
   DATABASE_PATH: z.string().default('data/sats-wars.db'),
   /** Free DEMO GUEST sign-in (sandbox / exhibition demo only). */
@@ -38,6 +53,7 @@ const schema = z.object({
 
 export type Env = z.infer<typeof schema> & {
   demoGuestEnabled: boolean;
+  webhookSecret: string;
   webMode: 'dev' | 'static' | 'none';
   allowedOrigins: string[];
   operatorPasswordGenerated: boolean;
@@ -61,7 +77,11 @@ export function loadDotEnv(): void {
   if (existsSync(file)) process.loadEnvFile(file);
 }
 
-export function parseEnv(source: NodeJS.ProcessEnv, randomPassword: () => string): Env {
+export function parseEnv(
+  source: NodeJS.ProcessEnv,
+  randomPassword: () => string,
+  randomSecret: () => string = randomPassword,
+): Env {
   const parsed = schema.safeParse(source);
   if (!parsed.success) {
     throw new EnvError(
@@ -73,10 +93,21 @@ export function parseEnv(source: NodeJS.ProcessEnv, randomPassword: () => string
   const problems: string[] = [];
 
   if (e.APP_MODE === 'live') {
-    problems.push(
-      'APP_MODE=live is not available yet: LNURL-auth (Phase 3) and Lightning payments (Phase 4) ' +
-        "are not implemented, and live payments need the owner's explicit approval. Use APP_MODE=sandbox.",
-    );
+    // Real money needs a real receiver, a public https callback and a label for the payer.
+    if (!e.LNBITS_URL) problems.push('APP_MODE=live needs LNBITS_URL.');
+    else if (prod && !e.LNBITS_URL.startsWith('https://')) {
+      problems.push('LNBITS_URL must be https:// in production.');
+    }
+    if (!e.LNBITS_INVOICE_KEY)
+      problems.push('APP_MODE=live needs LNBITS_INVOICE_KEY (invoice/read key).');
+    if (!e.PAYMENT_RECIPIENT_LABEL) {
+      problems.push('APP_MODE=live needs PAYMENT_RECIPIENT_LABEL (shown to every payer).');
+    }
+    if (!e.PUBLIC_BASE_URL?.startsWith('https://')) {
+      problems.push(
+        'APP_MODE=live needs an https:// PUBLIC_BASE_URL (wallets and webhooks reach it).',
+      );
+    }
   }
   let operatorPassword = e.OPERATOR_PASSWORD ?? '';
   let generated = false;
@@ -102,6 +133,7 @@ export function parseEnv(source: NodeJS.ProcessEnv, randomPassword: () => string
   return {
     ...e,
     demoGuestEnabled: e.DEMO_GUEST_ENABLED ?? e.APP_MODE === 'sandbox',
+    webhookSecret: e.LNBITS_WEBHOOK_SECRET ?? randomSecret(),
     webMode,
     allowedOrigins: e.ALLOWED_ORIGINS.split(',')
       .map((s) => s.trim().replace(/\/$/, ''))

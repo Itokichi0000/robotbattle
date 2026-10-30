@@ -1,82 +1,10 @@
 import { PRESETS } from '@swed/shared';
-import type { GameConfig, MatchEvent, MatchState, PilotActionInput, SeatId } from '@swed/shared';
+import type { GameConfig, PilotActionInput } from '@swed/shared';
 import { describe, expect, it } from 'vitest';
-import {
-  advanceTo,
-  createMatch,
-  isRoundOver,
-  reduce,
-  type EngineCommand,
-  type ReduceResult,
-} from './engine';
+import { isRoundOver } from './engine';
 import { recommendTarget } from './hints';
 import { toPublicState } from './public';
-
-/* ------------------------------------------------------------- harness */
-
-class Sim {
-  state: MatchState;
-  events: MatchEvent[] = [];
-  private n = 0;
-  constructor(
-    opts: { config?: GameConfig; autoSupport?: boolean; seed?: number; attract?: boolean } = {},
-  ) {
-    this.state = createMatch({
-      matchId: 'm-test',
-      seed: opts.seed ?? 42,
-      config: opts.config ?? PRESETS.TEST,
-      autoSupport: opts.autoSupport ?? false,
-      attract: opts.attract ?? false,
-    });
-  }
-  get t() {
-    return this.state.t;
-  }
-  cmd(c: EngineCommand): ReduceResult {
-    const r = reduce(this.state, c);
-    this.state = r.state;
-    this.events.push(...r.events);
-    return r;
-  }
-  to(t: number) {
-    const r = advanceTo(this.state, t);
-    this.state = r.state;
-    this.events.push(...r.events);
-  }
-  wait(ms: number) {
-    this.to(this.state.t + ms);
-  }
-  join(seatId: SeatId, pilotId = `p-${seatId}`) {
-    return this.cmd({
-      type: 'SEAT_JOIN',
-      t: this.t,
-      seatId,
-      pilotId,
-      displayName: `PILOT-${seatId.slice(0, 4)}`,
-    });
-  }
-  act(seatId: SeatId, action: PilotActionInput, pilotId = `p-${seatId}`, id?: string) {
-    this.n += 1;
-    const r = this.cmd({
-      type: 'PILOT_ACTION',
-      t: this.t,
-      pilotId,
-      seatId,
-      clientActionId: id ?? `act-${String(this.n).padStart(6, '0')}`,
-      action,
-    });
-    if (r.outcome.kind !== 'action') throw new Error('expected action outcome');
-    return r.outcome.result;
-  }
-  /** START, then skip the deploy cinematic so combat begins now. */
-  launch() {
-    this.cmd({ type: 'START', t: this.t });
-    this.cmd({ type: 'SKIP_DEPLOY', t: this.t });
-  }
-  of<T extends MatchEvent['type']>(type: T) {
-    return this.events.filter((e): e is Extract<MatchEvent, { type: T }> => e.type === type);
-  }
-}
+import { Sim } from './testkit';
 
 /** Cities and core that cannot fall, for tests about the clock rather than the fight. */
 function sturdy(): GameConfig {
@@ -116,7 +44,10 @@ describe('match setup', () => {
 
 describe('seats', () => {
   it('rejects seats that are not open yet, taken seats, and seat swaps in combat', () => {
-    const sim = new Sim();
+    // Venues can close stations (e.g. a broken phone stand); all eight are open by default.
+    const config = structuredClone(PRESETS.TEST);
+    config.openSeats = ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'];
+    const sim = new Sim({ config });
     const closed = sim.join('POWER_CORE');
     expect(closed.outcome).toEqual({
       kind: 'seat',
@@ -475,7 +406,7 @@ describe('public state', () => {
     expect(json).not.toContain('"rng"');
     expect(json).not.toContain('actionLog');
     expect(pub.seats.GUNNER_L).toMatchObject({ occupied: true, auto: false, open: true });
-    expect(pub.seats.POWER_CORE).toMatchObject({ occupied: false, open: false });
+    expect(pub.seats.POWER_CORE).toMatchObject({ occupied: false, open: true, bot: false });
   });
 
   it('reports the total combat clock across waves', () => {

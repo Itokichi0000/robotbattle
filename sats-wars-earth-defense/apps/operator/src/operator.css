@@ -231,3 +231,30 @@ td em {
   color: var(--sw-muted);
   font-style: normal;
 }
+
+/* --------------------------------------------------------- payments */
+.payments h2 b {
+  margin-left: 8px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+.payments .ally,
+.payments td.ally {
+  color: var(--sw-ally);
+}
+.payments .danger {
+  color: var(--sw-danger);
+}
+.payments .muted {
+  color: var(--sw-muted);
+}
+.payments .hint {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--sw-muted);
+  line-height: 1.5;
+}
+.payments label input {
+  display: block;
+  margin-top: 4px;
+}

@@ -194,6 +194,15 @@ importers:
       '@fastify/static':
         specifier: ^8.3.0
         version: 8.3.0
+      '@noble/curves':
+        specifier: ~2.3.0
+        version: 2.3.0
+      '@noble/hashes':
+        specifier: ~2.3.0
+        version: 2.3.0
+      '@scure/base':
+        specifier: ~2.0.0
+        version: 2.0.0
       '@swed/game-engine':
         specifier: workspace:*
         version: link:../../packages/game-engine
@@ -842,6 +851,14 @@ packages:
     cpu: [x64]
     os: [linux]
 
+  '@noble/curves@2.3.0':
+    resolution: {integrity: sha512-v7cY+4oWYPQszRj6ZFGzTVL7uP2TaLo1xMhWHzYC5wj0ZhOXQ5x+sBre8rF3hi8cAoi0bh1qXoovoOkdFtvqEg==}
+    engines: {node: '>= 20.19.0'}
+
+  '@noble/hashes@2.3.0':
+    resolution: {integrity: sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==}
+    engines: {node: '>= 20.19.0'}
+
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
 
@@ -1106,6 +1123,9 @@ packages:
     resolution: {integrity: sha512-xA+neBh1bqkqaS3b48T2UHZnDsTIpb9B0h+TdBzynjF/ymCpYndhfY10RqW0qSKB1HqqQA83mINVhAdwA+mETg==}
     cpu: [x64]
     os: [win32]
+
+  '@scure/base@2.0.0':
+    resolution: {integrity: sha512-3E1kpuZginKkek01ovG8krQ0Z44E3DHPjc5S2rjJw9lZn3KSQOs8S7wqikF/AH7iRanHypj85uGyxk0XAyC37w==}
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -2905,6 +2925,12 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
+  '@noble/curves@2.3.0':
+    dependencies:
+      '@noble/hashes': 2.3.0
+
+  '@noble/hashes@2.3.0': {}
+
   '@oxc-project/types@0.156.0': {}
 
   '@pinojs/redact@0.4.0': {}
@@ -3067,6 +3093,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.66.0':
     optional: true
+
+  '@scure/base@2.0.0': {}
 
   '@socket.io/component-emitter@3.1.2': {}
 

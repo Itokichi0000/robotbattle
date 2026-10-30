@@ -60,7 +60,7 @@ jobs:
   earth-defense:
     # The one-mech, eight-seat project (D-075) is its own pnpm workspace.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: sats-wars-earth-defense

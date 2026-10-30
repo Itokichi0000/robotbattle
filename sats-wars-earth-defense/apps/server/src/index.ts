@@ -15,15 +15,20 @@ try {
   throw err;
 }
 
-const { app, runtime } = await buildApp(env);
+const { app, runtime, payments } = await buildApp(env);
 await app.listen({ host: env.HOST, port: env.PORT });
 runtime.start();
+payments.start();
 
 const base = publicBaseUrl(env);
 const lines = [
   '',
   '  SATS WARS: EARTH DEFENSE — ONE MECH. EIGHT PILOTS.',
-  `  mode       ${env.APP_MODE.toUpperCase()}${env.APP_MODE === 'sandbox' ? ' (no real money, DEMO GUEST sign-in)' : ''}`,
+  `  mode       ${env.APP_MODE.toUpperCase()}${
+    env.APP_MODE === 'sandbox'
+      ? ' (VIRTUAL pulses only, DEMO GUEST + LNURL-auth sign-in)'
+      : ' (LNbits invoices; payments stay OFF until approved in /operator)'
+  }`,
   `  display    http://localhost:${env.PORT}/display/`,
   `  pilot      ${base}/pilot/   (join QR on the big screen)`,
   `  operator   http://localhost:${env.PORT}/operator/`,

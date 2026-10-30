@@ -1,6 +1,6 @@
 import { ROLES, SEATS } from '@swed/shared';
 import type { PublicMatchState, SeatId } from '@swed/shared';
-import { IconCrosshair, IconShield, ROLE_VAR } from '@swed/ui-tokens';
+import { IconBolt, IconCrosshair, IconShield, IconWrench, ROLE_VAR } from '@swed/ui-tokens';
 import { useState } from 'react';
 import { haptic, leaveSeat, ready } from '../net';
 import { reasonText, useL } from '../ui';
@@ -31,6 +31,38 @@ const HOWTO: Record<string, { ja: string[]; en: string[] }> = {
       'Within 1.2 s = PERFECT GUARD',
     ],
   },
+  POWER_CORE: {
+    ja: [
+      '炉心の出力100%を4系統に配分',
+      '±5で調整、またはワンタップの配分',
+      'ボス戦は武器、被弾が多ければシールド・修理へ',
+    ],
+    en: [
+      'Split 100 % reactor output across 4 systems',
+      'Adjust ±5 or tap a ready-made plan',
+      'Guns for the boss; shields and repair under fire',
+    ],
+  },
+  POWER_ROUTER: {
+    ja: [
+      '過負荷で切れた回路が赤く光る',
+      'タイルを回して左から右へ電力をつなぐ',
+      'つながったら CONNECT',
+    ],
+    en: [
+      'Overloaded circuits turn red',
+      'Turn tiles to carry power left to right',
+      'Press CONNECT when it reaches',
+    ],
+  },
+  ENGINEER: {
+    ja: ['担当部位の赤い所をタップ', '番号のボルトを順番に締める', '修理には修理エネルギーが必要'],
+    en: [
+      'Tap a red part in your section',
+      'Tighten the numbered bolts in order',
+      'Repairs use repair energy',
+    ],
+  },
 };
 
 export function ReadyRoom({ s, seat }: { s: PublicMatchState | undefined; seat: SeatId }) {
@@ -39,8 +71,15 @@ export function ReadyRoom({ s, seat }: { s: PublicMatchState | undefined; seat: 
   const def = SEATS[seat];
   const me = s?.seats[seat];
   const launching = s?.phase === 'COUNTDOWN' || s?.phase === 'DEPLOYMENT';
-  const howto = HOWTO[def.role];
-  const Icon = def.role === 'GUNNER' ? IconCrosshair : IconShield;
+  const howto = HOWTO[seat] ?? HOWTO[def.role];
+  const Icon =
+    def.role === 'GUNNER'
+      ? IconCrosshair
+      : def.role === 'DEFENSE'
+        ? IconShield
+        : def.role === 'POWER'
+          ? IconBolt
+          : IconWrench;
   return (
     <main className="screen ready" style={{ ['--acc' as string]: ROLE_VAR[def.role] }}>
       <div className="ready-k">

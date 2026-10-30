@@ -8,6 +8,8 @@ import {
   isCombatPhase,
   PARTS,
   PHASE_LABEL,
+  POWER_LANES,
+  ROLE_IDS,
   ROLES,
   SEATS,
   shieldSeatFor,
@@ -25,6 +27,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { CAPTURE } from '../capture';
 import { store } from '../net';
+import { finisher } from '../scene/cameraBus';
 import { Lobby } from './Lobby';
 import { Radar } from './Radar';
 import { Results, REASON_LABEL } from './Results';
@@ -103,6 +106,22 @@ function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
         </div>
         <div className="bar">
           <i style={{ width: `${s.teamSync}%` }} />
+          <b style={{ left: `${s.hints.overdriveSyncMin}%` }} />
+        </div>
+      </div>
+      <div className="meter">
+        <div className="row">
+          <span className="k">CHARGE 蓄電</span>
+          <span className="v sw-num" style={{ color: 'var(--sw-action)' }}>
+            {Math.round(s.teamCapacitor)}
+          </span>
+        </div>
+        <div className="bar" style={{ ['--bar' as string]: 'var(--sw-action)' }}>
+          <i
+            style={{
+              width: `${Math.min(100, (s.teamCapacitor / s.hints.overdriveCapacitorMin) * 100)}%`,
+            }}
+          />
         </div>
       </div>
       <div>
@@ -149,6 +168,44 @@ function BossBar({ s, mt }: { s: PublicMatchState; mt: number }) {
   );
 }
 
+/**
+ * RAIJIN OVERDRIVE call (spec §4.5, §6.7): READY, then the 5 s window with the four systems
+ * locking in. AUTO SUPPORT stands in only for systems nobody is flying, and says so.
+ */
+function OverdriveBanner({ s, mt }: { s: PublicMatchState; mt: number }) {
+  const od = s.overdrive;
+  if (od.status === 'IDLE') return null;
+  const left = od.status === 'CHARGING' ? Math.max(0, od.windowEndsAt - mt) : null;
+  return (
+    <div className={`od-banner sw-frame${od.status === 'CHARGING' ? ' charging' : ''}`}>
+      <div className="title">
+        <IconBolt size={28} />
+        <b>RAIJIN OVERDRIVE</b>
+        <span className="sub">{left === null ? 'READY 全系統 SYNC NOW' : `SYNC NOW 同期中`}</span>
+        {left !== null ? <span className="secs sw-num">{(left / 1000).toFixed(1)}s</span> : null}
+      </div>
+      <div className="roles">
+        {ROLE_IDS.map((r) => {
+          const done = od.confirmed.includes(r);
+          const auto = od.autoRoles.includes(r);
+          const Icon = ROLE_ICON[r];
+          return (
+            <div
+              key={r}
+              className={`r${done ? ' done' : ''}${auto ? ' auto' : ''}`}
+              style={{ ['--acc' as string]: ROLE_VAR[r] }}
+            >
+              <Icon size={18} />
+              <span>{ROLES[r].labelJa}</span>
+              <small>{done ? (auto ? 'AUTO' : 'SYNC') : auto ? 'AUTO' : 'WAIT'}</small>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** One urgent warning at a time (spec §9.1: right side, about one timed warning). */
 function ContextAlert({ s, mt }: { s: PublicMatchState; mt: number }) {
   const sorted = [...s.threats].sort((a, b) => a.impactAt - b.impactAt);
@@ -184,7 +241,11 @@ function ContextAlert({ s, mt }: { s: PublicMatchState; mt: number }) {
 function seatName(s: PublicMatchState, id: SeatId) {
   const seat = s.seats[id];
   if (seat.occupied)
-    return { name: seat.displayName ?? 'PILOT', auto: false, offline: !seat.connected };
+    return {
+      name: seat.displayName ?? 'PILOT',
+      auto: seat.bot,
+      offline: !seat.connected && !seat.bot,
+    };
   return { name: seat.auto ? 'AUTO SUPPORT' : '空席 EMPTY', auto: true, offline: false };
 }
 
@@ -263,6 +324,13 @@ function SystemStrip({
   const avg = parts.reduce((a, [, v]) => a + v, 0) / parts.length;
   const lane = (v: number) => (v / s.hints.laneMax) * 100;
   const dist = s.distribution;
+  const cut = POWER_LANES.filter((l) => s.circuits[l].broken);
+  const eng = (id: 'ENGINEER_LEGS' | 'ENGINEER_CORE', idle: string) => {
+    const e = s.engineers[id];
+    if (e.job) return `REPAIRING ${PARTS[e.job.part].labelEn}`;
+    if (mt < e.cooldownUntil) return 'COOLING';
+    return idle;
+  };
   return (
     <div className="strip">
       {sys('GUNNER', 'FIRE / LOCK', lane(s.energy.weapon), {
@@ -275,16 +343,18 @@ function SystemStrip({
       })}
       {sys(
         'POWER',
-        `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
+        cut.length
+          ? `OVERLOAD ${cut.map((l) => l[0]!.toUpperCase()).join('/')}`
+          : `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
         lane((s.energy.weapon + s.energy.shield + s.energy.mobility + s.energy.repair) / 4),
         {
-          POWER_CORE: 'ROUTING',
-          POWER_ROUTER: 'GRID OK',
+          POWER_CORE: `PLAN v${s.distributionVersion}`,
+          POWER_ROUTER: cut.length ? `RE-ROUTE ${cut.length}` : 'GRID OK',
         },
       )}
-      {sys('ENGINEER', `${PARTS[worst[0]].labelEn} ${worst[1]}%`, avg, {
-        ENGINEER_LEGS: 'LEGS / JOINTS',
-        ENGINEER_CORE: 'CORE / GUNS',
+      {sys('ENGINEER', `${PARTS[worst[0]].labelEn} ${Math.round(worst[1])}%`, avg, {
+        ENGINEER_LEGS: eng('ENGINEER_LEGS', 'LEGS / JOINTS'),
+        ENGINEER_CORE: eng('ENGINEER_CORE', 'CORE / GUNS'),
       })}
     </div>
   );
@@ -344,6 +414,42 @@ function useFeed() {
         case 'seat_assigned':
           push(`${e.displayName}  ${SEATS[e.seatId].labelJa} 搭乗`, 'info');
           break;
+        case 'power_routed':
+          if (!e.auto)
+            push(
+              `POWER ROUTED 出力配分  W${e.distribution.weapon} S${e.distribution.shield} M${e.distribution.mobility} R${e.distribution.repair}`,
+              'info',
+            );
+          break;
+        case 'circuit_overload':
+          push(`OVERLOAD 過負荷  ${e.lane.toUpperCase()} 回路切断`, 'danger');
+          break;
+        case 'circuit_restored':
+          if (!e.auto) push(`CIRCUIT RESTORED 回路復旧  ${e.lane.toUpperCase()}`, 'guard');
+          break;
+        case 'part_repaired':
+          if (!e.auto)
+            push(`${PARTS[e.part].labelEn} REPAIRED 修理完了  ${Math.round(e.hp)}%`, 'guard');
+          break;
+        case 'sats_pulse_settled':
+          // Never who paid or how much: the pulse belongs to the crew (spec §7.4, §8.2).
+          push(
+            `SHARED ENERGY PULSE 共有エネルギー  +${e.gain} CHARGE${e.virtual ? '  [VIRTUAL]' : '  LIGHTNING'}`,
+            'combo',
+          );
+          break;
+        case 'overdrive_ready':
+          push('OVERDRIVE READY 必殺技準備完了', 'kill');
+          break;
+        case 'overdrive_fired':
+          push(`RAIJIN OVERDRIVE  −${e.damage}`, 'kill');
+          break;
+        case 'overdrive_failed':
+          push(
+            `SYNC FAILED 同期失敗  ${e.missing.map((r) => ROLES[r].labelJa).join('・')} 未同期`,
+            'danger',
+          );
+          break;
       }
     });
     const id = setInterval(
@@ -371,7 +477,8 @@ function useRoleFlashes(): Record<RoleId, number> {
         const bump = (r: RoleId) => setF((x) => ({ ...x, [r]: x[r] + 1 }));
         if (e.type === 'weapon_fired' && !e.auto) bump('GUNNER');
         if (e.type === 'threat_blocked') bump('DEFENSE');
-        if (e.type === 'part_repaired') bump('ENGINEER');
+        if (e.type === 'part_repaired' && !e.auto) bump('ENGINEER');
+        if ((e.type === 'power_routed' || e.type === 'circuit_restored') && !e.auto) bump('POWER');
       }),
     [],
   );
@@ -391,6 +498,8 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
       ? Math.ceil((snap.phaseEndsAt - mt) / 1000)
       : 0;
   const outcome = useMemo(() => snap?.result, [snap?.result]);
+  // During the OVERDRIVE finisher the picture leads: HUD fades almost out (spec §9.1).
+  const finishing = now < finisher.until;
 
   return (
     <>
@@ -412,11 +521,12 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
         </>
       ) : null}
       {snap && (combat || snap.phase === 'VICTORY' || snap.phase === 'DEFEAT') ? (
-        <div className="hud-dim" style={{ opacity: combat ? 1 : 0.25 }}>
+        <div className="hud-dim" style={{ opacity: finishing ? 0.12 : combat ? 1 : 0.25 }}>
           <TopBar s={snap} mt={mt} />
           {combat ? (
             <>
               <BossBar s={snap} mt={mt} />
+              <OverdriveBanner s={snap} mt={mt} />
               <ContextAlert s={snap} mt={mt} />
               <Radar s={snap} mt={mt} />
               <WorldMarkers s={snap} mt={mt} />
@@ -457,7 +567,8 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
       {!st.snap && !st.reconnecting ? (
         <div className="banner">CONNECTING ゲームサーバーに接続中</div>
       ) : null}
-      <div className="provisional">PROVISIONAL 3D 仮モデル / PHASE 1</div>
+      {finishing ? <div className="od-call-big">RAIJIN OVERDRIVE</div> : null}
+      <div className="provisional">PROVISIONAL 3D 仮モデル（Phase 5 で本番アートに差し替え）</div>
       {!audioReady ? (
         <div className="sound-hint">CLICK OR ANY KEY: SOUND ON クリックで音声有効化</div>
       ) : null}

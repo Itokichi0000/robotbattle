@@ -1,8 +1,8 @@
-import type { EnemyKind } from './config';
+import type { EnemyKind, PowerDistribution } from './config';
 import type { CityId } from './japan';
 import type { Phase } from './phases';
 import type { Direction, MechPartId, RoleId, SeatId } from './seats';
-import type { MatchOutcome, MatchResult, ThreatKind, ThreatTarget } from './state';
+import type { MatchOutcome, MatchResult, PowerLane, ThreatKind, ThreatTarget } from './state';
 
 /**
  * Confirmed match events. The big screen keys its VFX and sound off these (spec §12.3);
@@ -14,7 +14,11 @@ export type MatchEventBody =
   | { type: 'match_resumed' }
   | { type: 'auto_support_changed'; enabled: boolean }
   | { type: 'seat_assigned'; seatId: SeatId; displayName: string }
-  | { type: 'seat_released'; seatId: SeatId; reason: 'LEFT' | 'TIMEOUT' | 'KICKED' | 'ROUND_OVER' }
+  | {
+      type: 'seat_released';
+      seatId: SeatId;
+      reason: 'LEFT' | 'TIMEOUT' | 'KICKED' | 'ROUND_OVER' | 'REPLACED';
+    }
   | { type: 'seat_ready'; seatId: SeatId }
   | { type: 'seat_connection'; seatId: SeatId; connected: boolean }
   | { type: 'enemy_spawned'; enemyId: string; kind: EnemyKind }
@@ -62,6 +66,16 @@ export type MatchEventBody =
   | { type: 'part_damaged'; part: MechPartId; hp: number }
   | { type: 'part_repaired'; part: MechPartId; hp: number; seatId: SeatId; auto: boolean }
   | { type: 'team_combo'; roles: RoleId[]; gain: number; sync: number }
+  | { type: 'power_routed'; seatId: SeatId; distribution: PowerDistribution; auto: boolean }
+  | { type: 'circuit_overload'; lane: PowerLane }
+  | { type: 'circuit_restored'; lane: PowerLane; seatId: SeatId; auto: boolean }
+  | { type: 'repair_started'; seatId: SeatId; part: MechPartId }
+  | { type: 'overdrive_ready' }
+  | { type: 'overdrive_window'; endsAt: number; autoRoles: RoleId[] }
+  | { type: 'overdrive_sync'; role: RoleId; seatId: SeatId | null; auto: boolean }
+  | { type: 'overdrive_fired'; damage: number; roles: RoleId[]; autoRoles: RoleId[] }
+  | { type: 'overdrive_failed'; missing: RoleId[] }
+  | { type: 'sats_pulse_settled'; seatId: SeatId | null; gain: number; virtual: boolean }
   | { type: 'match_result'; outcome: MatchOutcome; result: MatchResult };
 
 export type MatchEventType = MatchEventBody['type'];

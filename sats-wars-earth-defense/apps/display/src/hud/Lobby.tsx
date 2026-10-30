@@ -51,6 +51,10 @@ function plateStatus(
   id: SeatId,
 ): { cls: string; who: string; st: string } {
   const seat = s?.seats[id];
+  if (seat?.occupied && seat.bot) {
+    // Operator demo bots are labelled as bots and give way to the first person who boards.
+    return { cls: 'auto', who: seat.displayName ?? 'DEMO-BOT', st: 'DEMO-BOT 交代可' };
+  }
   if (seat?.occupied) {
     return {
       cls: 'on',
@@ -62,7 +66,7 @@ function plateStatus(
           : 'CONNECTED 搭乗',
     };
   }
-  if (seat && !seat.open) return { cls: 'auto', who: 'AUTO SUPPORT', st: 'PHASE 2 で開放' };
+  if (seat && !seat.open) return { cls: 'auto', who: 'AUTO SUPPORT', st: 'CLOSED 運営が閉鎖' };
   return { cls: 'wait', who: '—', st: seat?.auto ? 'WAITING / AUTO' : 'WAITING 募集中' };
 }
 
@@ -116,7 +120,8 @@ function Leaders({ s }: { s: PublicMatchState | undefined }) {
 
 export function Lobby({ s, attract }: { s: PublicMatchState | undefined; attract: boolean }) {
   const join = useSyncExternalStore(joinInfo.subscribe, joinInfo.get, joinInfo.get);
-  const humans = s?.humans ?? 0;
+  // Seats held by demo bots are still open to people.
+  const humans = s ? SEAT_IDS.filter((id) => s.seats[id].occupied && !s.seats[id].bot).length : 0;
   return (
     <>
       <div className="lobby-title">
@@ -140,8 +145,8 @@ export function Lobby({ s, attract }: { s: PublicMatchState | undefined; attract
         </div>
         <div className="pips">
           {SEAT_IDS.map((id) => (
-            <i key={id} className={s?.seats[id].occupied ? 'on' : ''}>
-              {s?.seats[id].occupied ? <IconPilot size={16} /> : null}
+            <i key={id} className={s?.seats[id].occupied && !s.seats[id].bot ? 'on' : ''}>
+              {s?.seats[id].occupied && !s.seats[id].bot ? <IconPilot size={16} /> : null}
             </i>
           ))}
         </div>

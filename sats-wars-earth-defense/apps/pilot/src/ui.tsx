@@ -1,6 +1,6 @@
-import { formatClock, PHASE_LABEL, REASON_TEXT, ROLES, SEATS } from '@swed/shared';
+import { formatClock, isCombatPhase, PHASE_LABEL, REASON_TEXT, ROLES, SEATS } from '@swed/shared';
 import type { Lang, PublicMatchState, ReasonCode, SeatId } from '@swed/shared';
-import { IconSignal, ROLE_VAR } from '@swed/ui-tokens';
+import { IconBolt, IconSignal, ROLE_VAR } from '@swed/ui-tokens';
 import { createContext, useContext, type ReactNode } from 'react';
 
 /** Language context: Japanese first, English toggle (spec §3.4). */
@@ -25,6 +25,22 @@ export function reasonText(
 }
 
 /** Top band of every phone screen: brand, role, wave clock, link state (ref 06). */
+/** Opens the shared-energy sheet from any console header (kept apart from role controls). */
+type Listener = () => void;
+let pulseOpen = false;
+const pulseListeners = new Set<Listener>();
+export const pulseUi = {
+  get: () => pulseOpen,
+  set: (v: boolean) => {
+    pulseOpen = v;
+    for (const l of pulseListeners) l();
+  },
+  subscribe: (l: Listener) => {
+    pulseListeners.add(l);
+    return () => pulseListeners.delete(l);
+  },
+};
+
 export function PilotHeader({
   s,
   mt,
@@ -43,9 +59,20 @@ export function PilotHeader({
   return (
     <header className="ph" style={def ? { ['--acc' as string]: ROLE_VAR[def.role] } : undefined}>
       <div className="ph-top">
-        <span className="ph-brand">SATS WARS / PILOT</span>
+        {/* On a console the role bar below names the seat; the brand would crowd narrow phones. */}
+        {seat ? null : <span className="ph-brand">SATS WARS / PILOT</span>}
         <span className="ph-wave sw-num">{label ? (lang === 'ja' ? label.ja : label.en) : ''}</span>
         <span className="ph-time sw-num">{end !== null ? formatClock(end - mt) : '--:--'}</span>
+        {seat && s && isCombatPhase(s.phase) ? (
+          <button
+            className="ph-pulse"
+            onClick={() => pulseUi.set(true)}
+            aria-label={L('共有エネルギー', 'Shared energy')}
+          >
+            <IconBolt size={14} />
+            <span>+{s.hints.pulseGain}</span>
+          </button>
+        ) : null}
         <span
           className={`ph-link ${connected ? 'ok' : 'bad'}`}
           aria-label={connected ? L('接続中', 'Connected') : L('再接続中', 'Reconnecting')}

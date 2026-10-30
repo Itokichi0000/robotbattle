@@ -11,6 +11,7 @@ import type {
   OperatorCommandResult,
   OperatorServerToClient,
   OperatorStatusMsg,
+  PaymentIntentView,
   PilotClientToServer,
   PilotServerToClient,
   SeatChangedMsg,
@@ -25,18 +26,22 @@ import {
   operatorCommandSchema,
   pilotActionReqSchema,
   readyReqSchema,
+  syncFinisherReqSchema,
 } from '@swed/shared/schemas';
 import { Server, type Namespace, type Socket } from 'socket.io';
 import type { Db } from './db';
 import { recentAudit } from './db';
 import type { Env } from './env';
+import type { PaymentService } from './payments/service';
 import type { MatchRuntime } from './runtime';
 import type { PilotRow } from './sessions';
 import {
+  displayNameFor,
   isOperatorToken,
   OPERATOR_COOKIE,
   parseCookies,
   PILOT_COOKIE,
+  pilotById,
   pilotForToken,
 } from './sessions';
 
@@ -92,6 +97,8 @@ export class Realtime {
   readonly pilot: PilotNs;
   readonly operator: OperatorNs;
   runtime!: MatchRuntime;
+  payments!: PaymentService;
+  hideCallsigns = false;
   settings: DisplaySettings = {
     volume: 0.8,
     muted: false,
@@ -124,8 +131,9 @@ export class Realtime {
   }
 
   /** Called once the runtime exists (the runtime's hooks call back into this object). */
-  bind(runtime: MatchRuntime): void {
+  bind(runtime: MatchRuntime, payments: PaymentService): void {
     this.runtime = runtime;
+    this.payments = payments;
     this.setupDisplay();
     this.setupPilot();
     this.setupOperator();
@@ -190,10 +198,38 @@ export class Realtime {
     }
   }
 
+  /** Payment updates go only to the paying pilot's own sockets (spec §11.4). */
+  notifyPayment(pilotId: string, view: PaymentIntentView): void {
+    this.pilot.to(`pilot:${pilotId}`).emit('payment:status', view);
+  }
+
+  /** Same wallet signed in on another phone: tell the old phone, then cut it off. */
+  replacePilotSessions(pilotId: string): void {
+    this.pilot.to(`pilot:${pilotId}`).emit('pilot:notice', { code: 'SESSION_REPLACED' });
+    this.pilot.in(`pilot:${pilotId}`).disconnectSockets(true);
+  }
+
+  /** After a callsign change: refresh the seat name and the pilot's own status. */
+  refreshPilot(pilotId: string): void {
+    const pilot = pilotById(this.opts.db, pilotId);
+    if (!pilot) return;
+    this.runtime.rename(pilot.id, displayNameFor(pilot, this.hideCallsigns));
+    for (const id of this.pilotSockets.get(pilotId) ?? []) {
+      const sock = this.pilot.sockets.get(id);
+      if (sock) sock.data.pilot = pilot;
+    }
+    this.pilot.to(`pilot:${pilotId}`).emit('pilot:sessionStatus', this.sessionStatus(pilot));
+  }
+
   private sessionStatus(pilot: PilotRow): SessionStatusMsg {
     return {
       authenticated: true,
-      pilot: { publicName: pilot.public_name, kind: pilot.kind },
+      pilot: {
+        publicName: pilot.public_name,
+        kind: pilot.kind,
+        callsign: pilot.callsign,
+        showCallsign: !!pilot.show_callsign,
+      },
       matchId: this.runtime.state.matchId,
       assignedSeat: this.runtime.seatOf(pilot.id),
     };
@@ -256,7 +292,15 @@ export class Realtime {
         if (limited()) return ack({ ok: false, reasonCode: 'RATE_LIMITED' });
         const req = joinSeatReqSchema.safeParse(raw);
         if (!req.success) return ack({ ok: false, reasonCode: 'INVALID' });
-        ack(this.runtime.joinSeat(pilot, req.data.matchId, req.data.seatId));
+        const fresh = pilotById(db, pilot.id) ?? pilot;
+        ack(
+          this.runtime.joinSeat(
+            fresh,
+            req.data.matchId,
+            req.data.seatId,
+            displayNameFor(fresh, this.hideCallsigns),
+          ),
+        );
       });
 
       socket.on('pilot:ready', (raw, ack) => {
@@ -284,6 +328,27 @@ export class Realtime {
         if (!req.success) return ack({ clientActionId, accepted: false, reasonCode: 'INVALID' });
         if (limited()) return ack({ clientActionId, accepted: false, reasonCode: 'RATE_LIMITED' });
         const res = this.runtime.pilotAction(pilot, req.data);
+        ack(res);
+        socket.emit('pilot:actionResult', res);
+      });
+
+      socket.on('pilot:syncFinisher', (raw, ack) => {
+        if (typeof ack !== 'function') return;
+        const req = syncFinisherReqSchema.safeParse(raw);
+        const clientActionId =
+          typeof raw === 'object' && raw && 'clientActionId' in raw
+            ? String(raw.clientActionId).slice(0, 64)
+            : '';
+        if (!req.success) return ack({ clientActionId, accepted: false, reasonCode: 'INVALID' });
+        if (limited()) return ack({ clientActionId, accepted: false, reasonCode: 'RATE_LIMITED' });
+        const seatId = this.runtime.seatOf(pilot.id);
+        if (!seatId) return ack({ clientActionId, accepted: false, reasonCode: 'NOT_YOUR_SEAT' });
+        const res = this.runtime.pilotAction(pilot, {
+          matchId: req.data.matchId,
+          seatId,
+          clientActionId: req.data.clientActionId,
+          action: { actionType: 'SYNC_NOW', payload: {} },
+        });
         ack(res);
         socket.emit('pilot:actionResult', res);
       });
@@ -318,11 +383,11 @@ export class Realtime {
     this.operator.on('connection', (socket) => {
       socket.emit('match:snapshot', this.runtime.snapshotMsg());
       socket.emit('operator:status', this.status());
-      socket.on('operator:command', (raw, ack) => {
+      socket.on('operator:command', async (raw, ack) => {
         if (typeof ack !== 'function') return;
         const cmd = operatorCommandSchema.safeParse(raw);
         if (!cmd.success) return ack({ ok: false, message: 'invalid command' });
-        const res = this.operatorCommand(cmd.data as OperatorCommand);
+        const res = await this.operatorCommand(cmd.data as OperatorCommand);
         this.runtime.audit(
           'operator',
           cmd.data.command,
@@ -334,7 +399,7 @@ export class Realtime {
     });
   }
 
-  operatorCommand(cmd: OperatorCommand): OperatorCommandResult {
+  async operatorCommand(cmd: OperatorCommand): Promise<OperatorCommandResult> {
     const rt = this.runtime;
     const control = (
       type: 'ATTRACT' | 'OPEN_LOBBY' | 'START' | 'SKIP_DEPLOY' | 'PAUSE' | 'RESUME' | 'END',
@@ -370,7 +435,10 @@ export class Realtime {
         const pilotId = rt.state.seats[cmd.seatId].pilotId;
         const r = rt.command({ type: 'SEAT_KICK', seatId: cmd.seatId });
         const ok = r.outcome.kind === 'control' && r.outcome.ok;
-        if (ok && pilotId) this.syncPilotSeats();
+        if (ok && pilotId) {
+          this.pilot.to(`pilot:${pilotId}`).emit('pilot:notice', { code: 'KICKED' });
+          this.syncPilotSeats();
+        }
         return { ok, message: ok ? `${cmd.seatId} released` : `${cmd.seatId} is empty` };
       }
       case 'SET_PRESET':
@@ -381,6 +449,32 @@ export class Realtime {
         this.display.emit('display:settings', this.settings);
         return { ok: true, message: 'display updated' };
       }
+      case 'SET_DEMO_BOTS':
+        rt.setDemoBots(cmd.enabled);
+        return { ok: true, message: `DEMO BOTS ${cmd.enabled ? 'on' : 'off'}` };
+      case 'SET_HIDE_CALLSIGNS': {
+        this.hideCallsigns = cmd.hidden;
+        for (const id of Object.keys(rt.state.seats) as SeatId[]) {
+          const pid = rt.state.seats[id].pilotId;
+          const pilot = pid && !rt.state.seats[id].bot ? pilotById(this.opts.db, pid) : null;
+          if (pilot) rt.rename(pilot.id, displayNameFor(pilot, cmd.hidden));
+        }
+        return {
+          ok: true,
+          message: cmd.hidden ? 'callsigns hidden' : 'callsigns shown when opted in',
+        };
+      }
+      case 'SANDBOX_SETTLE':
+        return this.payments.sandboxSettle(cmd.intentId);
+      case 'PAYMENTS_CHECK': {
+        const c = await this.payments.runChecks();
+        const ok = !!c.backend?.ok && !!c.webhook?.ok;
+        return { ok, message: ok ? 'checks passed' : 'checks failed — see PAYMENTS panel' };
+      }
+      case 'PAYMENTS_ENABLE_LIVE':
+        return this.payments.enableLive(cmd.confirm);
+      case 'PAYMENTS_DISABLE':
+        return this.payments.disable();
     }
   }
 
@@ -388,6 +482,9 @@ export class Realtime {
     const audit = recentAudit(this.opts.db, 20) as AuditEntry[];
     return {
       mode: this.opts.env.APP_MODE,
+      demoBots: this.runtime.demoBots,
+      hideCallsigns: this.hideCallsigns,
+      payments: this.payments.operatorView(),
       presetId: this.runtime.state.presetId,
       nextPresetId: this.runtime.nextPresetId,
       joinUrl: this.opts.joinUrl,

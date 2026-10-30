@@ -6,7 +6,10 @@ import {
   isCombatPhase,
   isSeatOpen,
   MECH_PART_IDS,
+  POWER_LANES,
   PRESETS,
+  ROLE_IDS,
+  ROLES,
   roleOf,
   SEAT_IDS,
   SHIELD_COVERAGE,
@@ -29,6 +32,8 @@ import type {
   MechPartId,
   Phase,
   PilotActionInput,
+  PowerDistribution,
+  PowerLane,
   PresetId,
   ReasonCode,
   RoleId,
@@ -43,6 +48,7 @@ import type {
 import { recommendTarget } from './hints';
 import { enemyBearingAt, sectorMargin } from './orbit';
 import { nextRandom, randomBetween, randomPick, weightedPick } from './rng';
+import { generatePuzzle, routeConnects } from './router';
 
 /**
  * The SATS WARS rules, as pure functions: reduce(state, command) and advanceTo(state, t).
@@ -63,9 +69,19 @@ export type EngineCommand =
   | { type: 'RESUME'; t: number }
   | { type: 'END'; t: number }
   | { type: 'SET_AUTO_SUPPORT'; t: number; enabled: boolean }
-  | { type: 'SEAT_JOIN'; t: number; seatId: SeatId; pilotId: string; displayName: string }
+  | {
+      type: 'SEAT_JOIN';
+      t: number;
+      seatId: SeatId;
+      pilotId: string;
+      displayName: string;
+      /** Operator demo bot: shown as such; a human joining the seat replaces it. */
+      bot?: boolean;
+    }
   | { type: 'SEAT_LEAVE'; t: number; pilotId: string }
   | { type: 'SEAT_KICK'; t: number; seatId: SeatId }
+  /** Staff hide or restore a callsign: changes the public name only. */
+  | { type: 'SEAT_RENAME'; t: number; seatId: SeatId; displayName: string }
   | { type: 'SEAT_READY'; t: number; pilotId: string }
   | { type: 'SEAT_CONNECTION'; t: number; pilotId: string; connected: boolean }
   | {
@@ -75,7 +91,9 @@ export type EngineCommand =
       seatId: SeatId;
       clientActionId: string;
       action: PilotActionInput;
-    };
+    }
+  /** A settled Lightning (or VIRTUAL sandbox) energy pulse. Applied once per intent id. */
+  | { type: 'SATS_PULSE'; t: number; intentId: string; seatId: SeatId | null; virtual: boolean };
 
 export type CommandOutcome =
   | { kind: 'none' }
@@ -106,7 +124,17 @@ export interface CreateMatchInput {
 }
 
 function emptyStats() {
-  return { actions: 0, hits: 0, damage: 0, blocks: 0, perfect: 0, repairs: 0, combos: 0 };
+  return {
+    actions: 0,
+    hits: 0,
+    damage: 0,
+    blocks: 0,
+    perfect: 0,
+    repairs: 0,
+    combos: 0,
+    routes: 0,
+    syncs: 0,
+  };
 }
 
 function emptySeat(seatId: SeatId): SeatState {
@@ -117,7 +145,19 @@ function emptySeat(seatId: SeatId): SeatState {
     connected: false,
     ready: false,
     disconnectedAt: null,
+    bot: false,
     stats: emptyStats(),
+  };
+}
+
+function idleOverdrive(): MatchState['overdrive'] {
+  return {
+    status: 'IDLE',
+    readyAt: 0,
+    windowStartedAt: 0,
+    windowEndsAt: 0,
+    confirmed: [],
+    autoRoles: [],
   };
 }
 
@@ -188,10 +228,22 @@ export function createMatch(input: CreateMatchInput): MatchState {
     recentSuccesses: [],
     lastComboAt: 0,
     spawn: { scriptedDone: 0, nextSpawnAt: 0 },
+    circuits: Object.fromEntries(
+      POWER_LANES.map((l) => [l, { broken: false, brokenAt: 0, puzzle: null }]),
+    ) as MatchState['circuits'],
+    nextOverloadAt: null,
+    powerSuccessAt: -1e9,
+    engineers: {
+      ENGINEER_LEGS: { job: null, cooldownUntil: 0 },
+      ENGINEER_CORE: { job: null, cooldownUntil: 0 },
+    },
+    overdrive: idleOverdrive(),
+    pulsesApplied: [],
     autoTimers: {
       gunner: { GUNNER_L: 0, GUNNER_R: 0 },
       engineer: 0,
       shield: { SHIELD_L: 0, SHIELD_R: 0 },
+      power: 0,
     },
     crewAtLaunch: 0,
     stats: {
@@ -203,6 +255,12 @@ export function createMatch(input: CreateMatchInput): MatchState {
       combos: 0,
       bestSync: 0,
       damageToBoss: 0,
+      repairs: 0,
+      routesFixed: 0,
+      overloads: 0,
+      overdrives: 0,
+      overdriveFails: 0,
+      pulses: 0,
     },
     result: null,
     actionLog: {},
@@ -243,6 +301,10 @@ function isAuto(s: MatchState, seat: SeatId): boolean {
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+function wear(s: MatchState, part: MechPartId, amount: number): void {
+  s.parts[part] = Math.max(0, Math.round((s.parts[part] - amount) * 10) / 10);
 }
 
 /* ---------------------------------------------------------------- phases */
@@ -294,10 +356,15 @@ function enterPhase(ctx: Ctx, to: Phase, at: number): void {
   }
   if (to === 'WAVE_1' || to === 'WAVE_2' || to === 'BOSS') {
     s.spawn = { scriptedDone: 0, nextSpawnAt: at + s.config.waves[to].spawnEveryMs };
+    const first = s.config.router.firstAtMs[to];
+    s.nextOverloadAt = first === null ? null : at + first;
+    s.autoTimers.power = at + 4_000;
   }
   if (to === 'VICTORY' || to === 'DEFEAT') {
     s.threats = [];
     s.paused = false;
+    s.overdrive = idleOverdrive();
+    s.nextOverloadAt = null;
   }
   emit(ctx, at, { type: 'phase_changed', from, to, endsAt: s.phaseEndsAt });
 }
@@ -495,6 +562,7 @@ function resolveThreat(ctx: Ctx, th: ThreatState): void {
     const ratio = clamp(0.5 + 0.5 * (s.parts[shoulderOf(seat)] / 100), 0, 1);
     const perfect = at - sh.activeFrom <= s.config.shields.perfectMs;
     remaining = Math.round(th.damage * (1 - ratio));
+    wear(s, shoulderOf(seat), s.config.mech.wear.perBlock);
     s.stats.threatsBlocked += 1;
     const st = s.seats[seat].stats;
     st.blocks += 1;
@@ -522,6 +590,7 @@ function resolveThreat(ctx: Ctx, th: ThreatState): void {
     const ratio = s.config.auto.shieldBlockRatio;
     remaining = Math.round(th.damage * (1 - ratio));
     s.autoTimers.shield[seat] = at + s.config.auto.shieldCooldownMs;
+    wear(s, shoulderOf(seat), s.config.mech.wear.perBlock);
     s.stats.threatsBlocked += 1;
     emit(ctx, at, {
       type: 'shield_deployed',
@@ -561,13 +630,18 @@ function applyHit(ctx: Ctx, th: ThreatState, damage: number): void {
       }
     }
   } else {
-    if (s.energy.mobility >= s.config.mech.evadeCost) {
-      // Legs and thrusters sidestep part of the blow when the mobility lane can pay.
+    const legs = (s.parts.LEG_L + s.parts.LEG_R) / 200;
+    if (s.energy.mobility >= s.config.mech.evadeCost && legs > 0.3) {
+      // Legs and thrusters sidestep part of the blow when the mobility lane can pay;
+      // damaged legs sidestep less (engineers keep RAIJIN nimble).
       s.energy.mobility -= s.config.mech.evadeCost;
-      dmg = Math.round(dmg * s.config.mech.evadeRatio);
+      wear(s, 'LEG_L', s.config.mech.wear.perEvade);
+      wear(s, 'LEG_R', s.config.mech.wear.perEvade);
+      const ratio = s.config.mech.evadeRatio + (1 - s.config.mech.evadeRatio) * (1 - legs) * 0.8;
+      dmg = Math.round(dmg * ratio);
     }
     const part = th.target.part;
-    s.parts[part] = Math.max(0, Math.round(s.parts[part] - dmg * 0.3));
+    s.parts[part] = Math.max(0, Math.round(s.parts[part] - dmg * s.config.mech.partDamageRatio));
     s.coreHp = Math.max(0, Math.round(s.coreHp - dmg * s.config.mech.coreShareOfMechHit));
     emit(ctx, at, { type: 'part_damaged', part, hp: s.parts[part] });
   }
@@ -600,12 +674,18 @@ function recordSuccess(ctx: Ctx, at: number, seatId: SeatId, auto: boolean): voi
   const windowStart = at - s.config.sync.windowMs;
   s.recentSuccesses = s.recentSuccesses.filter((r) => r.t >= windowStart);
   const roles = [...new Set(s.recentSuccesses.map((r) => r.role))] as RoleId[];
-  const humanInvolved = s.recentSuccesses.some((r) => isHuman(s, r.seatId));
-  if (roles.length >= 2 && humanInvolved) {
-    const gain = s.config.sync.gainByRoles[Math.min(4, roles.length) as 2 | 3 | 4];
+  const humanRoles = new Set(
+    s.recentSuccesses.filter((r) => isHuman(s, r.seatId)).map((r) => r.role),
+  ).size;
+  if (roles.length >= 2 && humanRoles >= 1) {
+    // AUTO SUPPORT can complete a link, but people linking with people is worth more.
+    const weight = humanRoles >= 2 ? 1 : 0.5;
+    const gain = Math.round(
+      s.config.sync.gainByRoles[Math.min(4, roles.length) as 2 | 3 | 4] * weight,
+    );
     s.teamSync = clamp(s.teamSync + gain, 0, 100);
     s.teamCapacitor = clamp(
-      s.teamCapacitor + s.config.capacitor.perCombo,
+      s.teamCapacitor + Math.round(s.config.capacitor.perCombo * weight),
       0,
       s.config.capacitor.max,
     );
@@ -681,6 +761,7 @@ function fireWeapon(
     ),
   );
   s.energy.weapon -= cfg.energyCost;
+  wear(s, armOf(seat), s.config.mech.wear.perShot);
   const st = s.seats[seat].stats;
   if (!auto) {
     st.hits += 1;
@@ -768,6 +849,242 @@ function deployShield(ctx: Ctx, at: number, seat: ShieldSeatId, dir: Direction):
   return null;
 }
 
+/* ------------------------------------------------------------------ power */
+
+function shift(a: PowerDistribution, b: PowerDistribution): number {
+  return (
+    (Math.abs(a.weapon - b.weapon) +
+      Math.abs(a.shield - b.shield) +
+      Math.abs(a.mobility - b.mobility) +
+      Math.abs(a.repair - b.repair)) /
+    2
+  );
+}
+
+function validDistribution(s: MatchState, d: PowerDistribution): boolean {
+  const { laneMin, laneMax } = s.config.power;
+  const v = [d.weapon, d.shield, d.mobility, d.repair];
+  return (
+    v.every((x) => Number.isInteger(x) && x >= laneMin && x <= laneMax) &&
+    v.reduce((a, b) => a + b, 0) === 100
+  );
+}
+
+function applyPower(ctx: Ctx, at: number, seat: SeatId, d: PowerDistribution, auto: boolean): void {
+  const s = ctx.s;
+  const moved = shift(s.distribution, d);
+  s.distribution = { ...d };
+  s.distributionVersion += 1;
+  emit(ctx, at, { type: 'power_routed', seatId: seat, distribution: { ...d }, auto });
+  // A real re-plan is teamwork; nudging a slider back and forth is not.
+  if (moved >= s.config.power.minShift && at - s.powerSuccessAt >= s.config.power.successEveryMs) {
+    s.powerSuccessAt = at;
+    recordSuccess(ctx, at, seat, auto);
+  }
+}
+
+function setPower(
+  ctx: Ctx,
+  at: number,
+  d: PowerDistribution,
+  baseVersion: number,
+): ReasonCode | null {
+  const s = ctx.s;
+  if (!validDistribution(s, d)) return 'BAD_DISTRIBUTION';
+  // Two phones on one seat (or a stale screen) must not silently overwrite each other.
+  if (baseVersion !== s.distributionVersion) return 'STALE_VERSION';
+  applyPower(ctx, at, 'POWER_CORE', d, false);
+  s.seats.POWER_CORE.stats.routes += 1;
+  return null;
+}
+
+/* ---------------------------------------------------------------- circuits */
+
+function runOverloads(ctx: Ctx, now: number): void {
+  const s = ctx.s;
+  if (s.nextOverloadAt === null || now < s.nextOverloadAt) return;
+  const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
+  const every = s.config.router.everyMs[wave];
+  s.nextOverloadAt = every === null ? null : now + Math.round(every * randomBetween(s, 0.8, 1.2));
+  const intact = POWER_LANES.filter((l) => !s.circuits[l].broken);
+  if (POWER_LANES.length - intact.length >= s.config.router.maxBroken || intact.length === 0)
+    return;
+  // The busiest lane is the likeliest to overload: pushing everything into guns has a cost.
+  const lane = weightedPick(
+    s,
+    intact.map((l) => ({ lane: l, weight: 5 + s.distribution[l] })),
+  ).lane;
+  s.circuits[lane] = { broken: true, brokenAt: now, puzzle: generatePuzzle(s) };
+  wear(s, 'CORE', s.config.mech.wear.perOverload);
+  s.stats.overloads += 1;
+  emit(ctx, now, { type: 'circuit_overload', lane });
+}
+
+function restoreCircuit(ctx: Ctx, at: number, lane: PowerLane, auto: boolean): void {
+  const s = ctx.s;
+  s.circuits[lane] = { broken: false, brokenAt: 0, puzzle: null };
+  s.stats.routesFixed += 1;
+  emit(ctx, at, { type: 'circuit_restored', lane, seatId: 'POWER_ROUTER', auto });
+  recordSuccess(ctx, at, 'POWER_ROUTER', auto);
+}
+
+function routeSubmit(
+  ctx: Ctx,
+  at: number,
+  lane: PowerLane,
+  rotations: number[],
+): ReasonCode | null {
+  const s = ctx.s;
+  const c = s.circuits[lane];
+  if (!c.broken || !c.puzzle) return 'CIRCUIT_OK';
+  if (!routeConnects(c.puzzle, rotations)) return 'ROUTE_INCOMPLETE';
+  restoreCircuit(ctx, at, lane, false);
+  s.seats.POWER_ROUTER.stats.routes += 1;
+  return null;
+}
+
+/* ----------------------------------------------------------------- repair */
+
+function repairFactor(s: MatchState): number {
+  return 0.6 + (s.distribution.repair / 100) * 2;
+}
+
+function repairStart(
+  ctx: Ctx,
+  at: number,
+  seat: EngineerSeatId,
+  part: MechPartId,
+): ReasonCode | null {
+  const s = ctx.s;
+  if (!ENGINEER_COVERAGE[seat].includes(part)) return 'NOT_YOUR_PART';
+  if (s.parts[part] >= 100) return 'PART_OK';
+  const eng = s.engineers[seat];
+  if (at < eng.cooldownUntil) return 'COOLDOWN';
+  if (s.energy.repair < s.config.repair.energyCost) return 'NO_ENERGY';
+  const slots = Array.from({ length: s.config.repair.slots }, (_, i) => i);
+  const bolts: number[] = [];
+  for (let i = 0; i < s.config.repair.bolts; i++) {
+    const pick = Math.floor(nextRandom(s) * slots.length);
+    bolts.push(slots.splice(pick, 1)[0]!);
+  }
+  eng.job = { part, bolts, startedAt: at, expiresAt: at + s.config.repair.jobMs };
+  emit(ctx, at, { type: 'repair_started', seatId: seat, part });
+  return null;
+}
+
+function repairFinish(
+  ctx: Ctx,
+  at: number,
+  seat: EngineerSeatId,
+  part: MechPartId,
+  order: number[],
+): ReasonCode | null {
+  const s = ctx.s;
+  const eng = s.engineers[seat];
+  const job = eng.job;
+  if (!job || job.part !== part) return 'NO_JOB';
+  if (at > job.expiresAt) {
+    eng.job = null;
+    return 'JOB_EXPIRED';
+  }
+  if (order.length !== job.bolts.length || order.some((b, i) => b !== job.bolts[i])) {
+    return 'WRONG_ORDER';
+  }
+  if (s.energy.repair < s.config.repair.energyCost) return 'NO_ENERGY';
+  s.energy.repair -= s.config.repair.energyCost;
+  const gain = Math.round(s.config.repair.amount * repairFactor(s));
+  s.parts[part] = Math.min(100, s.parts[part] + gain);
+  eng.job = null;
+  eng.cooldownUntil = at + s.config.repair.cooldownMs;
+  s.seats[seat].stats.repairs += 1;
+  s.stats.repairs += 1;
+  emit(ctx, at, { type: 'part_repaired', part, hp: s.parts[part], seatId: seat, auto: false });
+  recordSuccess(ctx, at, seat, false);
+  return null;
+}
+
+/* -------------------------------------------------------------- overdrive */
+
+function roleHasCrew(s: MatchState, role: RoleId): boolean {
+  return ROLES[role].seats.some((id) => isHuman(s, id));
+}
+
+function confirmRole(ctx: Ctx, at: number, role: RoleId, seatId: SeatId | null, auto: boolean) {
+  const od = ctx.s.overdrive;
+  if (od.confirmed.includes(role)) return;
+  od.confirmed.push(role);
+  emit(ctx, at, { type: 'overdrive_sync', role, seatId, auto });
+  if (ROLE_IDS.every((r) => od.confirmed.includes(r))) fireOverdrive(ctx, at);
+}
+
+function fireOverdrive(ctx: Ctx, at: number): void {
+  const s = ctx.s;
+  const od = s.overdrive;
+  const cfg = s.config.overdrive;
+  const autoRoles = [...od.autoRoles];
+  s.overdrive = idleOverdrive();
+  s.teamCapacitor = 0;
+  s.teamSync = cfg.syncAfter;
+  s.stats.overdrives += 1;
+  emit(ctx, at, { type: 'overdrive_fired', damage: cfg.damage, roles: [...ROLE_IDS], autoRoles });
+  const boss = bossOf(s);
+  if (boss) damageEnemy(ctx, at, boss, cfg.damage, null);
+}
+
+function syncNow(ctx: Ctx, at: number, seat: SeatId): ReasonCode | null {
+  const s = ctx.s;
+  const od = s.overdrive;
+  const role = roleOf(seat);
+  if (od.status === 'READY') {
+    od.status = 'CHARGING';
+    od.windowStartedAt = at;
+    od.windowEndsAt = at + s.config.overdrive.windowMs;
+    od.confirmed = [];
+    // Roles with nobody aboard are confirmed by AUTO SUPPORT, and say so (spec §6.7).
+    od.autoRoles = s.autoSupport ? ROLE_IDS.filter((r) => !roleHasCrew(s, r)) : [];
+    emit(ctx, at, {
+      type: 'overdrive_window',
+      endsAt: od.windowEndsAt,
+      autoRoles: [...od.autoRoles],
+    });
+  } else if (od.status !== 'CHARGING') {
+    return 'OVERDRIVE_NOT_READY';
+  }
+  s.seats[seat].stats.syncs += 1;
+  confirmRole(ctx, at, role, seat, false);
+  return null;
+}
+
+function runOverdrive(ctx: Ctx, now: number): void {
+  const s = ctx.s;
+  const od = s.overdrive;
+  const cfg = s.config.overdrive;
+  if (s.phase !== 'BOSS' || !bossOf(s)) {
+    if (od.status !== 'IDLE') s.overdrive = idleOverdrive();
+    return;
+  }
+  if (od.status === 'IDLE' && s.teamSync >= cfg.syncMin && s.teamCapacitor >= cfg.capacitorMin) {
+    od.status = 'READY';
+    od.readyAt = now;
+    emit(ctx, now, { type: 'overdrive_ready' });
+    return;
+  }
+  if (od.status !== 'CHARGING') return;
+  if (now >= od.windowStartedAt + cfg.autoConfirmMs) {
+    for (const r of od.autoRoles) {
+      if (s.overdrive.status !== 'CHARGING') return;
+      confirmRole(ctx, now, r, null, true);
+    }
+  }
+  if (s.overdrive.status === 'CHARGING' && now >= od.windowEndsAt) {
+    const missing = ROLE_IDS.filter((r) => !od.confirmed.includes(r));
+    s.overdrive = idleOverdrive();
+    s.teamCapacitor = Math.round(s.teamCapacitor * cfg.failCapacitorKeep);
+    s.stats.overdriveFails += 1;
+    emit(ctx, now, { type: 'overdrive_failed', missing });
+  }
+}
+
 /* ----------------------------------------------------------- auto support */
 
 function runAutoSupport(ctx: Ctx, now: number): void {
@@ -801,6 +1118,37 @@ function runAutoSupport(ctx: Ctx, now: number): void {
       recordSuccess(ctx, now, seat, true);
     }
   }
+  if (!isHuman(s, 'POWER_ROUTER')) {
+    for (const lane of POWER_LANES) {
+      const c = s.circuits[lane];
+      if (c.broken && now >= c.brokenAt + s.config.auto.routerFixMs) {
+        restoreCircuit(ctx, now, lane, true);
+      }
+    }
+  }
+  if (!isHuman(s, 'POWER_CORE') && now >= s.autoTimers.power) {
+    s.autoTimers.power = now + 8_000;
+    const want = autoPlan(s);
+    if (shift(want, s.distribution) >= s.config.power.minShift) {
+      applyPower(ctx, now, 'POWER_CORE', want, true);
+    }
+  }
+}
+
+/** AUTO SUPPORT's power plan: sensible, never clever (a human POWER A should beat it). */
+function autoPlan(s: MatchState): PowerDistribution {
+  const d = { ...s.config.power.defaultDistribution };
+  if (bossOf(s)) {
+    d.weapon += 10;
+    d.mobility -= 5;
+    d.repair -= 5;
+  }
+  const worst = Math.min(...Object.values(s.parts));
+  if (worst < 55 && d.weapon - 10 >= s.config.power.laneMin) {
+    d.weapon -= 10;
+    d.repair += 10;
+  }
+  return d;
 }
 
 /* -------------------------------------------------------------- simulation */
@@ -810,10 +1158,12 @@ function regenEnergy(s: MatchState, dtSec: number): void {
   const total = s.config.energy.regenPerSec * coreFactor * dtSec;
   const max = s.config.energy.laneMax;
   const d = s.distribution;
-  s.energy.weapon = Math.min(max, s.energy.weapon + (total * d.weapon) / 100);
-  s.energy.shield = Math.min(max, s.energy.shield + (total * d.shield) / 100);
-  s.energy.mobility = Math.min(max, s.energy.mobility + (total * d.mobility) / 100);
-  s.energy.repair = Math.min(max, s.energy.repair + (total * d.repair) / 100);
+  // A cut circuit starves its lane until POWER B re-routes it.
+  const f = (lane: PowerLane) => (s.circuits[lane].broken ? s.config.router.brokenRegenFactor : 1);
+  s.energy.weapon = Math.min(max, s.energy.weapon + (total * d.weapon * f('weapon')) / 100);
+  s.energy.shield = Math.min(max, s.energy.shield + (total * d.shield * f('shield')) / 100);
+  s.energy.mobility = Math.min(max, s.energy.mobility + (total * d.mobility * f('mobility')) / 100);
+  s.energy.repair = Math.min(max, s.energy.repair + (total * d.repair * f('repair')) / 100);
 }
 
 function releaseTimedOutSeats(ctx: Ctx, now: number): void {
@@ -856,7 +1206,14 @@ function step(ctx: Ctx, now: number, dtSec: number): void {
       emit(ctx, now, { type: 'weapon_charged', seatId: seat, enemyId: g.targetId });
     }
   }
+  runOverloads(ctx, now);
   runAutoSupport(ctx, now);
+  if (!isCombatPhase(s.phase)) return;
+  for (const id of ['ENGINEER_LEGS', 'ENGINEER_CORE'] as const) {
+    const job = s.engineers[id].job;
+    if (job && now > job.expiresAt) s.engineers[id].job = null;
+  }
+  runOverdrive(ctx, now);
   if (now - s.lastComboAt > s.config.sync.decayAfterMs) {
     s.teamSync = Math.max(0, s.teamSync - s.config.sync.decayPerSec * dtSec);
   }
@@ -892,7 +1249,7 @@ function releaseSeat(
   ctx: Ctx,
   at: number,
   seatId: SeatId,
-  reason: 'LEFT' | 'TIMEOUT' | 'KICKED' | 'ROUND_OVER',
+  reason: 'LEFT' | 'TIMEOUT' | 'KICKED' | 'ROUND_OVER' | 'REPLACED',
 ): void {
   const s = ctx.s;
   const keep = s.seats[seatId].stats;
@@ -901,6 +1258,7 @@ function releaseSeat(
     s.gunners[seatId].targetId = null;
     s.gunners[seatId].chargedNotified = true;
   }
+  if (seatId === 'ENGINEER_LEGS' || seatId === 'ENGINEER_CORE') s.engineers[seatId].job = null;
   emit(ctx, at, { type: 'seat_released', seatId, reason });
 }
 
@@ -917,6 +1275,7 @@ function joinSeat(
   seatId: SeatId,
   pilotId: string,
   displayName: string,
+  bot = false,
 ): SeatRequestResult {
   const s = ctx.s;
   if (JOIN_CLOSED_PHASES.includes(s.phase)) return { ok: false, reasonCode: 'ROUND_CLOSED' };
@@ -932,7 +1291,11 @@ function joinSeat(
     return { ok: true, seatId };
   }
   const occupant = s.seats[seatId].pilotId;
-  if (occupant && occupant !== pilotId) return { ok: false, reasonCode: 'SEAT_TAKEN' };
+  if (occupant && occupant !== pilotId) {
+    // A demo bot steps aside for a human; humans never replace each other.
+    if (!s.seats[seatId].bot || bot) return { ok: false, reasonCode: 'SEAT_TAKEN' };
+    releaseSeat(ctx, at, seatId, 'REPLACED');
+  }
   if (current) {
     if (!SEAT_CHANGE_PHASES.includes(s.phase)) return { ok: false, reasonCode: 'SEAT_LOCKED' };
     releaseSeat(ctx, at, current, 'LEFT');
@@ -943,6 +1306,7 @@ function joinSeat(
   seat.connected = true;
   seat.ready = false;
   seat.disconnectedAt = null;
+  seat.bot = bot;
   seat.stats = emptyStats();
   emit(ctx, at, { type: 'seat_assigned', seatId, displayName });
   if (s.phase === 'ATTRACT') enterPhase(ctx, 'LOBBY', at);
@@ -989,6 +1353,21 @@ function pilotAction(
   } else if (a.actionType === 'DEPLOY_SHIELD') {
     if (role !== 'DEFENSE') return reject('WRONG_ROLE');
     reason = deployShield(ctx, at, cmd.seatId as ShieldSeatId, a.payload.dir);
+  } else if (a.actionType === 'SET_POWER') {
+    if (cmd.seatId !== 'POWER_CORE') return reject('WRONG_ROLE');
+    reason = setPower(ctx, at, a.payload.distribution, a.payload.baseVersion);
+  } else if (a.actionType === 'ROUTE_SUBMIT') {
+    if (cmd.seatId !== 'POWER_ROUTER') return reject('WRONG_ROLE');
+    reason = routeSubmit(ctx, at, a.payload.lane, a.payload.rotations);
+  } else if (a.actionType === 'REPAIR_START' || a.actionType === 'REPAIR_FINISH') {
+    if (role !== 'ENGINEER') return reject('WRONG_ROLE');
+    const e = cmd.seatId as EngineerSeatId;
+    reason =
+      a.actionType === 'REPAIR_START'
+        ? repairStart(ctx, at, e, a.payload.part)
+        : repairFinish(ctx, at, e, a.payload.part, a.payload.order);
+  } else if (a.actionType === 'SYNC_NOW') {
+    reason = syncNow(ctx, at, cmd.seatId);
   } else {
     return reject('INVALID');
   }
@@ -1095,7 +1474,7 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
     case 'SEAT_JOIN':
       outcome = {
         kind: 'seat',
-        result: joinSeat(ctx, at, cmd.seatId, cmd.pilotId, cmd.displayName),
+        result: joinSeat(ctx, at, cmd.seatId, cmd.pilotId, cmd.displayName, cmd.bot ?? false),
       };
       break;
     case 'SEAT_LEAVE': {
@@ -1109,6 +1488,10 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
         releaseSeat(ctx, at, cmd.seatId, 'KICKED');
         outcome = control(true);
       } else outcome = control(false);
+      break;
+    case 'SEAT_RENAME':
+      if (s.seats[cmd.seatId].pilotId) s.seats[cmd.seatId].displayName = cmd.displayName;
+      outcome = control(!!s.seats[cmd.seatId].pilotId);
       break;
     case 'SEAT_READY': {
       const seat = seatOf(s, cmd.pilotId);
@@ -1134,6 +1517,25 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
     case 'PILOT_ACTION':
       outcome = { kind: 'action', result: pilotAction(ctx, cmd, at) };
       break;
+    case 'SATS_PULSE': {
+      // Money already settled; the pulse lands once, only while the fight is on.
+      if (s.pulsesApplied.includes(cmd.intentId)) outcome = control(false, 'INVALID');
+      else if (!isCombatPhase(s.phase)) outcome = control(false, 'NOT_IN_COMBAT');
+      else {
+        const gain = s.config.pulses.capacitorGain;
+        s.pulsesApplied.push(cmd.intentId);
+        s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
+        s.stats.pulses += 1;
+        emit(ctx, at, {
+          type: 'sats_pulse_settled',
+          seatId: cmd.seatId,
+          gain,
+          virtual: cmd.virtual,
+        });
+        outcome = control(true);
+      }
+      break;
+    }
   }
   return { state: s, events: ctx.events, outcome };
 }

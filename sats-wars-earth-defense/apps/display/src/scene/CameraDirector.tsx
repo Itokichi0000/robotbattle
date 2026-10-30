@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { enemyPositionAt } from '@swed/game-engine';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { FX_TIME_SCALE } from '../capture';
 import { store } from '../net';
 import { anim } from './anim';
 import { shake } from './cameraBus';
@@ -15,6 +16,7 @@ import { fxBus } from './fxBus';
  *   heroWide        behind-right over RAIJIN's shoulder: mech left, swarm and Japan right
  *   shoulderCombat  short push toward the firing arm
  *   bossReveal      pulls wide and tilts up when NULL CORE arrives
+ *   finisher        RAIJIN OVERDRIVE: low behind the mech, chest core to boss in one line
  *   result          slow orbit
  */
 
@@ -68,6 +70,23 @@ export function CameraDirector({
             until: now + 1_800,
           };
           lastOverride.current = now;
+        }
+        if (e.type === 'overdrive_fired') {
+          const snap = store.getState().snap?.state;
+          const boss = snap?.boss ? snap.enemies.find((x) => x.id === snap.boss!.id) : undefined;
+          const p = boss
+            ? enemyPositionAt(boss.orbit, boss.spawnedAt, store.matchTime(now))
+            : { x: 0, y: 40, z: -110 };
+          override.current = {
+            shot: {
+              pos: new THREE.Vector3(-7, 4.5, 15),
+              look: new THREE.Vector3(p.x * 0.7, 9 + p.y * 0.55, p.z * 0.7),
+              fov: 52,
+            },
+            until: now + 4_800 / FX_TIME_SCALE,
+          };
+          lastOverride.current = now;
+          return;
         }
         if (e.type === 'enemy_spawned' && e.kind === 'NULL_CORE') {
           override.current = {

@@ -58,6 +58,71 @@ export interface DisplayStatsMsg {
 export interface PilotIdentity {
   publicName: string;
   kind: 'DEMO_GUEST' | 'LNURL';
+  /** Optional short callsign; on the big screen only if showCallsign and staff allow it. */
+  callsign: string | null;
+  showCallsign: boolean;
+}
+
+/* --------------------------------------------------------------- payments */
+
+export type PulseRefusal =
+  | 'PAYMENTS_DISABLED'
+  | 'STALE_MATCH'
+  | 'NOT_IN_COMBAT'
+  | 'PULSE_PENDING'
+  | 'PULSE_LIMIT'
+  | 'PULSE_COOLDOWN'
+  | 'PULSE_MATCH_LIMIT'
+  | 'CAPACITOR_FULL'
+  | 'BACKEND_UNAVAILABLE';
+
+export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }> = {
+  PAYMENTS_DISABLED: {
+    ja: '現在エネルギーパルスは停止中です',
+    en: 'Energy pulses are switched off',
+  },
+  STALE_MATCH: { ja: 'この作戦は終了しました', en: 'That round is over' },
+  NOT_IN_COMBAT: { ja: '搭乗中の戦闘中だけ送れます', en: 'Only aboard, during combat' },
+  PULSE_PENDING: { ja: '支払い待ちの請求書があります', en: 'You already have an open invoice' },
+  PULSE_LIMIT: { ja: 'この作戦の上限（3回）に達しました', en: 'Limit for this round reached' },
+  PULSE_COOLDOWN: { ja: '少し待ってから（30秒に1回）', en: 'Once every 30 s' },
+  PULSE_MATCH_LIMIT: { ja: 'この作戦全体の上限に達しました', en: 'Round-wide limit reached' },
+  CAPACITOR_FULL: {
+    ja: 'CHARGE は満タンです。今は送っても増えません',
+    en: 'CHARGE is full; a pulse would add nothing now',
+  },
+  BACKEND_UNAVAILABLE: {
+    ja: '決済サーバーに接続できません。ゲームはそのまま続けられます',
+    en: 'Payment backend unavailable. Keep playing',
+  },
+};
+
+export interface PaymentIntentView {
+  intentId: string;
+  status: 'pending' | 'settled' | 'expired' | 'failed' | 'canceled';
+  applied: 'applied' | 'unapplied' | null;
+  amountSats: number;
+  mode: 'sandbox' | 'live';
+  recipient: string;
+  /** BOLT11 while pending (sandbox: an obviously VIRTUAL string that no wallet can pay). */
+  paymentRequest: string | null;
+  /** QR of `lightning:<invoice>` for paying from another device (live, while pending). */
+  qrSvg?: string | null;
+  expiresAt: string;
+  matchId: string;
+}
+
+export interface PaymentsStatus {
+  mode: 'sandbox' | 'live';
+  enabled: boolean;
+  amountSats: number;
+  capacitorGain: number;
+  recipient: string;
+  remaining: number;
+  cooldownUntil: string | null;
+  inCombat: boolean;
+  /** TEAM CAPACITOR is at its cap: a pulse would add nothing, so none is offered. */
+  capacitorFull: boolean;
 }
 
 export interface SessionStatusMsg {
@@ -101,6 +166,10 @@ export interface PilotServerToClient {
   'seat:changed': (msg: SeatChangedMsg) => void;
   'pilot:actionResult': (msg: ActionResult) => void;
   'pilot:sessionStatus': (msg: SessionStatusMsg) => void;
+  /** Only to the paying pilot (spec §11.4). */
+  'payment:status': (msg: PaymentIntentView) => void;
+  /** e.g. SESSION_REPLACED when the same wallet signed in on another phone. */
+  'pilot:notice': (msg: { code: 'SESSION_REPLACED' | 'KICKED' }) => void;
 }
 
 export interface PilotClientToServer {
@@ -111,6 +180,11 @@ export interface PilotClientToServer {
   ) => void;
   'pilot:action': (req: PilotActionReq, ack: (res: ActionResult) => void) => void;
   'pilot:leave': (req: { matchId: string }, ack: (res: SeatRequestResult) => void) => void;
+  /** Spec §11.4: RAIJIN OVERDRIVE confirmation for the pilot's role. */
+  'pilot:syncFinisher': (
+    req: { matchId: string; clientActionId: string },
+    ack: (res: ActionResult) => void,
+  ) => void;
 }
 
 /* --------------------------------------------------------------- operator */
@@ -128,7 +202,15 @@ export type OperatorCommand =
   | { command: 'SET_AUTO_SUPPORT'; enabled: boolean }
   | { command: 'KICK_SEAT'; seatId: SeatId }
   | { command: 'SET_PRESET'; presetId: Exclude<PresetId, 'TEST'> }
-  | { command: 'SET_DISPLAY'; settings: Partial<DisplaySettings> };
+  | { command: 'SET_DISPLAY'; settings: Partial<DisplaySettings> }
+  /** Labelled demo bots fill empty seats and play (exhibition attract loop). */
+  | { command: 'SET_DEMO_BOTS'; enabled: boolean }
+  /** Show only PILOT-XXXX names on the big screen. */
+  | { command: 'SET_HIDE_CALLSIGNS'; hidden: boolean }
+  | { command: 'SANDBOX_SETTLE'; intentId: string }
+  | { command: 'PAYMENTS_CHECK' }
+  | { command: 'PAYMENTS_ENABLE_LIVE'; confirm: string }
+  | { command: 'PAYMENTS_DISABLE' };
 
 export type OperatorCommandName = OperatorCommand['command'];
 
@@ -152,8 +234,40 @@ export interface AuditEntry {
   detail: string;
 }
 
+export interface OperatorPaymentsView {
+  mode: AppMode;
+  provider: string;
+  enabled: boolean;
+  liveEnabled: boolean;
+  recipient: string;
+  amountSats: number;
+  capacitorGain: number;
+  perPilotPerMatch: number;
+  cooldownSec: number;
+  maxPerMatch: number;
+  checks: {
+    backend: { ok: boolean; detail: string; at: string } | null;
+    webhook: { ok: boolean; detail: string; at: string } | null;
+  };
+  settledTotal: { n: number; sats: number };
+  recent: Array<{
+    intentId: string;
+    status: PaymentIntentView['status'];
+    applied: PaymentIntentView['applied'];
+    amountSats: number;
+    mode: AppMode;
+    seatId: string | null;
+    createdAt: string;
+    currentMatch: boolean;
+    note: string | null;
+  }>;
+}
+
 export interface OperatorStatusMsg {
   mode: AppMode;
+  demoBots: boolean;
+  hideCallsigns: boolean;
+  payments: OperatorPaymentsView;
   presetId: PresetId;
   nextPresetId: PresetId;
   joinUrl: string;

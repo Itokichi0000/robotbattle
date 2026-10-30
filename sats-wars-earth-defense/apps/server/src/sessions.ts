@@ -26,6 +26,8 @@ export interface PilotRow {
   id: string;
   public_name: string;
   kind: PilotIdentity['kind'];
+  callsign: string | null;
+  show_callsign: number;
 }
 
 export function createDemoGuest(db: Db): { pilot: PilotRow; token: string } {
@@ -33,6 +35,8 @@ export function createDemoGuest(db: Db): { pilot: PilotRow; token: string } {
     id: randomUUID(),
     public_name: makePublicPilotName(randomBytes(2).toString('hex')),
     kind: 'DEMO_GUEST',
+    callsign: null,
+    show_callsign: 0,
   };
   const now = nowIso();
   db.prepare(
@@ -53,11 +57,81 @@ export function pilotForToken(db: Db, token: string | undefined): PilotRow | nul
   if (!token || token.length > 200) return null;
   const row = db
     .prepare(
-      `SELECT p.id, p.public_name, p.kind FROM pilot_sessions s JOIN pilots p ON p.id = s.pilot_id
+      `SELECT p.id, p.public_name, p.kind, p.callsign, p.show_callsign
+       FROM pilot_sessions s JOIN pilots p ON p.id = s.pilot_id
        WHERE s.token_hash = ? AND s.expires_at > ?`,
     )
     .get(sha256(token), nowIso()) as PilotRow | undefined;
   return row ?? null;
+}
+
+export function pilotById(db: Db, id: string): PilotRow | null {
+  const row = db
+    .prepare('SELECT id, public_name, kind, callsign, show_callsign FROM pilots WHERE id = ?')
+    .get(id) as PilotRow | undefined;
+  return row ?? null;
+}
+
+/**
+ * LNURL-auth pilots are keyed by SHA-256(linkingKey): a pseudonym per wallet and domain.
+ * The key itself is never stored or shown (spec §7.4).
+ */
+export function findOrCreateLnurlPilot(db: Db, linkingKeyHex: string): PilotRow {
+  const hash = sha256(`lnurl:${linkingKeyHex.toLowerCase()}`);
+  const found = db
+    .prepare(
+      'SELECT id, public_name, kind, callsign, show_callsign FROM pilots WHERE linking_key_hash = ?',
+    )
+    .get(hash) as PilotRow | undefined;
+  if (found) {
+    db.prepare('UPDATE pilots SET last_seen_at = ? WHERE id = ?').run(nowIso(), found.id);
+    return found;
+  }
+  const pilot: PilotRow = {
+    id: randomUUID(),
+    public_name: makePublicPilotName(randomBytes(2).toString('hex')),
+    kind: 'LNURL',
+    callsign: null,
+    show_callsign: 0,
+  };
+  const now = nowIso();
+  db.prepare(
+    'INSERT INTO pilots (id, public_name, kind, created_at, last_seen_at, linking_key_hash) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(pilot.id, pilot.public_name, pilot.kind, now, now, hash);
+  return pilot;
+}
+
+/** One wallet, one active device: a new LNURL login ends the pilot's other sessions. */
+export function revokeOtherPilotSessions(db: Db, pilotId: string, keepToken: string): number {
+  const r = db
+    .prepare('DELETE FROM pilot_sessions WHERE pilot_id = ? AND token_hash <> ?')
+    .run(pilotId, sha256(keepToken));
+  return Number(r.changes);
+}
+
+/**
+ * Optional short callsign. NFKC-normalised, 2–12 letters/digits/kana/kanji/-/_, no
+ * markup; shown on the big screen only when the pilot opts in and the operator allows it.
+ */
+export function sanitizeCallsign(raw: string): string | null {
+  const s = raw.normalize('NFKC').trim().replace(/\s+/g, '');
+  if (s.length < 2 || s.length > 12) return null;
+  if (!/^[\p{L}\p{N}_-]+$/u.test(s)) return null;
+  return s;
+}
+
+export function setCallsign(db: Db, pilotId: string, callsign: string | null, show: boolean): void {
+  db.prepare('UPDATE pilots SET callsign = ?, show_callsign = ? WHERE id = ?').run(
+    callsign,
+    show && callsign ? 1 : 0,
+    pilotId,
+  );
+}
+
+export function displayNameFor(pilot: PilotRow, hideCallsigns: boolean): string {
+  return pilot.callsign && pilot.show_callsign && !hideCallsigns
+    ? pilot.callsign
+    : pilot.public_name;
 }
 
 export function revokePilotSession(db: Db, token: string | undefined): void {

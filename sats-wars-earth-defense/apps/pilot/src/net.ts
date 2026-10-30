@@ -1,6 +1,8 @@
 import { MatchStore, newClientId } from '@swed/client';
 import type {
   ActionResult,
+  PaymentIntentView,
+  PaymentsStatus,
   PilotActionInput,
   PilotClientToServer,
   PilotIdentity,
@@ -27,6 +29,9 @@ export interface PilotSessionState {
   mode: 'sandbox' | 'live';
   status: SessionStatusMsg | null;
   error: string | null;
+  /** Shown once: why this phone was signed out or unseated. */
+  notice: 'SESSION_REPLACED' | 'KICKED' | null;
+  lnurlDomain: string;
 }
 
 let session: PilotSessionState = {
@@ -37,6 +42,8 @@ let session: PilotSessionState = {
   mode: 'sandbox',
   status: null,
   error: null,
+  notice: null,
+  lnurlDomain: '',
 };
 const listeners = new Set<Listener>();
 function setSession(patch: Partial<PilotSessionState>) {
@@ -69,7 +76,21 @@ socket.on('connect_error', (err) => {
 });
 socket.on('match:snapshot', (m) => store.applySnapshot(m, performance.now()));
 socket.on('match:event', (m) => store.applyEvent(m));
-socket.on('pilot:sessionStatus', (s) => setSession({ status: s }));
+socket.on('pilot:sessionStatus', (s) => setSession({ status: s, pilot: s.pilot ?? session.pilot }));
+socket.on('pilot:notice', (n) => {
+  if (n.code === 'SESSION_REPLACED') {
+    // The same wallet signed in elsewhere: this phone is no longer the pilot.
+    socket.disconnect();
+    setSession({ notice: n.code, authenticated: false, pilot: null, status: null });
+  } else {
+    setSession({ notice: n.code });
+  }
+});
+socket.on('payment:status', (v) => setPayments({ intent: v }));
+
+export function clearNotice(): void {
+  setSession({ notice: null });
+}
 
 export async function loadSession(): Promise<void> {
   try {
@@ -79,6 +100,7 @@ export async function loadSession(): Promise<void> {
       pilot: PilotIdentity | null;
       demoGuestEnabled: boolean;
       mode: 'sandbox' | 'live';
+      lnurlDomain: string;
     };
     setSession({ loaded: true, error: null, ...body });
     if (body.authenticated && !socket.connected) socket.connect();
@@ -180,4 +202,149 @@ export function haptic(ms = 12): void {
   } catch {
     /* not supported (iOS Safari) */
   }
+}
+
+/* ------------------------------------------------------------- LNURL-auth */
+
+export interface LnurlAttempt {
+  attemptId: string;
+  lnurl: string;
+  expiresAt: string;
+  qrSvg: string;
+}
+
+export async function startLnurl(): Promise<LnurlAttempt | null> {
+  try {
+    const res = await fetch('/api/auth/attempt', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as LnurlAttempt;
+  } catch {
+    return null;
+  }
+}
+
+export type LnurlPoll = 'PENDING' | 'AUTHORIZED' | 'EXPIRED' | 'FAILED' | 'NOT_FOUND' | 'NETWORK';
+
+export async function pollLnurl(attemptId: string): Promise<LnurlPoll> {
+  try {
+    const res = await fetch(`/api/auth/attempt/${encodeURIComponent(attemptId)}/status`, {
+      credentials: 'same-origin',
+    });
+    const body = (await res.json()) as { status: LnurlPoll };
+    if (body.status === 'AUTHORIZED') await loadSession();
+    return body.status;
+  } catch {
+    return 'NETWORK';
+  }
+}
+
+/* ------------------------------------------------------- callsign / sync */
+
+export async function saveCallsign(
+  callsign: string | null,
+  showOnScreen: boolean,
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/pilot/callsign', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ callsign, showOnScreen }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** RAIJIN OVERDRIVE confirmation for this pilot's role (spec §11.4 pilot:syncFinisher). */
+export async function syncNow(): Promise<ActionResult> {
+  const clientActionId = newClientId('s');
+  try {
+    return await socket
+      .timeout(3_000)
+      .emitWithAck('pilot:syncFinisher', { matchId: matchId(), clientActionId });
+  } catch {
+    return { clientActionId, accepted: false, reasonCode: 'NETWORK' };
+  }
+}
+
+/* --------------------------------------------------------- energy pulses */
+
+export interface PaymentsState {
+  quote: PaymentsStatus | null;
+  intent: PaymentIntentView | null;
+  error: string | null;
+  retryAfterMs: number | null;
+}
+
+let payments: PaymentsState = { quote: null, intent: null, error: null, retryAfterMs: null };
+const payListeners = new Set<Listener>();
+function setPayments(patch: Partial<PaymentsState>) {
+  payments = { ...payments, ...patch };
+  for (const l of payListeners) l();
+}
+export const paymentsStore = {
+  get: () => payments,
+  subscribe: (l: Listener) => {
+    payListeners.add(l);
+    return () => payListeners.delete(l);
+  },
+};
+
+export async function loadQuote(): Promise<void> {
+  try {
+    const res = await fetch('/api/payments/quote', { credentials: 'same-origin' });
+    if (res.ok) setPayments({ quote: (await res.json()) as PaymentsStatus });
+  } catch {
+    /* keep the last quote; the game does not depend on it */
+  }
+}
+
+/** Creates the invoice only after the pilot confirmed amount and receiver on screen. */
+export async function requestPulse(): Promise<void> {
+  setPayments({ error: null, retryAfterMs: null });
+  try {
+    const res = await fetch('/api/payments/intent', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ matchId: matchId() }),
+    });
+    const body = (await res.json()) as PaymentIntentView & {
+      error?: string;
+      retryAfterMs?: number | null;
+    };
+    if (!res.ok)
+      setPayments({
+        error: body.error ?? 'BACKEND_UNAVAILABLE',
+        retryAfterMs: body.retryAfterMs ?? null,
+      });
+    else setPayments({ intent: body });
+  } catch {
+    setPayments({ error: 'BACKEND_UNAVAILABLE' });
+  }
+  void loadQuote();
+}
+
+export async function refreshIntent(): Promise<void> {
+  const id = payments.intent?.intentId;
+  if (!id) return;
+  try {
+    const res = await fetch(`/api/payments/intent/${encodeURIComponent(id)}`, {
+      credentials: 'same-origin',
+    });
+    if (res.ok) setPayments({ intent: (await res.json()) as PaymentIntentView });
+  } catch {
+    /* status also arrives over the socket */
+  }
+}
+
+export function closePulse(): void {
+  setPayments({ intent: null, error: null, retryAfterMs: null });
 }

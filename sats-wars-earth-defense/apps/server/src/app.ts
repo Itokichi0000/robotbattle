@@ -3,37 +3,46 @@ import path from 'node:path';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyRateLimit from '@fastify/rate-limit';
 import type { HealthInfo, JoinInfo } from '@swed/shared';
+import { PRESETS } from '@swed/shared';
 import { operatorLoginSchema } from '@swed/shared/schemas';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { audit, openDb, type Db } from './db';
 import { PROJECT_ROOT, publicBaseUrl, type Env } from './env';
+import { LnbitsPaymentProvider } from './payments/lnbits';
+import { SandboxPaymentProvider } from './payments/sandbox';
+import { PaymentService } from './payments/service';
 import { Realtime } from './realtime';
+import { registerAuthRoutes } from './routes/auth';
+import type { RouteContext } from './routes/context';
+import { LNBITS_WEBHOOK_PATH, registerPaymentRoutes } from './routes/payments';
 import { MatchRuntime } from './runtime';
 import {
   cookieHeader,
-  createDemoGuest,
   isOperatorToken,
   issueOperatorSession,
   OPERATOR_COOKIE,
   OPERATOR_COOKIE_MAX_AGE,
   parseCookies,
   passwordMatches,
-  PILOT_COOKIE,
-  PILOT_COOKIE_MAX_AGE,
-  pilotForToken,
   revokeOperatorSession,
-  revokePilotSession,
 } from './sessions';
 import { createDevWeb, registerStaticWeb, type DevWeb, type RawHandler } from './web';
 
 export const SERVER_VERSION = '0.1.0';
+
+/** Request log line without the query string (k1/sig/key, webhook tokens). */
+export function logRequest(req: { method: string; url: string; ip?: string }) {
+  return { method: req.method, url: req.url.split('?')[0], ip: req.ip };
+}
 
 export interface BuildOptions {
   /** Monotonic clock source for the match (tests pass a manual clock). */
   source?: () => number;
   db?: Db;
   logger?: boolean;
+  /** HTTP client for the payment backend (tests inject a fake LNbits). */
+  fetch?: typeof fetch;
 }
 
 export interface BuiltApp {
@@ -42,6 +51,7 @@ export interface BuiltApp {
   realtime: Realtime;
   db: Db;
   joinUrl: string;
+  payments: PaymentService;
 }
 
 export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<BuiltApp> {
@@ -63,6 +73,9 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
               'req.headers.authorization',
               'res.headers["set-cookie"]',
             ],
+            // Query strings never reach the logs: LNURL callbacks carry k1/sig/key and the
+            // payment webhook carries its secret token.
+            serializers: { req: logRequest },
           },
     trustProxy: env.TRUST_PROXY,
     bodyLimit: 16 * 1024,
@@ -123,7 +136,28 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
       matchReplaced: () => realtime.onMatchReplaced(),
     },
   });
-  realtime.bind(runtime);
+  const webhookBase = `${base}${LNBITS_WEBHOOK_PATH}`;
+  const provider =
+    env.APP_MODE === 'live'
+      ? new LnbitsPaymentProvider({
+          url: env.LNBITS_URL!,
+          invoiceKey: env.LNBITS_INVOICE_KEY!,
+          fetch: opts.fetch,
+        })
+      : new SandboxPaymentProvider();
+  const payments = new PaymentService({
+    db,
+    runtime,
+    provider,
+    recipient: env.PAYMENT_RECIPIENT_LABEL ?? 'SATS WARS SANDBOX — VIRTUAL（架空・テスト）',
+    amountSats: env.PULSE_AMOUNT_SATS ?? PRESETS[env.MATCH_PRESET].pulses.amountSats,
+    webhookUrl: env.APP_MODE === 'live' ? `${webhookBase}?token=${env.webhookSecret}` : undefined,
+    pingUrl: `${webhookBase}/ping?token=${env.webhookSecret}`,
+    notify: (pilotId, view) => realtime.notifyPayment(pilotId, view),
+    log: app.log,
+    fetch: opts.fetch,
+  });
+  realtime.bind(runtime, payments);
 
   const cookieOpts = (maxAgeSec: number, sameSite: 'Lax' | 'Strict') => ({
     secure: base.startsWith('https://'),
@@ -166,46 +200,11 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     reply.type('image/svg+xml').header('Cache-Control', 'no-cache').send(qrSvg),
   );
 
-  /* ----------------------------------------------------------------- pilot */
+  /* ------------------------------------------------- pilots and payments */
 
-  app.get('/api/session', async (req) => {
-    const pilot = pilotForToken(db, parseCookies(req.headers.cookie)[PILOT_COOKIE]);
-    return {
-      authenticated: !!pilot,
-      pilot: pilot ? { publicName: pilot.public_name, kind: pilot.kind } : null,
-      mode: env.APP_MODE,
-      demoGuestEnabled: env.demoGuestEnabled,
-    };
-  });
-
-  app.post(
-    '/api/auth/demo-guest',
-    { preHandler: sameOrigin, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
-    async (req, reply) => {
-      if (!env.demoGuestEnabled) return reply.code(403).send({ error: 'DEMO_GUEST_DISABLED' });
-      const existing = pilotForToken(db, parseCookies(req.headers.cookie)[PILOT_COOKIE]);
-      if (existing) return { pilot: { publicName: existing.public_name, kind: existing.kind } };
-      const { pilot, token } = createDemoGuest(db);
-      audit(db, `pilot:${pilot.public_name}`, 'DEMO_GUEST_SIGNIN');
-      reply.header(
-        'Set-Cookie',
-        cookieHeader(PILOT_COOKIE, token, cookieOpts(PILOT_COOKIE_MAX_AGE, 'Lax')),
-      );
-      return { pilot: { publicName: pilot.public_name, kind: pilot.kind } };
-    },
-  );
-
-  app.post('/api/auth/logout', { preHandler: sameOrigin }, async (req, reply) => {
-    const token = parseCookies(req.headers.cookie)[PILOT_COOKIE];
-    const pilot = pilotForToken(db, token);
-    revokePilotSession(db, token);
-    if (pilot) {
-      runtime.command({ type: 'SEAT_LEAVE', pilotId: pilot.id });
-      realtime.disconnectPilot(pilot.id);
-    }
-    reply.header('Set-Cookie', cookieHeader(PILOT_COOKIE, '', cookieOpts(0, 'Lax')));
-    return { ok: true };
-  });
+  const ctx: RouteContext = { env, db, runtime, realtime, payments, base, cookieOpts, sameOrigin };
+  registerAuthRoutes(app, ctx);
+  registerPaymentRoutes(app, ctx);
 
   /* -------------------------------------------------------------- operator */
 
@@ -252,10 +251,11 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
 
   app.addHook('onClose', async () => {
     runtime.stop();
+    payments.stop();
     realtime.close();
     await devWeb?.close();
     if (!opts.db) db.close();
   });
 
-  return { app, runtime, realtime, db, joinUrl };
+  return { app, runtime, realtime, db, joinUrl, payments };
 }

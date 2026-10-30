@@ -1,13 +1,14 @@
 import { useFrame } from '@react-three/fiber';
 import { enemyPositionAt } from '@swed/game-engine';
-import type { Direction, MechPartId, ShieldSeatId } from '@swed/shared';
+import { ROLE_IDS, ROLES, SEATS } from '@swed/shared';
+import type { Direction, MechPartId, RoleId, SeatId, ShieldSeatId } from '@swed/shared';
 import { COLORS } from '@swed/ui-tokens';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { FX_TIME_SCALE } from '../capture';
 import { store } from '../net';
 import { anchorWorldPosition } from './anchors';
-import { cameraKick } from './cameraBus';
+import { cameraKick, finisher } from './cameraBus';
 import { lastEnemyPos } from './Enemies';
 import { fxBus } from './fxBus';
 
@@ -50,6 +51,30 @@ interface Beam {
   max: number;
   width: number;
 }
+
+/** An energy packet travelling along a short arc (power routing, sats pulse, overdrive). */
+interface Orb {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  t: number;
+  dur: number;
+  delay: number;
+  arc: number;
+  color: string;
+  size: number;
+  /** Sparks burst on arrival. */
+  burst: number;
+}
+
+const LANE_STATION: Record<'weapon' | 'shield' | 'mobility' | 'repair', string[]> = {
+  weapon: ['cannonL', 'cannonR'],
+  shield: ['shoulderL', 'shoulderR'],
+  mobility: ['legs'],
+  repair: ['torso', 'legs'],
+};
+const BACKPACK_FALLBACK = new THREE.Vector3(0, 9.6, 1.6);
 
 interface Blast {
   ball: THREE.Mesh;
@@ -292,7 +317,60 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
     );
     combo.visible = false;
     combo.userData.life = 0;
-    return { beams, blasts, telegraphs, shields, combo };
+    const orbGeo = new THREE.SphereGeometry(1, 14, 10);
+    const orbs: Orb[] = Array.from({ length: 28 }, () => {
+      const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(orbGeo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      return {
+        mesh,
+        mat,
+        from: new THREE.Vector3(),
+        to: new THREE.Vector3(),
+        t: 0,
+        dur: 0,
+        delay: 0,
+        arc: 0,
+        color: COLORS.power,
+        size: 0.3,
+        burst: 0,
+      };
+    });
+    // OVERDRIVE READY: a slow amber ring around the chest core, and one line per system
+    // that has synced, so the hall sees the four systems lock in one by one.
+    const odRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.05, 8, 72),
+      new THREE.MeshBasicMaterial({
+        color: COLORS.action,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    odRing.visible = false;
+    const odLines = Object.fromEntries(
+      ROLE_IDS.map((r) => {
+        const mat = new THREE.MeshBasicMaterial({
+          color: COLORS.action,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          toneMapped: false,
+        });
+        const mesh = new THREE.Mesh(beamGeo, mat);
+        mesh.visible = false;
+        mesh.frustumCulled = false;
+        return [r, { mesh, mat }];
+      }),
+    ) as unknown as Record<RoleId, { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial }>;
+    return { beams, blasts, telegraphs, shields, combo, orbs, odRing, odLines };
   }, []);
 
   useEffect(() => {
@@ -300,11 +378,17 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
     for (const b of pools.beams) g.add(b.mesh);
     for (const b of pools.blasts) g.add(b.ball, b.ring);
     for (const t of pools.telegraphs) g.add(t.mesh, t.orb);
-    g.add(pools.shields.SHIELD_L.mesh, pools.shields.SHIELD_R.mesh, pools.combo);
+    g.add(pools.shields.SHIELD_L.mesh, pools.shields.SHIELD_R.mesh, pools.combo, pools.odRing);
+    for (const o of pools.orbs) g.add(o.mesh);
+    for (const r of ROLE_IDS) g.add(pools.odLines[r].mesh);
   }, [pools]);
 
   const tmpA = useMemo(() => new THREE.Vector3(), []);
   const tmpB = useMemo(() => new THREE.Vector3(), []);
+  const tmpC = useMemo(() => new THREE.Vector3(), []);
+  /** Effect clock (scaled like every other effect) and actions queued on it. */
+  const fxClock = useRef(0);
+  const queue = useRef<Array<{ at: number; run: () => void }>>([]);
 
   useEffect(() => {
     const beam = (
@@ -345,6 +429,32 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       }
       return false;
     };
+    const station = (id: string, out: THREE.Vector3) => {
+      if (anchorWorldPosition(`station:${id}`, out)) return out;
+      return out.copy(id === 'backpack' ? BACKPACK_FALLBACK : PART_POS.CORE);
+    };
+    const seatPos = (seat: SeatId, out: THREE.Vector3) => station(SEATS[seat].station, out);
+    const orb = (
+      from: THREE.Vector3,
+      to: THREE.Vector3,
+      color: string,
+      o: { dur?: number; delay?: number; arc?: number; size?: number; burst?: number } = {},
+    ) => {
+      const slot = pools.orbs.find((x) => x.dur <= 0) ?? pools.orbs[0]!;
+      slot.from.copy(from);
+      slot.to.copy(to);
+      slot.t = 0;
+      slot.dur = o.dur ?? 0.7;
+      slot.delay = o.delay ?? 0;
+      slot.arc = o.arc ?? 1.2;
+      slot.color = color;
+      slot.size = o.size ?? 0.3;
+      slot.burst = o.burst ?? 8;
+      slot.mat.color.set(color);
+      slot.mesh.visible = false;
+    };
+    const later = (sec: number, run: () => void) =>
+      queue.current.push({ at: fxClock.current + sec, run });
     const shieldPoint = (dir: Direction, out: THREE.Vector3) =>
       out
         .copy(DIR_VEC[dir])
@@ -418,8 +528,95 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           pools.combo.visible = true;
           break;
         case 'part_repaired':
-          sparks.spawn(PART_POS[e.part], 24, COLORS.repair, 5, 0.5);
+          sparks.spawn(PART_POS[e.part], e.auto ? 14 : 40, COLORS.repair, 6, 0.6);
+          if (!e.auto) blast(PART_POS[e.part].clone(), 1.2, COLORS.repair);
           break;
+        case 'repair_started':
+          sparks.spawn(PART_POS[e.part], 10, '#ffe2a8', 4, 0.35);
+          break;
+        case 'power_routed': {
+          // Chest reactor → the systems the new plan feeds, sized by their share.
+          const core = station('core', tmpA).clone();
+          (['weapon', 'shield', 'mobility', 'repair'] as const).forEach((lane, i) => {
+            const share = e.distribution[lane];
+            if (share < 10) return;
+            for (const id of LANE_STATION[lane]) {
+              orb(core, station(id, tmpB).clone(), COLORS.power, {
+                dur: 0.55,
+                delay: i * 0.06,
+                arc: 0.6,
+                size: 0.12 + share / 260,
+                burst: e.auto ? 3 : 6,
+              });
+            }
+          });
+          break;
+        }
+        case 'circuit_overload': {
+          const at = station('backpack', tmpA).clone();
+          sparks.spawn(at, 60, COLORS.danger, 10, 0.7);
+          blast(at, 1.8, '#ff6a4a');
+          cameraKick(0.25);
+          break;
+        }
+        case 'circuit_restored': {
+          const at = station('backpack', tmpA).clone();
+          sparks.spawn(at, e.auto ? 16 : 40, COLORS.power, 7, 0.55);
+          orb(at, station('core', tmpB).clone(), COLORS.power, { dur: 0.5, arc: 0.8, size: 0.25 });
+          break;
+        }
+        case 'sats_pulse_settled': {
+          // The shared pulse: from the pilot's station into the chest reactor (spec §8.1).
+          const to = station('core', tmpB).clone();
+          const from = e.seatId
+            ? seatPos(e.seatId, tmpA).clone()
+            : to.clone().add(tmpC.set(0, 9, 4));
+          orb(from, to, COLORS.ally, { dur: 0.9, arc: 2.2, size: 0.55, burst: 50 });
+          later(0.9, () => {
+            pools.combo.userData.life = 1;
+            pools.combo.visible = true;
+          });
+          break;
+        }
+        case 'overdrive_window':
+          pools.odRing.userData.boost = 1;
+          break;
+        case 'overdrive_failed':
+          sparks.spawn(station('core', tmpA).clone(), 40, '#8aa0ad', 5, 0.5);
+          break;
+        case 'overdrive_fired': {
+          // Four systems converge on the chest core, then the main cannon lightning (3–5 s).
+          finisher.until = performance.now() + 4_800 / FX_TIME_SCALE;
+          const core = station('core', tmpA).clone();
+          const seats: SeatId[] = ROLE_IDS.flatMap((r) => ROLES[r].seats);
+          seats.forEach((seat, i) =>
+            orb(seatPos(seat, tmpB).clone(), core, COLORS.action, {
+              dur: 0.8,
+              delay: i * 0.05,
+              arc: 1.6,
+              size: 0.35,
+              burst: 12,
+            }),
+          );
+          later(1.05, () => {
+            const bossId = store.getState().snap?.state.boss?.id;
+            const from = station('core', tmpA).clone();
+            const to =
+              bossId && enemyPos(bossId, tmpB)
+                ? tmpB.clone()
+                : from.clone().add(tmpC.set(0, 30, -120));
+            beam(from, to, '#ffffff', 1.1, 1.5);
+            beam(from, to, COLORS.action, 2.8, 1.3);
+            beam(from, to, COLORS.ally, 4.6, 0.7);
+            sparks.spawn(from, 80, COLORS.action, 12, 0.9);
+            later(0.15, () => {
+              blast(to, 16, '#ffd08a');
+              sparks.spawn(to, 260, COLORS.action, 36, 1.3);
+              cameraKick(1.1);
+            });
+          });
+          break;
+        }
         case 'shield_deployed':
           if (!e.auto)
             pools.shields[e.seatId as ShieldSeatId].ripple = Math.max(
@@ -429,7 +626,7 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           break;
       }
     });
-  }, [pools, sparks, tmpA, tmpB]);
+  }, [pools, sparks, tmpA, tmpB, tmpC]);
 
   useFrame((s, frameDt) => {
     const dt = frameDt * FX_TIME_SCALE;
@@ -437,6 +634,62 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
     const mt = store.matchTime(now);
     const snap = store.getState().snap?.state;
     const flashScale = reduceFlash ? 0.35 : 1;
+
+    fxClock.current += dt;
+    if (queue.current.length) {
+      const due = queue.current.filter((q) => q.at <= fxClock.current);
+      queue.current = queue.current.filter((q) => q.at > fxClock.current);
+      for (const q of due) q.run();
+    }
+    for (const o of pools.orbs) {
+      if (o.dur <= 0) continue;
+      if (o.delay > 0) {
+        o.delay -= dt;
+        continue;
+      }
+      o.t += dt;
+      const k = Math.min(1, o.t / o.dur);
+      const e = k * k * (3 - 2 * k);
+      o.mesh.position.lerpVectors(o.from, o.to, e);
+      o.mesh.position.y += Math.sin(Math.PI * e) * o.arc;
+      o.mesh.scale.setScalar(o.size * (0.7 + 0.6 * Math.sin(Math.PI * k)));
+      o.mat.opacity = 0.9 * flashScale + 0.1;
+      o.mesh.visible = true;
+      if (Math.random() < 0.6) sparks.spawn(o.mesh.position, 1, o.color, 1.2, o.size * 1.4);
+      if (k >= 1) {
+        o.dur = 0;
+        o.mesh.visible = false;
+        if (o.burst) sparks.spawn(o.to, o.burst, o.color, 5, 0.5);
+      }
+    }
+    // OVERDRIVE READY / CHARGING: ring around the core, one line per synced system.
+    const od = snap?.overdrive;
+    const ring = pools.odRing;
+    const coreOk = anchorWorldPosition('station:core', tmpC);
+    if (od && od.status !== 'IDLE' && coreOk) {
+      const boost = (ring.userData.boost as number | undefined) ?? 0;
+      ring.userData.boost = Math.max(0, boost - dt * 0.8);
+      ring.position.copy(tmpC);
+      ring.lookAt(s.camera.position);
+      // ≤ 1 Hz breathing, never a strobe.
+      const pulse = 0.5 + 0.5 * Math.sin((now / 1000) * Math.PI * 2 * 0.8);
+      ring.scale.setScalar((od.status === 'CHARGING' ? 2.2 : 2.8) + pulse * 0.4 + boost * 2);
+      (ring.material as THREE.MeshBasicMaterial).opacity = (0.35 + pulse * 0.35) * flashScale + 0.1;
+      ring.visible = true;
+    } else ring.visible = false;
+    for (const r of ROLE_IDS) {
+      const line = pools.odLines[r];
+      const on = !!od && od.status === 'CHARGING' && od.confirmed.includes(r) && coreOk;
+      line.mesh.visible = on;
+      if (!on) continue;
+      const seat = ROLES[r].seats[0]!;
+      if (!anchorWorldPosition(`station:${SEATS[seat].station}`, tmpA)) continue;
+      const dir = tmpB.copy(tmpC).sub(tmpA);
+      line.mesh.position.copy(tmpA);
+      line.mesh.quaternion.setFromUnitVectors(UP, dir.clone().normalize());
+      line.mesh.scale.set(0.08, dir.length(), 0.08);
+      line.mat.opacity = (od.autoRoles.includes(r) ? 0.4 : 0.85) * flashScale + 0.1;
+    }
 
     for (const b of pools.beams) {
       if (b.life <= 0) continue;
