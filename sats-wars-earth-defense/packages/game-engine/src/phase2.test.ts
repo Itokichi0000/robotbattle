@@ -234,7 +234,7 @@ describe('ENGINEER — bolt jobs', () => {
 });
 
 describe('RAIJIN OVERDRIVE', () => {
-  /** Puts the crew in the boss fight with SYNC and CAPACITOR at the threshold. */
+  /** Puts the crew in the boss fight with the RAIJIN gauge full (D-032: the only condition). */
   function charged(
     crew: Array<'GUNNER_L' | 'SHIELD_L' | 'POWER_CORE' | 'ENGINEER_CORE'>,
     autoSupport = true,
@@ -245,12 +245,12 @@ describe('RAIJIN OVERDRIVE', () => {
     const T = PRESETS.TEST.timings;
     sim.wait(T.wave1Ms + T.wave2Ms + 2_000);
     expect(sim.state.phase).toBe('BOSS');
-    sim.state = { ...sim.state, teamSync: 90, teamCapacitor: 100, lastComboAt: sim.t };
+    sim.state = { ...sim.state, teamSync: 0, teamCapacitor: 100, lastComboAt: sim.t };
     sim.wait(100);
     return sim;
   }
 
-  it('becomes READY in the boss fight at SYNC ≥ 80 and CAPACITOR ≥ 100', () => {
+  it('becomes READY in the boss fight when the RAIJIN gauge is full (SYNC no longer counts)', () => {
     const sim = charged(['GUNNER_L']);
     expect(sim.state.overdrive.status).toBe('READY');
     expect(sim.of('overdrive_ready')).toHaveLength(1);
@@ -302,7 +302,7 @@ describe('RAIJIN OVERDRIVE', () => {
 });
 
 describe('shared energy pulses', () => {
-  it('adds a fixed capacitor gain once per intent, only during combat', () => {
+  it('adds a fixed RAIJIN gauge gain once per intent, only during combat', () => {
     const sim = new Sim({ config: sturdy() });
     sim.join('GUNNER_L');
     const early = sim.cmd({
@@ -319,13 +319,13 @@ describe('shared energy pulses', () => {
       sim.cmd({ type: 'SATS_PULSE', t: sim.t, intentId: 'pi_1', seatId: 'GUNNER_L', virtual: true })
         .outcome,
     ).toMatchObject({ ok: true });
-    expect(sim.state.teamCapacitor).toBe(c0 + PRESETS.TEST.pulses.capacitorGain);
+    expect(sim.state.teamCapacitor).toBe(c0 + PRESETS.TEST.crisis.recoverGauge);
     // A duplicate webhook / retry never applies twice.
     expect(
       sim.cmd({ type: 'SATS_PULSE', t: sim.t, intentId: 'pi_1', seatId: 'GUNNER_L', virtual: true })
         .outcome,
     ).toMatchObject({ ok: false });
-    expect(sim.state.teamCapacitor).toBe(c0 + PRESETS.TEST.pulses.capacitorGain);
+    expect(sim.state.teamCapacitor).toBe(c0 + PRESETS.TEST.crisis.recoverGauge);
     expect(sim.of('sats_pulse_settled')).toHaveLength(1);
     // The public event names the station, never the pilot or an amount.
     expect(JSON.stringify(sim.of('sats_pulse_settled')[0])).not.toMatch(/pilot|sats":/i);

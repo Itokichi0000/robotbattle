@@ -78,20 +78,15 @@ export function PilotHeader({
         {seat ? null : <span className="ph-brand">SATS WARS / PILOT</span>}
         <span className="ph-wave sw-num">{label ? (lang === 'ja' ? label.ja : label.en) : ''}</span>
         <span className="ph-time sw-num">{end !== null ? formatClock(end - mt) : '--:--'}</span>
-        {seat && s && isCombatPhase(s.phase) && mt < s.overchargeUntil ? (
-          <span className="ph-oc sw-num" title="OVERCHARGE">
-            OC {Math.ceil((s.overchargeUntil - mt) / 1000)}s
-          </span>
-        ) : null}
+        {/* The one team meter (D-032). Sats are offered only by the blackout banner. */}
         {seat && s && isCombatPhase(s.phase) ? (
-          <button
-            className="ph-pulse"
-            onClick={() => pulseUi.set(true)}
-            aria-label={L('共有エネルギー', 'Shared energy')}
+          <span
+            className={`ph-gauge sw-num${s.teamCapacitor >= s.hints.overdriveCapacitorMin ? ' full' : ''}`}
+            aria-label={L('雷神ゲージ', 'RAIJIN gauge')}
           >
             <IconBolt size={14} />
-            <span>+{s.hints.pulseGain}</span>
-          </button>
+            {Math.round(Math.min(100, (s.teamCapacitor / s.hints.overdriveCapacitorMin) * 100))}%
+          </span>
         ) : null}
         <span
           className={`ph-link ${connected ? 'ok' : 'bad'}`}
@@ -146,14 +141,15 @@ export function LinkBar({ s, mt, seat }: { s: PublicMatchState; mt: number; seat
         )
       : role === 'ENGINEER'
         ? L('修理量アップ', 'bigger repair')
-        : role === 'DEFENSE'
-          ? L('CHARGE アップ', 'more CHARGE')
-          : L('SYNC アップ', 'more SYNC');
+        : L('ゲージ多め', 'more gauge');
   const text = !link
-    ? L('LINK — 誰かが成功すると連携が始まる', 'LINK — any success starts a chain')
+    ? L('連携 — 誰かが成功すると連携が始まる', 'LINK — any success starts a chain')
     : mineIn
-      ? L(`LINK ×${n} — ほかの系統の成功を待つ`, `LINK ×${n} — waiting for other systems`)
-      : L(`今あなたが成功で LINK ×${n + 1}（${bonus}）`, `Succeed now: LINK ×${n + 1} (${bonus})`);
+      ? L(`連携 ×${n} — ほかの役割の成功を待つ`, `LINK ×${n} — waiting for other roles`)
+      : L(
+          `今あなたが成功で 連携 ×${n + 1}・雷神ゲージ↑（${bonus}）`,
+          `Succeed now: LINK ×${n + 1}, gauge up (${bonus})`,
+        );
   return (
     <div className={`link-bar${yours ? ' yours' : ''}${link ? ' live' : ''}`} aria-live="polite">
       <div className="link-roles" aria-hidden>

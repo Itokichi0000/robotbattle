@@ -674,20 +674,6 @@ body {
 .ph-top svg {
   flex-shrink: 0;
 }
-.ph-pulse {
-  min-width: 44px;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border: 1px solid var(--sw-ally);
-  background: transparent;
-  color: var(--sw-ally);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
 .banner-note {
   padding: 10px 14px;
   border-bottom: 1px solid var(--sw-danger);
@@ -1161,15 +1147,6 @@ p.virtual {
 }
 
 /* ------------------------------------------------------- LINK CHAIN */
-.ph-oc {
-  padding: 2px 6px;
-  border: 1px solid var(--sw-repair);
-  color: var(--sw-repair);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
 .link-bar {
   position: relative;
   display: flex;
@@ -1365,4 +1342,21 @@ p.virtual {
   .crisis-flash {
     animation: none;
   }
+}
+
+/* The RAIJIN gauge chip in the header (D-032): read-only, amber when the finisher is ready. */
+.ph-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--sw-line);
+  color: var(--sw-action);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ph-gauge.full {
+  border-color: var(--sw-action);
+  background: rgba(242, 173, 77, 0.16);
 }

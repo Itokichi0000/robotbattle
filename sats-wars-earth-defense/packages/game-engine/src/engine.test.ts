@@ -300,7 +300,7 @@ describe('shields', () => {
 });
 
 describe('cooperation', () => {
-  it('a gun hit and a shield block within the window form a TEAM SYNC combo', () => {
+  it('a gun hit and a shield block within the window form a LINK combo', () => {
     const sim = new Sim();
     sim.join('GUNNER_L');
     sim.join('SHIELD_L');

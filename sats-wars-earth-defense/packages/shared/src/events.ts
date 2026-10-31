@@ -84,7 +84,8 @@ export type MatchEventBody =
       kind: 'BLACKOUT';
       by: 'PULSE' | 'ROUTE' | 'AUTO';
       seatId: SeatId | null;
-      overchargeUntil: number | null;
+      /** RAIJIN gauge added (the crew's fix and a GRID PULSE pay the same; AUTO adds 0). */
+      gain: number;
     }
   | { type: 'crisis_failed'; kind: 'BLACKOUT'; damage: number }
   | { type: 'power_routed'; seatId: SeatId; distribution: PowerDistribution; auto: boolean }
@@ -105,7 +106,6 @@ export type MatchEventBody =
       settleMs: number | null;
       /** This pulse ended a REACTOR BLACKOUT. */
       crisis: boolean;
-      overchargeUntil: number;
     }
   | { type: 'match_result'; outcome: MatchOutcome; result: MatchResult };
 

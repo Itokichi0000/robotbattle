@@ -36,7 +36,7 @@ async function operator(browser: Browser): Promise<{ ctx: BrowserContext; page: 
   const page = await ctx.newPage();
   page.on('dialog', (d) => void d.accept());
   await page.goto('/operator/');
-  await expect(page.getByText('MATCH CONTROL')).toBeVisible();
+  await expect(page.getByText('今の状態 NOW')).toBeVisible();
   return { ctx, page };
 }
 
@@ -44,7 +44,7 @@ async function resetMatch(op: Page): Promise<void> {
   // Specs share one server: no demo bots or seats left over from an earlier test.
   await expect(op.locator('.payments')).toBeVisible(); // operator status has arrived
   if (await op.getByLabel(/DEMO BOTS/).isChecked()) await op.getByLabel(/DEMO BOTS/).uncheck();
-  await op.getByRole('button', { name: /^RESET$/ }).click();
+  await op.getByRole('button', { name: /RESET/ }).click();
   await expect.poll(async () => (await publicMatch(op)).state.humans, { timeout: 15_000 }).toBe(0);
   await expect
     .poll(async () => (await publicMatch(op)).phase, { timeout: 15_000 })
@@ -125,23 +125,29 @@ test('LNURL-auth pilot, callsign opt-in, one wallet one phone, VIRTUAL pulse app
   await expect.poll(async () => (await publicMatch(op)).phase, { timeout: 20_000 }).toBe('WAVE_1');
   await expect(display.locator('.strip').getByText('RAIJIN_FAN')).toBeVisible();
 
-  // Shared energy pulse: its own sheet, VIRTUAL in sandbox, fixed amount, never required.
+  // Sats only in a blackout (D-032): no button for it until staff (or the wave) stop the reactor.
+  await expect(a.getByRole('button', { name: /sats で即時復旧/ })).toHaveCount(0);
+  await op.getByRole('button', { name: '炉心停止を起こす' }).click();
+  await expect(display.locator('.crisis-banner')).toBeVisible({ timeout: 10_000 });
   const before = (await publicMatch(op)).state.teamCapacitor;
-  await a.getByRole('button', { name: '共有エネルギー' }).click();
+  await a.getByRole('button', { name: /sats で即時復旧/ }).click();
   const sheet = a.getByRole('dialog', { name: '共有エネルギー' });
   await expect(sheet.getByText(/VIRTUAL（架空・無料のテスト）/)).toBeVisible();
-  await expect(sheet.getByText('21 sats')).toBeVisible();
-  await expect(sheet.getByText(/支払わなくても最後まで遊べます/)).toBeVisible();
-  await sheet.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
+  await expect(sheet.getByText('21 sats', { exact: true })).toBeVisible();
+  await expect(sheet.getByText(/払わなくても勝てます/)).toBeVisible();
+  await sheet.getByRole('button', { name: /sats を送る（VIRTUAL/ }).click();
   await expect(sheet.getByText(/テスト用の架空の請求書/)).toBeVisible();
 
   // Staff settle it in the console; the server applies +20 exactly once.
   const settle = op.locator('.payments').getByRole('button', { name: 'SETTLE' });
   await expect(settle).toBeVisible({ timeout: 10_000 });
   await settle.click();
-  await expect(sheet.getByText(/を炉心へ送りました/)).toBeVisible({ timeout: 15_000 });
+  await expect(sheet.getByText(/着金しました/)).toBeVisible({ timeout: 15_000 });
   const after = await publicMatch(op);
   expect(after.state.stats.pulses).toBe(1);
+  // The pulse ended the blackout: same result the crew's re-route would have had.
+  expect(after.state.crisis).toBeNull();
+  expect(after.state.stats.blackoutsByPulse).toBe(1);
   expect(after.state.teamCapacitor).toBeGreaterThanOrEqual(Math.min(100, before + 20) - 1);
   await expect(op.locator('.payments').getByRole('button', { name: 'SETTLE' })).toHaveCount(0);
   await a.getByRole('button', { name: '閉じる' }).click();

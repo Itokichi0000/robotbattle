@@ -1,10 +1,11 @@
-import { CITY_IDS, CITY_POINTS, JAPAN_OUTLINES, SEAT_IDS, SEATS } from '@swed/shared';
+import { SEAT_IDS, SEATS } from '@swed/shared';
 import type { PublicMatchState, SeatId } from '@swed/shared';
 import { IconPilot, ROLE_VAR } from '@swed/ui-tokens';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { joinInfo } from '../net';
 import { screen } from '../scene/anchors';
 import { STATION_OF } from '../scene/Raijin';
+import { ACTS } from './acts';
 
 /**
  * Attract + boarding overlay on the hangar (spec §4.1–4.2). Every seat plate is wired to the
@@ -17,34 +18,6 @@ const ROW_W = 1920 - 128;
 const GAP = 12;
 const COL_W = (ROW_W - GAP * 7) / 8;
 const PLATE_TOP = 1080 - 36 - 126;
-
-function JapanMini() {
-  const s = 7.5;
-  const tx = (x: number) => 150 + x * s;
-  const ty = (y: number) => 120 - y * s;
-  return (
-    <svg viewBox="0 0 300 240" width={300} height={240} aria-hidden>
-      {JAPAN_OUTLINES.map((poly, i) => (
-        <polygon
-          key={i}
-          points={poly.map((p) => `${tx(p.x).toFixed(1)},${ty(p.y).toFixed(1)}`).join(' ')}
-          fill="rgba(91,202,218,0.12)"
-          stroke="rgba(143,233,245,0.8)"
-          strokeWidth={1}
-        />
-      ))}
-      {CITY_IDS.map((id) => (
-        <circle
-          key={id}
-          cx={tx(CITY_POINTS[id].x)}
-          cy={ty(CITY_POINTS[id].y)}
-          r={3}
-          fill="#5bcada"
-        />
-      ))}
-    </svg>
-  );
-}
 
 function plateStatus(
   s: PublicMatchState | undefined,
@@ -131,14 +104,33 @@ export function Lobby({ s, attract }: { s: PublicMatchState | undefined; attract
         <div className="slogan">ONE MECH. EIGHT PILOTS. DEFEND JAPAN.</div>
         <div className="slogan-ja">8人の力で、日本を守れ。</div>
       </div>
-      {!attract ? (
-        <div className="mission sw-frame">
-          <div className="kick">MISSION 作戦</div>
-          <h2>DEFEND JAPAN</h2>
-          <p>日本列島を守れ — NULL SWARM 接近中</p>
-          <JapanMini />
+      {/* How to play, readable before anyone scans (D-032): three steps and what sats do. */}
+      <div className="mission how sw-frame">
+        <div className="kick">HOW TO PLAY 遊び方</div>
+        <ol>
+          <li>
+            <b>QR から搭乗（無料）</b>
+            <span>スマホで右の QR を読み取り、8つの席から1つ選ぶ</span>
+          </li>
+          <li>
+            <b>4つの役割で協力</b>
+            <span>撃つ・守る・電力・修理。違う役割の成功をつなぐと 雷神ゲージ がたまる</span>
+          </li>
+          <li>
+            <b>3幕を戦い抜く</b>
+            <span>
+              {ACTS.WAVE_1.ja} → {ACTS.WAVE_2.ja} → {ACTS.BOSS.ja}（ゲージ満タンで必殺技）
+            </span>
+          </li>
+        </ol>
+        <div className="sats">
+          <b>sats の使いみち</b>
+          <span>
+            炉心停止の危機のときだけ、21 sats
+            で即時復旧できる（任意）。払わなくても仲間の操作で直せる
+          </span>
         </div>
-      ) : null}
+      </div>
       <div className="pilots-count">
         <div className="n sw-num">
           {String(humans).padStart(2, '0')} <small>PILOTS / 08 SEATS</small>

@@ -70,6 +70,8 @@ export type EngineCommand =
   | { type: 'RESUME'; t: number }
   | { type: 'END'; t: number }
   | { type: 'SET_AUTO_SUPPORT'; t: number; enabled: boolean }
+  /** Staff start a REACTOR BLACKOUT now (to show the GRID PULSE scene). Replaces this wave's. */
+  | { type: 'TRIGGER_BLACKOUT'; t: number }
   | {
       type: 'SEAT_JOIN';
       t: number;
@@ -238,7 +240,6 @@ export function createMatch(input: CreateMatchInput): MatchState {
     link: null,
     crisis: null,
     crisisFired: [],
-    overchargeUntil: 0,
     spawn: { scriptedDone: 0, nextSpawnAt: 0 },
     circuits: Object.fromEntries(
       POWER_LANES.map((l) => [l, { broken: false, brokenAt: 0, puzzle: null }]),
@@ -725,11 +726,8 @@ function recordSuccess(ctx: Ctx, at: number, seatId: SeatId, auto: boolean): voi
       const step = n === 2 ? g[2] : g[n] - g[(n - 1) as 2 | 3];
       const gain = Math.round(step * weight);
       s.teamSync = clamp(s.teamSync + gain, 0, 100);
-      s.teamCapacitor = clamp(
-        s.teamCapacitor + Math.round(s.config.capacitor.perCombo * weight),
-        0,
-        s.config.capacitor.max,
-      );
+      // Linking stations is the main way to fill the RAIJIN gauge.
+      s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
       s.stats.combos += 1;
       if (isHuman(s, seatId)) s.seats[seatId].stats.combos += 1;
       if (n === 2 && isHuman(s, link.seats[0]!)) s.seats[link.seats[0]!].stats.combos += 1;
@@ -1036,21 +1034,12 @@ function resolveCrisis(
   const s = ctx.s;
   if (!s.crisis) return;
   s.crisis = null;
-  // The crew's fix and a GRID PULSE end the same way; AUTO SUPPORT only restores power.
-  let until: number | null = null;
-  if (by !== 'AUTO') {
-    until = Math.max(s.overchargeUntil, at + s.config.overcharge.ms);
-    s.overchargeUntil = until;
-  }
+  // The crew's fix and a GRID PULSE pay the same RAIJIN gauge; AUTO SUPPORT only restores power.
+  const gain = by === 'AUTO' ? 0 : s.config.crisis.recoverGauge;
+  s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
   if (by === 'PULSE') s.stats.blackoutsByPulse += 1;
   if (by === 'ROUTE') s.stats.blackoutsByRoute += 1;
-  emit(ctx, at, {
-    type: 'crisis_resolved',
-    kind: 'BLACKOUT',
-    by,
-    seatId,
-    overchargeUntil: until,
-  });
+  emit(ctx, at, { type: 'crisis_resolved', kind: 'BLACKOUT', by, seatId, gain });
 }
 
 function runCrisis(ctx: Ctx, now: number): void {
@@ -1175,7 +1164,6 @@ function fireOverdrive(ctx: Ctx, at: number): void {
   const autoRoles = [...od.autoRoles];
   s.overdrive = idleOverdrive();
   s.teamCapacitor = 0;
-  s.teamSync = cfg.syncAfter;
   s.stats.overdrives += 1;
   emit(ctx, at, { type: 'overdrive_fired', damage: cfg.damage, roles: [...ROLE_IDS], autoRoles });
   const boss = bossOf(s);
@@ -1214,7 +1202,8 @@ function runOverdrive(ctx: Ctx, now: number): void {
     if (od.status !== 'IDLE') s.overdrive = idleOverdrive();
     return;
   }
-  if (od.status === 'IDLE' && s.teamSync >= cfg.syncMin && s.teamCapacitor >= cfg.capacitorMin) {
+  // One gauge (D-032): a full RAIJIN gauge in the boss fight opens the finisher.
+  if (od.status === 'IDLE' && s.teamCapacitor >= cfg.capacitorMin) {
     od.status = 'READY';
     od.readyAt = now;
     emit(ctx, now, { type: 'overdrive_ready' });
@@ -1304,15 +1293,11 @@ function autoPlan(s: MatchState): PowerDistribution {
 
 /* -------------------------------------------------------------- simulation */
 
-function regenEnergy(s: MatchState, dtSec: number, now: number): void {
+function regenEnergy(s: MatchState, dtSec: number): void {
   const coreFactor = 0.5 + 0.5 * (s.parts.CORE / 100);
   // REACTOR BLACKOUT: the reactor runs on reserve. Not fully dark, so a small crew with
   // nobody on POWER B is pressed, not starved (fully dark cut 2-pilot wins from 15/20 to 6/20).
-  const boost = s.crisis
-    ? s.config.crisis.regenFactor
-    : now < s.overchargeUntil
-      ? s.config.overcharge.regenFactor
-      : 1;
+  const boost = s.crisis ? s.config.crisis.regenFactor : 1;
   const total = s.config.energy.regenPerSec * coreFactor * boost * dtSec;
   const max = s.config.energy.laneMax;
   const d = s.distribution;
@@ -1352,7 +1337,7 @@ function step(ctx: Ctx, now: number, dtSec: number): void {
     }
   }
   if (!isCombatPhase(s.phase)) return;
-  regenEnergy(s, dtSec, now);
+  regenEnergy(s, dtSec);
   runSpawner(ctx, now);
   launchAttacks(ctx, now);
   resolveImpacts(ctx, now);
@@ -1627,6 +1612,20 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
         outcome = control(true);
       }
       break;
+    case 'TRIGGER_BLACKOUT': {
+      const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
+      if (!['WAVE_1', 'WAVE_2', 'BOSS'].includes(s.phase) || s.paused) {
+        outcome = control(false, 'NOT_IN_COMBAT');
+      } else if (s.crisis || s.overdrive.status !== 'IDLE') {
+        outcome = control(false, 'INVALID');
+      } else {
+        // Counts as this wave's blackout, so the scheduled one does not follow right after.
+        if (!s.crisisFired.includes(wave)) s.crisisFired.push(wave);
+        startCrisis(ctx, at);
+        outcome = control(true);
+      }
+      break;
+    }
     case 'SET_AUTO_SUPPORT':
       if (s.autoSupport !== cmd.enabled) {
         s.autoSupport = cmd.enabled;
@@ -1685,12 +1684,11 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
       if (s.pulsesApplied.includes(cmd.intentId)) outcome = control(false, 'INVALID');
       else if (!isCombatPhase(s.phase)) outcome = control(false, 'NOT_IN_COMBAT');
       else {
-        const gain = s.config.pulses.capacitorGain;
+        // GRID PULSE: ends the blackout and pays the same gauge as the crew's re-route. If the
+        // crew fixed it while the payment was confirming, the paid gauge still lands.
+        const gain = s.config.crisis.recoverGauge;
         const crisis = !!s.crisis;
         s.pulsesApplied.push(cmd.intentId);
-        s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
-        // GRID PULSE: the shared energy overcharges the reactor (same as the crew's own fix).
-        s.overchargeUntil = Math.max(s.overchargeUntil, at + s.config.overcharge.ms);
         s.stats.pulses += 1;
         emit(ctx, at, {
           type: 'sats_pulse_settled',
@@ -1699,9 +1697,9 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
           virtual: cmd.virtual,
           settleMs: cmd.virtual ? null : (cmd.settleMs ?? null),
           crisis,
-          overchargeUntil: s.overchargeUntil,
         });
         if (crisis) resolveCrisis(ctx, at, 'PULSE', cmd.seatId);
+        else s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
         outcome = control(true);
       }
       break;

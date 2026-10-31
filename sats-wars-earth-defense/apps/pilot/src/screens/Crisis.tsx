@@ -30,29 +30,30 @@ export function CrisisBanner({ seat }: { seat: SeatId }) {
   const left = Math.max(0, crisis.endsAt - mt);
   const me = seat === 'POWER_ROUTER';
   const virtual = p.quote?.mode !== 'live';
+  const gain = s.hints.pulseGain;
   const how = me
     ? L(
-        'あなたの回路修復で炉心が戻ります（下のパネル）',
-        'Re-route the core below to restore power',
+        `あなたが下のパネルで回路をつなぐと復旧（雷神ゲージ +${gain}%）`,
+        `Re-route the core below to restore it (gauge +${gain}%)`,
       )
     : crisis.autoAt !== null
       ? L(
-          `AUTO SUPPORT が ${Math.max(0, Math.ceil((crisis.autoAt - mt) / 1000))} 秒後に復旧`,
-          `AUTO SUPPORT restores it in ${Math.max(0, Math.ceil((crisis.autoAt - mt) / 1000))} s`,
+          `直し方：電力B は空席なので AUTO が ${Math.max(0, Math.ceil((crisis.autoAt - mt) / 1000))} 秒後に復旧。急ぐなら sats で即時復旧（雷神ゲージ +${gain}%）`,
+          `AUTO restores it in ${Math.max(0, Math.ceil((crisis.autoAt - mt) / 1000))} s, or send sats to restore now (gauge +${gain}%)`,
         )
-      : L('電力B が回路を修復中', 'POWER B is re-routing the core');
+      : L(
+          `直し方：① 電力B が回路をつなぐ ② 誰かが sats で即時復旧。どちらでも雷神ゲージ +${gain}%`,
+          `Fix: POWER B re-routes, or anyone sends sats. Either way gauge +${gain}%`,
+        );
   return (
     <div className={`crisis${me ? ' compact' : ''}`} role="alert">
       <div className="crisis-head">
         <IconWarning size={20} />
-        <b>REACTOR BLACKOUT</b>
+        <b>{L('炉心停止', 'REACTOR BLACKOUT')}</b>
         <span className="sw-num">{(left / 1000).toFixed(1)}s</span>
       </div>
       <p className="crisis-how">
-        {L(
-          '炉心停止 — 予備電源のみ（回復 30%）。',
-          'Reactor down — reserve power only (30% regen). ',
-        )}
+        {L('エネルギー回復が 30% に低下。', 'Energy regen down to 30%. ')}
         {how}
       </p>
       {/* POWER B's job is the re-route below; the pulse button would cover the puzzle. */}
@@ -60,14 +61,17 @@ export function CrisisBanner({ seat }: { seat: SeatId }) {
         <button className="btn grid-pulse" onClick={() => pulseUi.set(true)}>
           <IconBolt size={20} />
           <span>
-            {L('GRID PULSE で即時復旧', 'GRID PULSE: restore now')}
+            {L(
+              `${s.hints.pulseAmountSats} sats で即時復旧`,
+              `Restore now with ${s.hints.pulseAmountSats} sats`,
+            )}
             <small>
               {virtual
-                ? L('VIRTUAL（テスト・無料）・任意', 'VIRTUAL (free test) · optional')
-                : L(
-                    `${s.hints.pulseAmountSats} sats・任意 — 払わなくても復旧できます`,
-                    `${s.hints.pulseAmountSats} sats · optional — the crew can fix it too`,
-                  )}
+                ? L(
+                    'VIRTUAL（テスト・お金は動きません）・任意',
+                    'VIRTUAL (test, no money) · optional',
+                  )
+                : L('任意 — 払わなくても仲間が直せます', 'Optional — the crew can fix it too')}
             </small>
           </span>
         </button>
@@ -101,12 +105,12 @@ export function CrisisFlash() {
           setFlash({
             text: e.crisis
               ? L(
-                  `LIGHTNING PULSE 着金、炉心復旧${speed}`,
-                  `LIGHTNING PULSE landed, reactor back${speed}`,
+                  `LIGHTNING 着金 — 炉心復旧・雷神ゲージ +${e.gain}%${speed}`,
+                  `LIGHTNING landed — reactor back, gauge +${e.gain}%${speed}`,
                 )
               : L(
-                  `LIGHTNING PULSE 着金 — OVERCHARGE${speed}`,
-                  `LIGHTNING PULSE — OVERCHARGE${speed}`,
+                  `LIGHTNING 着金 — 雷神ゲージ +${e.gain}%${speed}`,
+                  `LIGHTNING landed — gauge +${e.gain}%${speed}`,
                 ),
             tone: 'bolt',
             until,
@@ -114,7 +118,10 @@ export function CrisisFlash() {
         }
         if (e.type === 'crisis_resolved' && e.by === 'ROUTE')
           setFlash({
-            text: L('電力B が炉心を復旧 — OVERCHARGE', 'POWER B restored the core — OVERCHARGE'),
+            text: L(
+              `電力B が炉心を復旧 — 雷神ゲージ +${e.gain}%`,
+              `POWER B restored the core — gauge +${e.gain}%`,
+            ),
             tone: 'ok',
             until,
           });

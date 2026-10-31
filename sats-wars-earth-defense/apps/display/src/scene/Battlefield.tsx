@@ -254,9 +254,9 @@ export function BattlefieldLights({ shadows }: { shadows: boolean }) {
       alarm.current.position.set(Math.sin(t * 2.4) * 9, 16, Math.cos(t * 2.4) * 9);
       alarm.current.intensity = b * 1800;
     }
-    // OVERCHARGE: a cool surge light breathing on the chest reactor.
+    // RAIJIN gauge full: a cool surge light breathing on the chest reactor.
     if (surge.current)
-      surge.current.intensity = anim.overcharge ? 900 + Math.sin(s.clock.elapsedTime * 4) * 250 : 0;
+      surge.current.intensity = anim.gaugeFull ? 900 + Math.sin(s.clock.elapsedTime * 4) * 250 : 0;
   });
   return (
     <>

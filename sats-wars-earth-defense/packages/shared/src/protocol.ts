@@ -73,7 +73,7 @@ export type PulseRefusal =
   | 'PULSE_LIMIT'
   | 'PULSE_COOLDOWN'
   | 'PULSE_MATCH_LIMIT'
-  | 'CAPACITOR_FULL'
+  | 'NO_CRISIS'
   | 'BACKEND_UNAVAILABLE';
 
 export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }> = {
@@ -87,9 +87,9 @@ export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }
   PULSE_LIMIT: { ja: 'この作戦の上限（3回）に達しました', en: 'Limit for this round reached' },
   PULSE_COOLDOWN: { ja: '少し待ってから（30秒に1回）', en: 'Once every 30 s' },
   PULSE_MATCH_LIMIT: { ja: 'この作戦全体の上限に達しました', en: 'Round-wide limit reached' },
-  CAPACITOR_FULL: {
-    ja: 'CHARGE 満タン・オーバーチャージ中。今は送っても効果がありません',
-    en: 'CHARGE full and overcharged: a pulse would add nothing now',
+  NO_CRISIS: {
+    ja: 'sats を送れるのは炉心停止（ブラックアウト）中だけです',
+    en: 'Sats can only be sent during a reactor blackout',
   },
   BACKEND_UNAVAILABLE: {
     ja: '決済サーバーに接続できません。ゲームはそのまま続けられます',
@@ -116,14 +116,13 @@ export interface PaymentsStatus {
   mode: 'sandbox' | 'live';
   enabled: boolean;
   amountSats: number;
+  /** RAIJIN gauge a pulse adds (the same as the crew's own fix). */
   capacitorGain: number;
   recipient: string;
   remaining: number;
   cooldownUntil: string | null;
   inCombat: boolean;
-  /** A pulse would add nothing right now (CHARGE full and already overcharged). */
-  capacitorFull: boolean;
-  /** REACTOR BLACKOUT in progress: a pulse restores the reactor at once. */
+  /** REACTOR BLACKOUT in progress: the only time a pulse can be sent (D-032). */
   crisis: boolean;
 }
 
@@ -213,7 +212,9 @@ export type OperatorCommand =
   | { command: 'PAYMENTS_CHECK' }
   | { command: 'PAYMENTS_ENABLE_LIVE'; confirm: string }
   | { command: 'PAYMENTS_DISABLE' }
-  | { command: 'SET_AUTO_SETTLE_VIRTUAL'; enabled: boolean };
+  | { command: 'SET_AUTO_SETTLE_VIRTUAL'; enabled: boolean }
+  /** Start a REACTOR BLACKOUT now, to show the GRID PULSE scene on demand. */
+  | { command: 'TRIGGER_BLACKOUT' };
 
 export type OperatorCommandName = OperatorCommand['command'];
 

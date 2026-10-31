@@ -58,7 +58,12 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
             ['修理 REPAIRS', String(s.stats.repairs)],
             ['回路復旧 RE-ROUTES', String(s.stats.routesFixed), `OVERLOAD ${s.stats.overloads}`],
             ['必殺技 OVERDRIVE', String(s.stats.overdrives)],
-            ['最高SYNC BEST SYNC', `${Math.round(s.stats.bestSync)}%`],
+            // Counts only, never who paid (spec §8.2): how the crew got through the blackouts.
+            [
+              '炉心停止の復旧 BLACKOUTS',
+              `${s.stats.blackouts - s.stats.blackoutsFailed} / ${s.stats.blackouts}`,
+              `仲間 ${s.stats.blackoutsByRoute} · sats ${s.stats.blackoutsByPulse}`,
+            ],
           ].map(([k, v, sub]) => (
             <div key={k} className="stat sw-frame">
               <div className="k">{k}</div>
@@ -81,7 +86,7 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
               <th>ROLE</th>
               <th style={{ textAlign: 'right' }}>WORK</th>
               <th style={{ textAlign: 'right' }}>COMBOS</th>
-              <th style={{ textAlign: 'right' }}>SYNC</th>
+              <th style={{ textAlign: 'right' }}>SYNC NOW</th>
             </tr>
           </thead>
           <tbody>

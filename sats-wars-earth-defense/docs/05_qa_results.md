@@ -92,35 +92,35 @@ CINEMATIC→SAFE に下がることを運営画面の DISPLAY 欄で確認。**�
 コマンド：`pnpm lint`（警告0）、`pnpm typecheck`（scripts も対象）、`pnpm format:check`、`pnpm test`、`pnpm build`、`pnpm e2e`、
 ルートの秘密情報スキャン（`node tools/security/scan-secrets.mjs`）すべて成功。
 
-### 画面キャプチャ（Phase 2〜4、支払いシーン改善後に撮り直し）
+### 画面キャプチャ（Phase 2〜4、D-032 の構成変更後に撮り直し）
 
 `tools/perf/capture-phase2.ts` が実際に操作して撮影（LNURL-auth はテスト用ウォレットで署名、電力 B のパズルはスマホ画面のタイルを
 タップして解く）。大画面は 1280×720・`?q=BALANCED&capture=1`、スマホは `?capture=1`。画像は `docs/qa/phase2/`。
 撮影した試合は **VICTORY（BOSS_DESTROYED）**、ブラックアウト2回（1回目 GRID PULSE、2回目 電力B の回路修復）。
 
-| 画像                                                                | 内容                                                                                                              |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `01_display_lobby_bots.png`                                         | 搭乗受付：人3人 + DEMO-BOT 5体（「DEMO-BOT 交代可」）、コールサイン RAIJIN_FAN（本人が表示を選択）                |
-| `02_display_power_routed.png`                                       | 電力案の送信：胸部から各部への光、CHARGE メーター、フィード「POWER ROUTED」                                       |
-| `03_display_overload.png`                                           | 過負荷：背部の火花、C3「OVERLOAD」、電力 B の状態                                                                 |
-| `05_display_blackout.png`                                           | **REACTOR BLACKOUT**：照明が落ちて赤い非常灯、中央に残り秒数と2つの出口（GRID PULSE／電力B 回路修復中）           |
-| `05b_display_lightning_pulse.png`                                   | **LIGHTNING PULSE**：「VIRTUAL（テスト）· 炉心復旧 · OVERCHARGE」、C3「OVERCHARGE 10s」（支払者・金額は出さない） |
-| `05c_display_core_rerouted.png`                                     | ボス戦の2回目：電力B が炉心をつなぎ直して「CORE RE-ROUTED」、フィードに LINK ×3・FULL LINK                        |
-| `06_display_boss.png`                                               | NULL CORE 戦                                                                                                      |
-| `07_display_overdrive_ready.png`                                    | OVERDRIVE READY：4系統のバナー（WAIT/SYNC/AUTO）、胸部コアのリング                                                |
-| `08_display_overdrive_fired.png` / `08b_display_overdrive_beam.png` | 発射：HUD が薄くなり「RAIJIN OVERDRIVE」、8席→コアの収束 → コアからボスへの雷撃ビーム                             |
-| `09_display_results.png`                                            | 作戦記録                                                                                                          |
-| `10_phone_join.png` / `11_phone_lnurl_pending.png`                  | 参加：パイロット認証（無料）、ウォレットを開く・リンクをコピー・別端末用の個人 QR・残り秒数                       |
-| `12_phone_seat_select_callsign.png`                                 | 席選択とコールサイン（任意・大画面表示はオプトイン）                                                              |
-| `13_phone_power_a.png`                                              | 電力 A：レーンをドラッグして配分                                                                                  |
-| `14_phone_router_overload.png` / `15_phone_router_connected.png`    | 電力 B：過負荷の回路タブ、3×3 タイル、届いている経路の点灯 → 接続OK。LINK バー（あと何系統で LINK が伸びるか）    |
-| `15b_phone_router_blackout.png`                                     | 電力 B のブラックアウト：炉心タブが自動で開き「予備電源のみ（回復 30%）。あなたの回路修復で炉心が戻ります」       |
-| `18_phone_blackout_banner.png`                                      | 全員のスマホに赤い帯：残り秒数と「GRID PULSE で即時復旧（任意・払わなくても復旧できます）」                       |
-| `19_phone_grid_pulse_sheet.png`                                     | GRID PULSE の条件シート：金額・受取先・VIRTUAL・残り回数・「払わなくても電力Bの回路修復で復旧できます」           |
-| `20_phone_pulse_landed.png`                                         | 着金：「共有エネルギー +20 を炉心へ送りました」「LIGHTNING PULSE 着金、炉心復旧 — VIRTUAL」                       |
-| `21_phone_overdrive_call.png`                                       | OVERDRIVE READY の SYNC NOW                                                                                       |
-| `22_phone_debrief.png`                                              | デブリーフ                                                                                                        |
-| `30`〜`32_operator_*.png`                                           | 運営：DEMO BOTS・「VIRTUAL を自動確定」・SHARED ENERGY（applied）・監査ログ                                       |
+| 画像                                                                | 内容                                                                                                                                                                             |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01_display_lobby_bots.png`                                         | 搭乗受付：人3人 + DEMO-BOT 5体（「DEMO-BOT 交代可」）、コールサイン RAIJIN_FAN（本人が表示を選択）                                                                               |
+| `02_display_power_routed.png`                                       | 電力案の送信：胸部から各部への光、CHARGE メーター、フィード「POWER ROUTED」                                                                                                      |
+| `03_display_overload.png`                                           | 過負荷：背部の火花、C3「OVERLOAD」、電力 B の状態                                                                                                                                |
+| `05_display_blackout.png`                                           | **炉心停止**：照明が落ちて赤い非常灯。番号付きの2つの直し方（① 電力B が回路をつなぐ ② 誰かが 21 sats を送る）と「どちらでも雷神ゲージ +20%」。左上の「今やること」も赤で同じ指示 |
+| `05b_display_lightning_pulse.png`                                   | **LIGHTNING 着金**：「VIRTUAL（テスト）· 炉心復旧 · 雷神ゲージ +20%」（支払者・金額は出さない）                                                                                  |
+| `05c_display_core_rerouted.png`                                     | 第3幕の2回目：電力B が炉心をつなぎ直して「炉心復旧 — 雷神ゲージ +20%」                                                                                                           |
+| `06_display_boss.png`                                               | NULL CORE 戦                                                                                                                                                                     |
+| `07_display_overdrive_ready.png`                                    | 雷神ゲージ満タン（上部「満タン！ 必殺技を撃てる」）→ RAIJIN OVERDRIVE の呼びかけ。「今やること：4つの役割が全員 SYNC NOW」                                                       |
+| `08_display_overdrive_fired.png` / `08b_display_overdrive_beam.png` | 発射：HUD が薄くなり「RAIJIN OVERDRIVE」、8席→コアの収束 → コアからボスへの雷撃ビーム                                                                                            |
+| `09_display_results.png`                                            | 作戦記録：VICTORY、役割ごとの仕事量、「炉心停止の復旧 2/2（仲間 1 · sats 1）」（件数だけ・誰が払ったかは出さない）                                                               |
+| `10_phone_join.png` / `11_phone_lnurl_pending.png`                  | 参加：パイロット認証（無料）、ウォレットを開く・リンクをコピー・別端末用の個人 QR・残り秒数                                                                                      |
+| `12_phone_seat_select_callsign.png`                                 | 席選択とコールサイン（任意・大画面表示はオプトイン）                                                                                                                             |
+| `13_phone_power_a.png`                                              | 電力 A：レーンをドラッグして配分                                                                                                                                                 |
+| `14_phone_router_overload.png` / `15_phone_router_connected.png`    | 電力 B：過負荷の回路タブ、3×3 タイル、届いている経路の点灯 → 接続OK。LINK バー（あと何系統で LINK が伸びるか）                                                                   |
+| `15b_phone_router_blackout.png`                                     | 電力 B のブラックアウト：炉心タブが自動で開き「予備電源のみ（回復 30%）。あなたの回路修復で炉心が戻ります」                                                                      |
+| `18_phone_blackout_banner.png`                                      | 全員のスマホに赤い帯「炉心停止」：直し方①②と「21 sats で即時復旧（任意）」ボタン                                                                                                 |
+| `19_phone_grid_pulse_sheet.png`                                     | 送る前の条件シート：効果（即時復旧＋雷神ゲージ +20%、電力B が直しても同じ）・金額・受取先・VIRTUAL・残り回数                                                                     |
+| `20_phone_pulse_landed.png`                                         | 着金：「着金しました。炉心復旧 ＋ 雷神ゲージ +20%」                                                                                                                              |
+| `21_phone_overdrive_call.png`                                       | OVERDRIVE READY の SYNC NOW                                                                                                                                                      |
+| `22_phone_debrief.png`                                              | デブリーフ                                                                                                                                                                       |
+| `30`〜`32_operator_*.png`                                           | 運営：「今の状態」（段階・状況の一文・次に押すボタンと説明）・席・sats 欄・展示の設定・折りたたみの詳細設定                                                                      |
 
 整備の修理シーン（旧 `04`/`16`/`17`）は、この試合では脚が一度も損傷しなかったため撮れていない。新しいボルト操作（なぞって回す／Enter）は
 E2E の8席ソーティーで実行している。
@@ -180,6 +180,29 @@ E2E の8席ソーティーで実行している。
 `?capture=1` で一時停止の表示を隠す（大画面と同じ仕組み。会場では使わない）。撮影用の人の席は撮り終えたら運営 KICK で
 AUTO SUPPORT に渡す（何もしない人の席が残ると、それは「途中で操作をやめたパイロット」で、実際に負ける）。
 
+## ゲーム構成の整理：3幕・雷神ゲージ・sats は炉心停止のときだけ（2026-10-31、D-032）
+
+オーナー指摘「運営画面も大画面も何が起きていて何ができるのか分かりにくい。sats を送ると何が起きるのかも」への対応。
+
+### 自動テスト（合計 107 件 + E2E 4 件、すべて合格）
+
+| 対象                   | 件数 | 追加・変更した内容                                                                                                                                                        |
+| ---------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/game-engine` | 55   | 必殺技はゲージ満タンだけで READY（SYNC 0 でも）、炉心停止の復旧は電力B と sats が同じ +20%（AUTO は 0）、確認中に仲間が直しても支払い分は加算、運営の「炉心停止を起こす」 |
+| `apps/server` 統合     | 35   | 炉心停止中でなければ請求書を作らない（`NO_CRISIS`、DB に行も作らない）、運営 `TRIGGER_BLACKOUT` で起こすと送れる、live（LNbits）の各テストも炉心停止中に実施              |
+| Playwright E2E         | 4    | 炉心停止前はスマホに sats のボタンが無い → 運営「炉心停止を起こす」→ 大画面に炉心停止 → スマホ「21 sats で即時復旧」→ 条件シート → SETTLE → 着金・炉心復旧（1回だけ）     |
+
+### バランス（BOT 対戦、skill 0.85、各 20 試合）
+
+| クルー | STANDARD 勝利 | 必殺技/試合 | SHORT 勝利 |
+| ------ | ------------- | ----------- | ---------- |
+| 0人    | 0/20          | 0           | 0/20       |
+| 2人    | 15/20         | 1.2         | 19/20      |
+| 4人    | 20/20         | 1.55        | 20/20      |
+| 8人    | 20/20         | 2.0         | 20/20      |
+
+撮影（`capture-phase2.ts`）の試合も VICTORY（BOSS_DESTROYED）。炉心停止2回（1回目 sats、2回目 電力B の修復）。
+
 ## 受け入れ基準（仕様 §16）の現状（2026-10-30 更新）
 
 | 項目                                                       | 状態                                                                                                      |
@@ -191,7 +214,7 @@ AUTO SUPPORT に渡す（何もしない人の席が残ると、それは「途�
 | B 2〜8人で開始、AUTO SUPPORT を明示                        | 達成（BOT 対戦：2人 8/10・4人 10/10・8人 9/10 勝、0人は勝てない）                                         |
 | B 砲撃・防衛・電力配分・修理がサーバー上で状態変化         | 達成（スマホ画面からの操作がサーバーに記録されることを E2E で確認）                                       |
 | B WAVE1→2→BOSS→必殺技→勝敗→結果                            | 達成（OVERDRIVE の発射・失敗・AUTO 代理をテスト。キャプチャで演出確認）                                   |
-| B 役割の組み合わせで TEAM SYNC                             | 達成                                                                                                      |
+| B 役割の組み合わせで雷神ゲージ（連携）                     | 達成                                                                                                      |
 | B 連打/切断/再接続で不正な状態変化なし                     | 達成（冪等キー・レート制限・席保持・版番号。連打負荷試験で喪失0）                                         |
 | C k1 単回/期限切れ/無効署名を拒否、正しい署名でログイン    | 達成（テスト用ウォレット。**実ウォレットは未試験**：公開 https が必要）                                   |
 | C 認証に sats 支払いを要求しない                           | 達成                                                                                                      |

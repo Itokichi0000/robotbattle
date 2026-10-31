@@ -85,7 +85,6 @@ export function toPublicState(s: MatchState): PublicMatchState {
     // Only a live link is shown; an expired one is simply gone.
     link: s.link && s.link.expiresAt >= s.t ? structuredClone(s.link) : null,
     crisis: s.crisis ? structuredClone(s.crisis) : null,
-    overchargeUntil: s.overchargeUntil,
     stats: { ...s.stats },
     result: s.result,
     hints: {
@@ -99,14 +98,13 @@ export function toPublicState(s: MatchState): PublicMatchState {
       threatWarnMs: s.config.timings.threatWarnMs,
       laneMax: s.config.energy.laneMax,
       citiesLostForDefeat: s.config.cities.lostForDefeat,
-      overdriveSyncMin: s.config.overdrive.syncMin,
       overdriveCapacitorMin: s.config.overdrive.capacitorMin,
       overdriveWindowMs: s.config.overdrive.windowMs,
       repairCooldownMs: s.config.repair.cooldownMs,
       repairAmount: s.config.repair.amount,
       repairSlots: s.config.repair.slots,
       powerLaneMax: s.config.power.laneMax,
-      pulseGain: s.config.pulses.capacitorGain,
+      pulseGain: s.config.crisis.recoverGauge,
       pulseAmountSats: s.config.pulses.amountSats,
       linkWindowMs: s.config.sync.windowMs,
       linkDamagePerRole: s.config.sync.linkDamagePerRole,

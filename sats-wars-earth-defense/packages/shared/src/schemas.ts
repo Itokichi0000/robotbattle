@@ -143,6 +143,7 @@ export const operatorCommandSchema = z.discriminatedUnion('command', [
   z.object({ command: z.literal('PAYMENTS_ENABLE_LIVE'), confirm: z.string().max(16) }).strict(),
   z.object({ command: z.literal('PAYMENTS_DISABLE') }).strict(),
   z.object({ command: z.literal('SET_AUTO_SETTLE_VIRTUAL'), enabled: z.boolean() }).strict(),
+  z.object({ command: z.literal('TRIGGER_BLACKOUT') }).strict(),
 ]);
 
 export const syncFinisherReqSchema = z.object({ matchId: id, clientActionId: clientKey }).strict();

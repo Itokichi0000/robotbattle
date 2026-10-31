@@ -265,8 +265,6 @@ export interface MatchState {
   crisis: CrisisState | null;
   /** Waves whose scheduled crisis has already happened. */
   crisisFired: Array<'WAVE_1' | 'WAVE_2' | 'BOSS'>;
-  /** Energy regen is boosted until then (after a GRID PULSE or a crew re-route). */
-  overchargeUntil: number;
   spawn: { scriptedDone: number; nextSpawnAt: number };
   circuits: Record<PowerLane, CircuitState>;
   /** Next circuit overload (match clock); null when none is scheduled in this wave. */
@@ -355,7 +353,6 @@ export interface PublicMatchState {
   teamCapacitor: number;
   link: LinkState | null;
   crisis: CrisisState | null;
-  overchargeUntil: number;
   stats: MatchStats;
   result: MatchResult | null;
   /** Balance numbers clients need to draw gauges (costs, cooldowns). */
@@ -370,7 +367,6 @@ export interface PublicMatchState {
     threatWarnMs: number;
     laneMax: number;
     citiesLostForDefeat: number;
-    overdriveSyncMin: number;
     overdriveCapacitorMin: number;
     overdriveWindowMs: number;
     repairCooldownMs: number;

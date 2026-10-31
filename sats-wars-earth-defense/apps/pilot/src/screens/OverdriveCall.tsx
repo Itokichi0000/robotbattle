@@ -7,7 +7,7 @@ import { haptic, store, syncNow } from '../net';
 import { reasonText, useL } from '../ui';
 
 /**
- * RAIJIN OVERDRIVE (spec §6.7): when the boss fight has SYNC ≥ 80 and a full CAPACITOR,
+ * RAIJIN OVERDRIVE (spec §6.7, D-032): when the RAIJIN gauge is full in the boss fight,
  * every phone shows SYNC NOW. One pilot from each of the four systems must confirm within
  * 5 s; roles with nobody aboard are confirmed by the labelled AUTO SUPPORT.
  */

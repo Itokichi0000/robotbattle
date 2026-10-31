@@ -49,10 +49,10 @@ if (!login.ok()) throw new Error(`operator login failed: ${login.status()}`);
 const op = await opCtx.newPage();
 op.on('dialog', (d) => void d.accept());
 await op.goto('/operator/');
-await op.waitForSelector('text=MATCH CONTROL');
+await op.waitForSelector('text=今の状態 NOW');
 // Start clean: no demo bots left over from an earlier run, an empty mech.
 if (await op.getByLabel(/DEMO BOTS/).isChecked()) await op.getByLabel(/DEMO BOTS/).uncheck();
-await op.getByRole('button', { name: /^RESET$/ }).click();
+await op.getByRole('button', { name: /RESET/ }).click();
 await sleep(1_500);
 
 async function state(): Promise<PublicMatchState> {
@@ -235,11 +235,11 @@ while (Date.now() < deadline) {
     await sleep(1_500);
     await engineer.screenshot({ path: path.join(out, '18_phone_blackout_banner.png') });
     await frozenShot('05_display_blackout.png');
-    await engineer.getByRole('button', { name: /GRID PULSE で即時復旧/ }).click();
+    await engineer.getByRole('button', { name: /sats で即時復旧/ }).click();
     await sleep(800);
     await engineer.screenshot({ path: path.join(out, '19_phone_grid_pulse_sheet.png') });
     const pulses = s.stats.pulses;
-    await engineer.getByRole('button', { name: /VIRTUAL パルスを申請/ }).click();
+    await engineer.getByRole('button', { name: /sats を送る（VIRTUAL/ }).click();
     for (let i = 0; i < 40 && (await state()).stats.pulses === pulses; i++) await sleep(250);
     await sleep(400);
     await engineer.screenshot({ path: path.join(out, '20_phone_pulse_landed.png') });

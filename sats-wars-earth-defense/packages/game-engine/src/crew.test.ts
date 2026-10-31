@@ -131,7 +131,7 @@ describe('REACTOR BLACKOUT', () => {
       patch(c);
     });
 
-  it('drops regen to reserve; POWER B re-routes it and the crew earns an OVERCHARGE', () => {
+  it('drops regen to reserve; POWER B re-routes it and the crew earns the gauge', () => {
     const sim = new Sim({ config: blackout() });
     sim.join('POWER_ROUTER');
     sim.launch();
@@ -159,15 +159,19 @@ describe('REACTOR BLACKOUT', () => {
     });
     expect(ok.accepted).toBe(true);
     expect(sim.state.crisis).toBeNull();
-    expect(sim.of('crisis_resolved').at(-1)).toMatchObject({ by: 'ROUTE', seatId: 'POWER_ROUTER' });
-    expect(sim.state.overchargeUntil).toBe(sim.t + PRESETS.TEST.overcharge.ms);
+    // The crew's fix pays the RAIJIN gauge, exactly what a GRID PULSE would.
+    expect(sim.of('crisis_resolved').at(-1)).toMatchObject({
+      by: 'ROUTE',
+      seatId: 'POWER_ROUTER',
+      gain: PRESETS.TEST.crisis.recoverGauge,
+    });
     expect(sim.state.stats.blackoutsByRoute).toBe(1);
     // Only once per wave.
     sim.wait(5_000);
     expect(sim.state.crisis).toBeNull();
   });
 
-  it('AUTO SUPPORT restores an unflown POWER B later, without the OVERCHARGE', () => {
+  it('AUTO SUPPORT restores an unflown POWER B later, without the gauge reward', () => {
     const sim = new Sim({ config: blackout(), autoSupport: true });
     sim.join('GUNNER_L');
     sim.launch();
@@ -177,7 +181,7 @@ describe('REACTOR BLACKOUT', () => {
     );
     sim.wait(PRESETS.TEST.crisis.autoFixMs);
     expect(sim.state.crisis).toBeNull();
-    expect(sim.of('crisis_resolved').at(-1)).toMatchObject({ by: 'AUTO', overchargeUntil: null });
+    expect(sim.of('crisis_resolved').at(-1)).toMatchObject({ by: 'AUTO', gain: 0 });
   });
 
   it('left unresolved, it costs core HP and drains every lane', () => {
@@ -203,6 +207,7 @@ describe('REACTOR BLACKOUT', () => {
     sim.join('GUNNER_L');
     sim.launch();
     sim.wait(3_100);
+    sim.state.teamCapacitor = 10;
     sim.cmd({
       type: 'SATS_PULSE',
       t: sim.t,
@@ -214,6 +219,8 @@ describe('REACTOR BLACKOUT', () => {
     expect(sim.state.crisis).toBeNull();
     expect(sim.of('sats_pulse_settled').at(-1)).toMatchObject({ crisis: true, settleMs: 1_840 });
     expect(sim.of('crisis_resolved').at(-1)).toMatchObject({ by: 'PULSE', seatId: 'GUNNER_L' });
+    // Same reward as the crew's re-route, paid once (not once for the pulse and again for the fix).
+    expect(sim.state.teamCapacitor).toBe(10 + PRESETS.TEST.crisis.recoverGauge);
     expect(sim.state.stats.blackoutsByPulse).toBe(1);
     // A VIRTUAL pulse never shows a settle time (no money moved).
     sim.cmd({
@@ -227,16 +234,34 @@ describe('REACTOR BLACKOUT', () => {
     expect(sim.of('sats_pulse_settled').at(-1)).toMatchObject({ crisis: false, settleMs: null });
   });
 
-  it('overcharge really speeds up energy', () => {
-    const regen = (overcharged: boolean) => {
-      const sim = new Sim({ config: sturdy() });
-      sim.join('GUNNER_L');
-      sim.launch();
-      sim.state.energy = { weapon: 0, shield: 0, mobility: 0, repair: 0 };
-      if (overcharged) sim.state.overchargeUntil = sim.t + 60_000;
-      sim.wait(1_000);
-      return sim.state.energy.shield;
-    };
-    expect(regen(true) / regen(false)).toBeCloseTo(PRESETS.TEST.overcharge.regenFactor, 1);
+  it('a pulse that settles after the crew already fixed it still pays the gauge', () => {
+    const sim = new Sim({ config: blackout() });
+    sim.join('POWER_ROUTER');
+    sim.launch();
+    sim.wait(3_100);
+    sim.act('POWER_ROUTER', {
+      actionType: 'BLACKOUT_ROUTE',
+      payload: { rotations: solvePuzzle(sim.state.crisis!.puzzle)! },
+    });
+    expect(sim.state.crisis).toBeNull();
+    sim.state.teamCapacitor = 30;
+    sim.cmd({ type: 'SATS_PULSE', t: sim.t, intentId: 'pi_late', seatId: null, virtual: true });
+    expect(sim.state.teamCapacitor).toBe(30 + PRESETS.TEST.crisis.recoverGauge);
+    expect(sim.of('sats_pulse_settled').at(-1)).toMatchObject({ crisis: false });
+  });
+
+  it('staff can start a blackout on demand (once at a time, only in a fight)', () => {
+    const sim = new Sim({ config: sturdy() });
+    sim.join('POWER_ROUTER');
+    expect(sim.cmd({ type: 'TRIGGER_BLACKOUT', t: sim.t }).outcome).toMatchObject({
+      ok: false,
+      reasonCode: 'NOT_IN_COMBAT',
+    });
+    sim.launch();
+    expect(sim.cmd({ type: 'TRIGGER_BLACKOUT', t: sim.t }).outcome).toMatchObject({ ok: true });
+    expect(sim.state.crisis?.kind).toBe('BLACKOUT');
+    expect(sim.cmd({ type: 'TRIGGER_BLACKOUT', t: sim.t }).outcome).toMatchObject({ ok: false });
+    // It replaces this wave's scheduled blackout instead of stacking a second one.
+    expect(sim.state.crisisFired).toContain(sim.state.phase);
   });
 });

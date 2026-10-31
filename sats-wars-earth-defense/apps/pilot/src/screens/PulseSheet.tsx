@@ -99,8 +99,8 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
         i.applied === 'applied' ? (
           <p className="pulse-ok">
             {L(
-              `共有エネルギー +${q?.capacitorGain ?? 20} を炉心へ送りました`,
-              `Shared energy +${q?.capacitorGain ?? 20} delivered to the core`,
+              `着金しました。炉心復旧 ＋ 雷神ゲージ +${q?.capacitorGain ?? 20}%`,
+              `Landed: reactor restored, RAIJIN gauge +${q?.capacitorGain ?? 20}%`,
             )}
           </p>
         ) : (
@@ -125,15 +125,16 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
     body = (
       <>
         <p className="pulse-what">
-          {q?.crisis
+          {L(
+            `送ると止まった炉心がすぐ復旧し、雷神ゲージ +${q?.capacitorGain ?? 20}%。電力B が回路をつないでも同じ効果なので、払わなくても勝てます。`,
+            `Restores the stopped reactor at once and adds +${q?.capacitorGain ?? 20}% to the RAIJIN gauge. POWER B's repair does the same, so you can win without paying.`,
+          )}
+          {q && !q.crisis
             ? L(
-                `炉心ブラックアウトを即時復旧し、しばらくエネルギー回復アップ（OVERCHARGE）、CHARGE +${q.capacitorGain}。払わなくても電力Bの回路修復で復旧できます。`,
-                `Restores the blacked-out reactor at once, then OVERCHARGE and CHARGE +${q.capacitorGain}. The crew can also fix it without paying (POWER B).`,
+                ' いまは炉心停止中ではないので送れません。',
+                ' There is no blackout right now, so nothing to send.',
               )
-            : L(
-                `仲間の共同メカへ送る共有エネルギー。TEAM CAPACITOR +${q?.capacitorGain ?? 20} と、しばらくエネルギー回復アップ（OVERCHARGE）。支払わなくても最後まで遊べます。`,
-                `Shared energy for the crew's mech: TEAM CAPACITOR +${q?.capacitorGain ?? 20} and a short OVERCHARGE. You can play to the end without paying.`,
-              )}
+            : null}
         </p>
         <dl className="pulse-terms">
           <div>
@@ -168,7 +169,7 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
         {err ? <p className="err">{L(err.ja, err.en)}</p> : null}
         <button
           className={`btn primary ${live ? 'action' : 'ally'}`}
-          disabled={busy || !q?.enabled || !q.inCombat || q.remaining <= 0 || q.capacitorFull}
+          disabled={busy || !q?.enabled || !q.inCombat || q.remaining <= 0 || !q.crisis}
           onClick={async () => {
             setBusy(true);
             await requestPulse();
@@ -184,18 +185,21 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
                     `${q?.amountSats ?? 21} sats を支払う（実際の支払い）`,
                     `Pay ${q?.amountSats ?? 21} sats (real payment)`,
                   )
-                : L('VIRTUAL パルスを申請（テスト・無料）', 'Request a VIRTUAL pulse (free test)')}
+                : L(
+                    `${q?.amountSats ?? 21} sats を送る（VIRTUAL・お金は動きません）`,
+                    `Send ${q?.amountSats ?? 21} sats (VIRTUAL, no real money)`,
+                  )}
             <small>
               {!q?.enabled
                 ? L('現在停止中', 'Currently off')
                 : !q.inCombat
                   ? L('搭乗中の戦闘中だけ', 'Only aboard, during combat')
-                  : q.capacitorFull
-                    ? L(
-                        'CHARGE 満タン・OVERCHARGE 中（今は不要）',
-                        'Full and overcharged (not needed now)',
-                      )
-                    : `+${q.capacitorGain} CAPACITOR`}
+                  : !q.crisis
+                    ? L('炉心停止のときだけ送れます', 'Only during a blackout')
+                    : L(
+                        `炉心復旧 ＋ 雷神ゲージ +${q.capacitorGain}%`,
+                        `Reactor back + gauge +${q.capacitorGain}%`,
+                      )}
             </small>
           </span>
         </button>
@@ -215,8 +219,8 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
           <IconBolt size={18} />
           <b>
             {p.quote?.crisis
-              ? L('GRID PULSE — 炉心を即時復旧', 'GRID PULSE — restore the reactor')
-              : L('共有エネルギーパルス', 'SHARED ENERGY PULSE')}
+              ? L('sats で炉心を即時復旧', 'Restore the reactor with sats')
+              : L('sats（炉心停止のときだけ）', 'Sats (blackouts only)')}
           </b>
           <button className="ph-lang" onClick={close} aria-label={L('閉じる', 'Close')}>
             ×

@@ -152,28 +152,27 @@ export interface GameConfig {
     decayPerSec: number;
     decayAfterMs: number;
   };
+  /**
+   * The RAIJIN gauge (雷神ゲージ, D-032): the one team meter. Hits, blocks and LINKs fill it;
+   * full in the boss fight opens RAIJIN OVERDRIVE. (Kept under its old name `capacitor`.)
+   */
   capacitor: {
     perHit: number;
     perBlock: number;
     perPerfect: number;
-    perCombo: number;
     max: number;
   };
   overdrive: {
-    syncMin: number;
     capacitorMin: number;
     damage: number;
     windowMs: number;
     /** AUTO SUPPORT confirms roles with nobody aboard this long after the window opens. */
     autoConfirmMs: number;
-    /** TEAM SYNC after a successful OVERDRIVE (the crew starts building again). */
-    syncAfter: number;
-    /** Share of CAPACITOR kept when the window closes incomplete. */
+    /** Share of the RAIJIN gauge kept when the window closes incomplete. */
     failCapacitorKeep: number;
   };
   /** Shared energy pulses (Lightning, spec §8.2). Fixed size: more money never means more power. */
   pulses: {
-    capacitorGain: number;
     amountSats: number;
     perPilotPerMatch: number;
     cooldownMs: number;
@@ -190,9 +189,12 @@ export interface GameConfig {
     failDamage: number;
     /** Energy regen while the reactor is down runs on reserve at this fraction (0 = dark). */
     regenFactor: number;
+    /**
+     * RAIJIN gauge for ending a blackout. A GRID PULSE (sats) and POWER B's re-route pay the
+     * same, so money is a shortcut, never extra power. AUTO SUPPORT's rescue pays nothing.
+     */
+    recoverGauge: number;
   };
-  /** After a GRID PULSE or a crew re-route of the blackout: boosted regen for a while. */
-  overcharge: { ms: number; regenFactor: number };
   auto: {
     gunnerEveryMs: number;
     gunnerDamageRatio: number;
@@ -302,14 +304,12 @@ const STANDARD: GameConfig = {
     decayPerSec: 0.4,
     decayAfterMs: 8_000,
   },
-  capacitor: { perHit: 2, perBlock: 3, perPerfect: 5, perCombo: 4, max: 100 },
+  capacitor: { perHit: 2, perBlock: 3, perPerfect: 5, max: 100 },
   overdrive: {
-    syncMin: 80,
     capacitorMin: 100,
     damage: 300,
     windowMs: 5_000,
     autoConfirmMs: 1_200,
-    syncAfter: 40,
     failCapacitorKeep: 0.5,
   },
   crisis: {
@@ -318,10 +318,9 @@ const STANDARD: GameConfig = {
     autoFixMs: 15_000,
     failDamage: 120,
     regenFactor: 0.3,
+    recoverGauge: 20,
   },
-  overcharge: { ms: 10_000, regenFactor: 1.8 },
   pulses: {
-    capacitorGain: 20,
     amountSats: 21,
     perPilotPerMatch: 3,
     cooldownMs: 30_000,

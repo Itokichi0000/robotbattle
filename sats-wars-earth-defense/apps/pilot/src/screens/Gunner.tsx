@@ -71,7 +71,10 @@ export function Gunner({ seat }: { seat: GunnerSeatId }) {
           });
         }
         if (e.type === 'team_combo')
-          setMsg({ text: `LINK ×${e.link}  +${e.gain} SYNC`, tone: 'ok' });
+          setMsg({
+            text: L(`連携 ×${e.link} 雷神ゲージ +${e.gain}`, `LINK ×${e.link} gauge +${e.gain}`),
+            tone: 'ok',
+          });
       }),
     [seat, L],
   );

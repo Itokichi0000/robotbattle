@@ -72,9 +72,10 @@
 `shield_deployed` `threat_blocked` `threat_intercepted` `incoming_hit` `city_damaged` `city_lost` `part_damaged`
 `part_repaired` `team_combo` `match_result` `power_routed` `circuit_overload` `circuit_restored` `repair_started`
 `overdrive_ready` `overdrive_window` `overdrive_sync` `overdrive_fired` `overdrive_failed` `sats_pulse_settled`。
-`crisis_started` `crisis_resolved { by: PULSE | ROUTE | AUTO }` `crisis_failed` も配信。`weapon_fired` は `perfect` と `link`、
-`team_combo` は `link`（2〜4）を持つ。公開状態に `link`（現在の LINK）・`crisis`（炉心パズル含む）・`overchargeUntil`。
-`sats_pulse_settled` は `{ seatId, gain, virtual, settleMs, crisis, overchargeUntil }`（金額・支払者の情報は載せない。
+`crisis_started` `crisis_resolved { by: PULSE | ROUTE | AUTO, gain }` `crisis_failed` も配信（`gain` は雷神ゲージの加算。AUTO は 0）。
+`weapon_fired` は `perfect` と `link`、`team_combo` は `link`（2〜4）と `gain`（雷神ゲージに加わる量）を持つ。
+公開状態に `link`（現在の LINK）・`crisis`（炉心パズル含む）。雷神ゲージは `teamCapacitor`（0〜100、D-032）。
+`sats_pulse_settled` は `{ seatId, gain, virtual, settleMs, crisis }`（金額・支払者の情報は載せない。
 `settleMs` は実決済だけの「請求→着金」実測）。
 
 ## HTTP
@@ -101,7 +102,9 @@
 
 運営コマンド（`operator:command`）：`ATTRACT` `OPEN_LOBBY` `START` `SKIP_DEPLOY` `PAUSE` `RESUME` `END` `NEXT_ROUND` `RESET`
 `SET_AUTO_SUPPORT` `SET_PRESET` `KICK_SEAT` `SET_DISPLAY` `SET_DEMO_BOTS` `SET_HIDE_CALLSIGNS` `SANDBOX_SETTLE` `PAYMENTS_CHECK`
-`PAYMENTS_ENABLE_LIVE { confirm: 'LIVE' }` `PAYMENTS_DISABLE`。すべて監査ログに残る。
+`PAYMENTS_ENABLE_LIVE { confirm: 'LIVE' }` `PAYMENTS_DISABLE` `SET_AUTO_SETTLE_VIRTUAL { enabled }`（sandbox のみ）
+`TRIGGER_BLACKOUT`（戦闘中に炉心停止を今すぐ起こす。その幕の予定分の代わり、D-032）。すべて監査ログに残る。
+パルスの請求書は炉心停止中だけ作る（それ以外は 409 `NO_CRISIS`）。
 
 認証と決済の詳細は [`03_auth_and_payment.md`](03_auth_and_payment.md)。
 

@@ -475,6 +475,18 @@ export class Realtime {
         return this.payments.enableLive(cmd.confirm);
       case 'PAYMENTS_DISABLE':
         return this.payments.disable();
+      case 'TRIGGER_BLACKOUT': {
+        const r = rt.command({ type: 'TRIGGER_BLACKOUT' });
+        const ok = r.outcome.kind === 'control' && r.outcome.ok;
+        return {
+          ok,
+          message: ok
+            ? 'blackout started'
+            : rt.state.crisis
+              ? 'a blackout is already on'
+              : `blackout only during a wave or the boss fight (now ${rt.state.phase})`,
+        };
+      }
       case 'SET_AUTO_SETTLE_VIRTUAL':
         return this.payments.setAutoSettleVirtual(cmd.enabled);
     }

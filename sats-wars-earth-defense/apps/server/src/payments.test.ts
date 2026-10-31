@@ -11,7 +11,7 @@ import { collect, cookiePair, emitAck, eventually, key, TestServer } from './tes
 import { signedCallback } from './testWallet';
 
 /**
- * Shared energy pulses (spec §8, Phase 4 done criteria): one intent adds CAPACITOR exactly
+ * Shared energy pulses (spec §8, Phase 4 done criteria, D-032): one intent lands exactly
  * once, payment is never required to play, sandbox never pretends to be real money, and live
  * mode needs staff approval and backend confirmation.
  */
@@ -35,10 +35,12 @@ async function operator() {
   return (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
 }
 
-async function launch(op: (c: object) => Promise<OperatorCommandResult>) {
+/** Into the fight, with a REACTOR BLACKOUT on: the only time sats can be sent (D-032). */
+async function launch(op: (c: object) => Promise<OperatorCommandResult>, blackout = true) {
   expect((await op({ command: 'START' })).ok).toBe(true);
   expect((await op({ command: 'SKIP_DEPLOY' })).ok).toBe(true);
   srv.advance(500);
+  if (blackout) expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
 }
 
 async function intent(cookie: string) {
@@ -51,7 +53,7 @@ async function intent(cookie: string) {
 }
 
 describe('sandbox (VIRTUAL) pulses', () => {
-  it('quote → intent → staff settles → CAPACITOR +20 exactly once, owner notified', async () => {
+  it('quote → intent → staff settles → blackout ends, RAIJIN gauge +20 exactly once, owner notified', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
     const phone = await seatedInCombat(cookie);
@@ -75,6 +77,7 @@ describe('sandbox (VIRTUAL) pulses', () => {
       capacitorGain: 20,
       remaining: 3,
       inCombat: true,
+      crisis: true,
     });
     expect(String(quote.recipient)).toMatch(/VIRTUAL/);
 
@@ -93,13 +96,15 @@ describe('sandbox (VIRTUAL) pulses', () => {
     const cap0 = srv.runtime.state.teamCapacitor;
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(true);
     expect(srv.runtime.state.teamCapacitor).toBe(Math.min(100, cap0 + 20));
+    expect(srv.runtime.state.crisis).toBeNull();
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(false);
     await eventually(() => statuses.some((s) => s.status === 'settled' && s.applied === 'applied'));
     const pulse = await eventually(() => events.find((e) => e.type === 'sats_pulse_settled'));
     expect(pulse.payload).toMatchObject({ seatId: 'GUNNER_L', gain: 20, virtual: true });
     expect(events.filter((e) => e.type === 'sats_pulse_settled')).toHaveLength(1);
 
-    // Cooldown: 30 s between pulses per pilot.
+    // Cooldown: 30 s between pulses per pilot (checked before the blackout rule).
+    expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
     expect((await intent(cookie)).body.error).toBe('PULSE_COOLDOWN');
     const view = (await (
       await srv.fetch(`/api/payments/intent/${first.body.intentId}`, { cookie })
@@ -114,6 +119,7 @@ describe('sandbox (VIRTUAL) pulses', () => {
     const op = await operator();
     await launch(op);
     for (let i = 0; i < 3; i++) {
+      if (!srv.runtime.state.crisis) await op({ command: 'TRIGGER_BLACKOUT' });
       const r = await intent(cookie);
       expect(r.status).toBe(200);
       await op({ command: 'SANDBOX_SETTLE', intentId: r.body.intentId });
@@ -121,30 +127,31 @@ describe('sandbox (VIRTUAL) pulses', () => {
         .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
         .run();
     }
+    await op({ command: 'TRIGGER_BLACKOUT' });
     expect((await intent(cookie)).body.error).toBe('PULSE_LIMIT');
   });
 
-  it('never sells a pulse that would add nothing; a blackout always makes it useful', async () => {
+  it('no invoice outside a blackout: sats have one job, and there is nothing to fix', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
     await seatedInCombat(cookie);
     const op = await operator();
-    await launch(op);
-    const st = srv.runtime.state;
+    await launch(op, false);
     const quote = async () =>
       (await (await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })).json()) as {
-        capacitorFull: boolean;
         crisis: boolean;
       };
-    // CHARGE full alone still leaves the OVERCHARGE to gain.
-    st.teamCapacitor = st.config.capacitor.max;
-    expect((await quote()).capacitorFull).toBe(false);
-    // Full and already overcharged: nothing to buy.
-    st.overchargeUntil = st.t + 60_000;
-    expect((await quote()).capacitorFull).toBe(true);
+    expect((await quote()).crisis).toBe(false);
     const r = await intent(cookie);
     expect(r.status).toBe(409);
-    expect(r.body.error).toBe('CAPACITOR_FULL');
+    expect(r.body.error).toBe('NO_CRISIS');
+    expect(srv.built.db.prepare('SELECT COUNT(*) AS n FROM payment_intents').get()).toEqual({
+      n: 0,
+    });
+    // Staff can start one on demand (the GRID PULSE scene for visitors); then it can be sent.
+    expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
+    expect((await quote()).crisis).toBe(true);
+    expect((await intent(cookie)).status).toBe(200);
   });
 
   it('a pulse during a REACTOR BLACKOUT restores it; staff can let VIRTUAL pulses confirm themselves', async () => {
@@ -152,23 +159,17 @@ describe('sandbox (VIRTUAL) pulses', () => {
     const cookie = await srv.demoGuest();
     await seatedInCombat(cookie);
     const op = await operator();
-    await launch(op);
+    await launch(op, false);
     const display = await srv.connect('/display');
     const events = collect<MatchEventMsg>(display, 'match:event');
-    // Force the blackout now (normally scheduled mid-wave).
+    // The scheduled blackout (forced to the wave start here).
     srv.runtime.state.config.crisis.atMs.WAVE_1 = 0;
     srv.advance(200);
     expect(srv.runtime.state.crisis?.kind).toBe('BLACKOUT');
-    // Even with CHARGE full, a blackout makes the pulse worth it.
-    srv.runtime.state.teamCapacitor = srv.runtime.state.config.capacitor.max;
-    srv.runtime.state.overchargeUntil = srv.runtime.state.t + 60_000;
     const q = (await (
       await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })
-    ).json()) as {
-      crisis: boolean;
-      capacitorFull: boolean;
-    };
-    expect(q).toMatchObject({ crisis: true, capacitorFull: false });
+    ).json()) as { crisis: boolean };
+    expect(q).toMatchObject({ crisis: true });
     expect((await op({ command: 'SET_AUTO_SETTLE_VIRTUAL', enabled: true })).ok).toBe(true);
     const r = await intent(cookie);
     expect(r.status).toBe(200);

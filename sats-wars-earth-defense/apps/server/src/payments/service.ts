@@ -10,9 +10,10 @@ import type { PaymentMode, PaymentProvider } from './provider';
 import type { SandboxPaymentProvider } from './sandbox';
 
 /**
- * Shared energy pulses (spec §8): a fixed-size Lightning payment that adds a fixed amount
- * to TEAM CAPACITOR. Rules that keep money from deciding the fight:
- *   - one size only (default 21 sats → +20), per-pilot cooldown and per-match caps
+ * Shared energy pulses (spec §8, D-032): a fixed-size Lightning payment that ends a REACTOR
+ * BLACKOUT at once and adds the same RAIJIN gauge the crew's own re-route would. Rules that
+ * keep money from deciding the fight:
+ *   - only during a blackout; one size only (default 21 sats → +20), cooldown and caps
  *   - settlement is confirmed by asking the backend; webhooks are only a hint
  *   - each intent applies at most once (DB status transition + engine intent id)
  *   - a payment that settles after its round is recorded as unapplied, never carried over
@@ -117,17 +118,16 @@ export class PaymentService {
       perPilot: p.perPilotPerMatch,
       cooldownMs: p.cooldownMs,
       maxPerMatch: p.maxPerMatch,
-      gain: p.capacitorGain,
+      gain: this.deps.runtime.state.config.crisis.recoverGauge,
     };
   }
 
   /**
-   * A pulse must do something: end a blackout, add CHARGE, or start an OVERCHARGE. Only when
-   * CHARGE is full and the reactor is already overcharged would it add nothing.
+   * Sats have one job (D-032): end a REACTOR BLACKOUT at once. Outside a blackout there is
+   * nothing to pay for, so no invoice is made.
    */
   private pulseUseful(): boolean {
-    const s = this.deps.runtime.state;
-    return !!s.crisis || s.teamCapacitor < s.config.capacitor.max || s.t >= s.overchargeUntil;
+    return !!this.deps.runtime.state.crisis;
   }
 
   /** Everything the phone needs to show before the pilot decides (amount, receiver, limits). */
@@ -149,8 +149,7 @@ export class PaymentService {
       remaining: Math.max(0, lim.perPilot - mine.n),
       cooldownUntil: lastAt ? new Date(lastAt + lim.cooldownMs).toISOString() : null,
       inCombat: isCombatPhase(s.phase) && this.deps.runtime.seatOf(pilot.id) !== null,
-      capacitorFull: !this.pulseUseful(),
-      crisis: !!s.crisis,
+      crisis: this.pulseUseful(),
     };
   }
 
@@ -192,8 +191,8 @@ export class PaymentService {
       )
       .get(s.matchId) as { n: number };
     if (total.n >= lim.maxPerMatch) return { ok: false, code: 'PULSE_MATCH_LIMIT' };
-    // Never sell a pulse that cannot add anything (real money for no effect).
-    if (!this.pulseUseful()) return { ok: false, code: 'CAPACITOR_FULL' };
+    // Only during a blackout: never sell a pulse when there is nothing to fix.
+    if (!this.pulseUseful()) return { ok: false, code: 'NO_CRISIS' };
 
     const intentId = `pi_${randomUUID()}`;
     this.creating.add(pilot.id);

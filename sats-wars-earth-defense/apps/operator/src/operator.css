@@ -258,3 +258,155 @@ td em {
   display: block;
   margin-top: 4px;
 }
+
+/* ------------------------------------------------ D-032: guided "now" console */
+.op header .mode {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+}
+.op header .mode.ally {
+  color: var(--sw-ally);
+}
+.op header .mode.danger {
+  color: var(--sw-danger);
+}
+.op header .mode.muted {
+  color: var(--sw-muted);
+}
+.now {
+  margin-bottom: 16px;
+}
+.now .flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.now .flow li {
+  counter-increment: step;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--sw-muted);
+  border: 1px solid rgba(68, 96, 112, 0.5);
+}
+.now .flow li::before {
+  content: counter(step) '. ';
+}
+.now .flow li.past {
+  color: var(--sw-text);
+  border-color: var(--sw-line);
+}
+.now .flow li.on {
+  color: var(--sw-void);
+  background: var(--sw-action);
+  border-color: var(--sw-action);
+  font-weight: 700;
+}
+.now .state b {
+  display: block;
+  font-size: 28px;
+  letter-spacing: 0.04em;
+}
+.now .state p {
+  margin: 6px 0 0;
+  font-size: 16px;
+  color: var(--sw-muted);
+  line-height: 1.5;
+}
+.now .state.crisis b {
+  color: var(--sw-danger);
+}
+.now .acts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.now .act {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.now .act .b {
+  min-height: 56px;
+  font-size: 17px;
+}
+.now .act.primary .b {
+  min-height: 64px;
+  font-size: 20px;
+}
+.now .act span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sw-muted);
+}
+.now .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(68, 96, 112, 0.4);
+}
+.now .toast {
+  font-size: 14px;
+  color: var(--sw-action);
+}
+.opts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.opts label.toggle {
+  align-items: flex-start;
+}
+.opts label.toggle input {
+  margin-top: 2px;
+}
+.opts b {
+  display: block;
+  font-size: 15px;
+}
+.opts small {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sw-muted);
+}
+.opts + .kv {
+  margin-top: 16px;
+}
+.payments .explain {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.payments .explain strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--sw-danger);
+}
+.advanced {
+  margin-top: 18px;
+}
+.advanced summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 14px;
+  color: var(--sw-muted);
+  letter-spacing: 0.06em;
+  min-height: 44px;
+}
+.advanced[open] summary {
+  margin-bottom: 12px;
+}
+.panel td:nth-child(4) {
+  white-space: nowrap;
+}

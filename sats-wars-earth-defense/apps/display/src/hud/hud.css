@@ -448,6 +448,56 @@
   font-size: 18px;
   color: var(--sw-muted);
 }
+.mission.how {
+  top: 250px;
+  width: 470px;
+  background: rgba(6, 12, 20, 0.8);
+}
+.mission.how ol {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.mission.how li {
+  position: relative;
+  padding: 8px 0 8px 46px;
+  counter-increment: step;
+}
+.mission.how li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 10px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--sw-action);
+  color: var(--sw-action);
+  font-weight: 700;
+}
+.mission.how li b,
+.mission.how .sats b {
+  display: block;
+  font-size: 21px;
+}
+.mission.how li span,
+.mission.how .sats span {
+  display: block;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--sw-muted);
+}
+.mission.how .sats {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--sw-ally);
+  background: rgba(16, 28, 40, 0.8);
+}
+.mission.how .sats b {
+  color: var(--sw-ally);
+}
 .pilots-count {
   position: absolute;
   right: 64px;
@@ -1054,4 +1104,196 @@
 /* The feed now sits above the LINK meter. */
 .feed {
   bottom: 186px;
+}
+
+/* ------------------------------------------- D-032: three acts, one gauge, plain goals */
+/* Top bar: act + time + cities + mech + the RAIJIN gauge (the only team meter). */
+.topbar .wave {
+  min-width: 300px;
+}
+.topbar .wave .v {
+  font-size: 30px;
+  letter-spacing: 0.04em;
+}
+.topbar .meter.gauge {
+  flex: 1;
+  width: auto;
+  min-width: 420px;
+  padding-right: 32px;
+  border-right: 0;
+}
+.topbar .meter.gauge .k {
+  color: var(--sw-action);
+}
+.topbar .meter.gauge .v {
+  color: var(--sw-action);
+  font-size: 32px;
+}
+.topbar .meter.gauge .bar {
+  height: 12px;
+}
+.topbar .meter.gauge .hint {
+  margin-top: 4px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  color: var(--sw-muted);
+}
+.topbar .meter.gauge.full .hint {
+  color: var(--sw-action);
+}
+.topbar .meter.gauge.full .bar > i {
+  box-shadow: 0 0 14px var(--sw-action);
+}
+
+/* Mission card: the act's goal and "what to do now", top left. */
+.mission-card {
+  position: absolute;
+  left: 28px;
+  top: 100px;
+  width: 480px;
+  padding: 16px 20px 18px;
+  background: rgba(6, 12, 20, 0.84);
+  border: 1px solid var(--sw-line-a);
+  --sw-frame-accent: var(--sw-action);
+}
+.mission-card .act {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.mission-card .act .no {
+  font-size: 14px;
+  letter-spacing: 0.24em;
+  color: var(--sw-action);
+}
+.mission-card .act b {
+  font-size: 30px;
+  letter-spacing: 0.06em;
+}
+.mission-card .act .en {
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  color: var(--sw-muted);
+}
+.mission-card .goal {
+  margin: 8px 0 12px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--sw-text);
+}
+.mission-card .now {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--now, var(--sw-ally));
+  background: rgba(16, 28, 40, 0.8);
+}
+.mission-card .now .lbl {
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  color: var(--now, var(--sw-ally));
+}
+.mission-card .now .txt {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.mission-card .now.danger {
+  --now: var(--sw-danger);
+}
+.mission-card .now.bolt,
+.mission-card .now.action {
+  --now: var(--sw-action);
+}
+
+/* Act intro: name and goal, large, for a few seconds when an act begins. */
+.act-intro {
+  position: absolute;
+  left: 50%;
+  top: 330px;
+  transform: translateX(-50%);
+  width: 1000px;
+  padding: 26px 40px 30px;
+  text-align: center;
+  background: rgba(4, 9, 15, 0.82);
+  border-top: 2px solid var(--sw-action);
+  border-bottom: 2px solid var(--sw-action);
+  animation: act-intro-in 420ms var(--sw-ease);
+}
+.act-intro .no {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.4em;
+  color: var(--sw-action);
+}
+.act-intro b {
+  display: block;
+  margin-top: 6px;
+  font-size: 76px;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+}
+.act-intro .en {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.4em;
+  color: var(--sw-muted);
+}
+.act-intro p {
+  margin: 16px 0 0;
+  font-size: 26px;
+  line-height: 1.5;
+}
+@keyframes act-intro-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .act-intro {
+    animation: none;
+  }
+}
+
+/* Blackout: the two numbered ways out and the shared reward. */
+.crisis-banner .way .n {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid currentColor;
+  font-weight: 700;
+}
+.crisis-banner .way small {
+  display: block;
+}
+.crisis-banner .reward {
+  margin-top: 12px;
+  font-size: 18px;
+  text-align: center;
+  color: var(--sw-action);
+  letter-spacing: 0.04em;
+}
+.crisis-banner {
+  width: 1000px;
+}
+.crisis-banner .title b {
+  white-space: nowrap;
+}
+.crisis-banner .title .ja {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+.crisis-banner .way {
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+.mission-card .act {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.mission-card .act b {
+  white-space: nowrap;
 }

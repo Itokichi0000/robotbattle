@@ -28,6 +28,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { CAPTURE, FX_TIME_SCALE } from '../capture';
 import { store } from '../net';
 import { finisher } from '../scene/cameraBus';
+import { actOf, ACTS, nowLine, type ActPhase } from './acts';
 import { Lobby } from './Lobby';
 import { Radar } from './Radar';
 import { Results, REASON_LABEL } from './Results';
@@ -62,17 +63,18 @@ function threatTargetLabel(th: ThreatState): { ja: string; en: string } {
   return { ja: `RAIJIN ${p.labelJa}`, en: `RAIJIN ${p.labelEn}` };
 }
 
+/**
+ * Four numbers only (D-032): which act and how long, cities, the mech, and the one team gauge.
+ * Everything else appears when it matters (mission card, alerts).
+ */
 function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
-  const label = PHASE_LABEL[s.phase];
+  const act = actOf(s.phase);
   const remaining =
     s.combatEndsAt !== null ? s.combatEndsAt - mt : s.phaseEndsAt !== null ? s.phaseEndsAt - mt : 0;
   const core = percent(s.coreHp, s.coreMax);
   const defended = CITY_IDS.filter((id) => !s.cities[id].lost).length;
-  const next = [...s.threats].sort((a, b) => a.impactAt - b.impactAt)[0];
-  const context =
-    next && next.target.type === 'CITY'
-      ? `${CITIES[next.target.cityId].nameEn} DEFENSE`
-      : 'JAPAN DEFENSE LINE';
+  const gauge = Math.round(Math.min(100, (s.teamCapacitor / s.hints.overdriveCapacitorMin) * 100));
+  const lost = CITY_IDS.length - defended;
   return (
     <div className="topbar">
       <div className="brand">
@@ -80,12 +82,25 @@ function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
         <span>EARTH DEFENSE</span>
       </div>
       <div className="wave">
-        <span className="k">{label.ja}</span>
-        <span className="v sw-num">{label.en}</span>
+        <span className="k">
+          {act ? `第${act.no}幕 / 3  ACT ${act.no}` : PHASE_LABEL[s.phase].en}
+        </span>
+        <span className="v">{act ? act.ja : PHASE_LABEL[s.phase].ja}</span>
+      </div>
+      <div className="time">
+        <span className="k">残り TIME</span>
+        <span className="v sw-num">{formatClock(remaining)}</span>
+      </div>
+      <div>
+        <span className="k">守った都市 CITIES</span>
+        <span className="v sw-num" style={{ color: lost >= 2 ? 'var(--sw-danger)' : undefined }}>
+          {defended}
+          <small style={{ fontSize: 20, color: 'var(--sw-muted)' }}> / {CITY_IDS.length}</small>
+        </span>
       </div>
       <div className="meter">
         <div className="row">
-          <span className="k">CORE 機体</span>
+          <span className="k">機体 MECH</span>
           <span className="v sw-num" style={{ color: core < 35 ? 'var(--sw-danger)' : undefined }}>
             {core}%
           </span>
@@ -97,59 +112,61 @@ function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
           <i style={{ width: `${core}%` }} />
         </div>
       </div>
-      <div className="meter">
+      <div className={`meter gauge${gauge >= 100 ? ' full' : ''}`}>
         <div className="row">
-          <span className="k">TEAM SYNC 連携</span>
-          <span className="v sw-num" style={{ color: 'var(--sw-ally)' }}>
-            {s.teamSync}%
-          </span>
-        </div>
-        <div className="bar">
-          <i style={{ width: `${s.teamSync}%` }} />
-          <b style={{ left: `${s.hints.overdriveSyncMin}%` }} />
-        </div>
-      </div>
-      <div className="meter">
-        <div className="row">
-          <span className="k">CHARGE 蓄電</span>
-          <span className="v sw-num" style={{ color: 'var(--sw-action)' }}>
-            {Math.round(s.teamCapacitor)}
-          </span>
+          <span className="k">雷神ゲージ RAIJIN GAUGE</span>
+          <span className="v sw-num">{gauge}%</span>
         </div>
         <div className="bar" style={{ ['--bar' as string]: 'var(--sw-action)' }}>
-          <i
-            style={{
-              width: `${Math.min(100, (s.teamCapacitor / s.hints.overdriveCapacitorMin) * 100)}%`,
-            }}
-          />
+          <i style={{ width: `${gauge}%` }} />
         </div>
-      </div>
-      <div>
-        <span className="k">CITIES 防衛都市</span>
-        <span className="v sw-num">
-          {defended}
-          <small style={{ fontSize: 20, color: 'var(--sw-muted)' }}> / {CITY_IDS.length}</small>
-        </span>
-      </div>
-      <div className="time">
-        <span className="k">TIME 残り</span>
-        <span className="v sw-num">{formatClock(remaining)}</span>
-      </div>
-      <div>
-        <span className="k">PILOTS 搭乗</span>
-        <span className="v sw-num">
-          {s.humans}
-          <small style={{ fontSize: 20, color: 'var(--sw-muted)' }}> / 8</small>
-        </span>
-      </div>
-      <div className="context">
-        <span className="k">{next ? 'PRIORITY 最優先' : 'STATUS 状況'}</span>
-        <span className="v" style={{ color: next ? 'var(--sw-danger)' : 'var(--sw-ally)' }}>
-          {context}
+        <span className="hint">
+          {gauge >= 100
+            ? s.phase === 'BOSS'
+              ? '満タン！ 必殺技を撃てる'
+              : '満タン — ボス戦で必殺技'
+            : '満タンで必殺技（ボス戦）'}
         </span>
       </div>
     </div>
   );
+}
+
+/** What this act is about, and the one thing to do right now (D-032). */
+function MissionCard({ s, mt }: { s: PublicMatchState; mt: number }) {
+  const act = actOf(s.phase);
+  if (!act) return null;
+  const now = nowLine(s, mt);
+  return (
+    <div className="mission-card sw-frame">
+      <div className="act">
+        <span className="no sw-num">ACT {act.no}</span>
+        <b>{act.ja}</b>
+        <span className="en">{act.en}</span>
+      </div>
+      <p className="goal">{act.goal}</p>
+      <div className={`now ${now.tone}`}>
+        <span className="lbl">今やること</span>
+        <span className="txt">{now.text}</span>
+      </div>
+    </div>
+  );
+}
+
+/** A few seconds in the middle when an act begins: its name and goal, large. */
+function useActIntro(): { phase: ActPhase; until: number } | null {
+  const [a, setA] = useState<{ phase: ActPhase; until: number } | null>(null);
+  useEffect(
+    () =>
+      store.onEvent(({ payload: e }) => {
+        if (e.type === 'phase_changed' && actOf(e.to)) {
+          // Text, not an effect: same 4.5 s in capture mode.
+          setA({ phase: e.to as ActPhase, until: performance.now() + 4_500 });
+        }
+      }),
+    [],
+  );
+  return a;
 }
 
 function BossBar({ s, mt }: { s: PublicMatchState; mt: number }) {
@@ -182,28 +199,37 @@ function CrisisBanner({ s, mt }: { s: PublicMatchState; mt: number }) {
   const left = Math.max(0, c.endsAt - mt);
   const crew =
     c.autoAt !== null
-      ? `AUTO SUPPORT 復旧まで ${Math.max(0, Math.ceil((c.autoAt - mt) / 1000))}s`
-      : '電力B 回路修復中 POWER B RE-ROUTING';
+      ? `電力B は空席 — AUTO が ${Math.max(0, Math.ceil((c.autoAt - mt) / 1000))}秒後に復旧`
+      : '電力B がスマホで回路をつなぐ';
   return (
     <div className="crisis-banner sw-frame">
       <div className="title">
         <IconWarning size={30} />
-        <b>REACTOR BLACKOUT</b>
-        <span className="ja">炉心停止</span>
+        <b>炉心停止</b>
+        <span className="ja">REACTOR BLACKOUT ・ エネルギー回復 30%</span>
         <span className="secs sw-num">{(left / 1000).toFixed(1)}s</span>
       </div>
       <div className="ways">
-        <div className="way pulse">
-          <IconBolt size={22} />
+        <div className="way crew">
+          <span className="n">1</span>
+          <IconWrench size={22} />
           <span>
-            GRID PULSE <small>スマホから即時復旧（任意）</small>
+            {crew}
+            <small>無料・仲間の操作で直す</small>
           </span>
         </div>
-        <span className="or">OR</span>
-        <div className="way crew">
-          <IconWrench size={22} />
-          <span>{crew}</span>
+        <span className="or">または</span>
+        <div className="way pulse">
+          <span className="n">2</span>
+          <IconBolt size={22} />
+          <span>
+            誰かがスマホから {s.hints.pulseAmountSats} sats を送る
+            <small>任意・Lightning で即時復旧</small>
+          </span>
         </div>
+      </div>
+      <div className="reward">
+        どちらでも復旧すると 雷神ゲージ +{s.hints.pulseGain}% ／ 時間切れは 機体 −損傷
       </div>
     </div>
   );
@@ -226,25 +252,30 @@ function useMoment(): Moment | null {
               ? `請求から着金まで ${(e.settleMs / 1000).toFixed(1)}秒`
               : 'VIRTUAL（テスト）';
           setM({
-            big: 'LIGHTNING PULSE',
-            sub: `${speed}  ·  ${e.crisis ? '炉心復旧 REACTOR RESTORED' : 'CHARGE +' + e.gain}  ·  OVERCHARGE`,
+            big: 'LIGHTNING 着金',
+            sub: `${speed}  ·  ${e.crisis ? '炉心復旧' : '復旧済み'}  ·  雷神ゲージ +${e.gain}%`,
             tone: 'bolt',
             until,
           });
         }
         if (e.type === 'crisis_resolved' && e.by === 'ROUTE')
           setM({
-            big: 'CORE RE-ROUTED',
-            sub: '電力B が炉心を復旧  ·  OVERCHARGE',
+            big: '炉心復旧',
+            sub: `電力B が回路をつないだ  ·  雷神ゲージ +${e.gain}%`,
             tone: 'ok',
             until,
           });
         if (e.type === 'crisis_resolved' && e.by === 'AUTO')
-          setM({ big: 'REACTOR RESTORED', sub: 'AUTO SUPPORT が炉心を復旧', tone: 'ok', until });
+          setM({
+            big: '炉心復旧',
+            sub: 'AUTO SUPPORT が復旧（ゲージ加算なし）',
+            tone: 'ok',
+            until,
+          });
         if (e.type === 'crisis_failed')
           setM({
-            big: 'BLACKOUT DAMAGE',
-            sub: `炉心停止の損傷  コア −${e.damage}`,
+            big: '復旧失敗',
+            sub: `炉心停止の損傷  機体 −${e.damage}`,
             tone: 'bad',
             until,
           });
@@ -260,7 +291,7 @@ function LinkMeter({ s, mt }: { s: PublicMatchState; mt: number }) {
   const n = link?.roles.length ?? 0;
   return (
     <div className={`link-meter${link ? ' live' : ''}`}>
-      <span className="k">LINK</span>
+      <span className="k">連携</span>
       <div className="nodes">
         {ROLE_IDS.map((r, i) => {
           const Icon = ROLE_ICON[r];
@@ -298,7 +329,9 @@ function OverdriveBanner({ s, mt }: { s: PublicMatchState; mt: number }) {
       <div className="title">
         <IconBolt size={28} />
         <b>RAIJIN OVERDRIVE</b>
-        <span className="sub">{left === null ? 'READY 全系統 SYNC NOW' : `SYNC NOW 同期中`}</span>
+        <span className="sub">
+          {left === null ? '必殺技 準備完了 — 全員スマホで SYNC NOW' : 'SYNC NOW 同期中'}
+        </span>
         {left !== null ? <span className="secs sw-num">{(left / 1000).toFixed(1)}s</span> : null}
       </div>
       <div className="roles">
@@ -462,11 +495,9 @@ function SystemStrip({
         'POWER',
         s.crisis
           ? 'BLACKOUT 炉心停止'
-          : mt < s.overchargeUntil
-            ? `OVERCHARGE ${Math.ceil((s.overchargeUntil - mt) / 1000)}s`
-            : cut.length
-              ? `OVERLOAD ${cut.map((l) => l[0]!.toUpperCase()).join('/')}`
-              : `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
+          : cut.length
+            ? `OVERLOAD ${cut.map((l) => l[0]!.toUpperCase()).join('/')}`
+            : `W${dist.weapon} S${dist.shield} M${dist.mobility} R${dist.repair}`,
         lane((s.energy.weapon + s.energy.shield + s.energy.mobility + s.energy.repair) / 4),
         {
           POWER_CORE: `PLAN v${s.distributionVersion}`,
@@ -515,8 +546,8 @@ function useFeed() {
         case 'team_combo':
           push(
             e.link >= 4
-              ? `FULL LINK  全系統連携  +${e.gain} SYNC`
-              : `LINK ×${e.link}  +${e.gain} SYNC  連携`,
+              ? `全系統連携 FULL LINK  雷神ゲージ +${e.gain}`
+              : `連携 ×${e.link}  雷神ゲージ +${e.gain}`,
             'combo',
           );
           break;
@@ -564,12 +595,12 @@ function useFeed() {
         case 'sats_pulse_settled':
           // Never who paid or how much: the pulse belongs to the crew (spec §7.4, §8.2).
           push(
-            `SHARED ENERGY PULSE 共有エネルギー  +${e.gain} CHARGE${e.virtual ? '  [VIRTUAL]' : '  LIGHTNING'}`,
+            `${e.virtual ? 'VIRTUAL（テスト）' : 'LIGHTNING'} 着金  炉心へ  雷神ゲージ +${e.gain}`,
             'combo',
           );
           break;
         case 'overdrive_ready':
-          push('OVERDRIVE READY 必殺技準備完了', 'kill');
+          push('雷神ゲージ満タン  必殺技 準備完了', 'kill');
           break;
         case 'overdrive_fired':
           push(`RAIJIN OVERDRIVE  −${e.damage}`, 'kill');
@@ -621,6 +652,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
   const feed = useFeed();
   const moment = useMoment();
   const flashes = useRoleFlashes();
+  const intro = useActIntro();
   const snap = st.snap?.state;
   const mt = store.matchTime(now);
   const combat = snap ? isCombatPhase(snap.phase) : false;
@@ -657,6 +689,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
           {combat ? (
             <>
               <BossBar s={snap} mt={mt} />
+              <MissionCard s={snap} mt={mt} />
               <CrisisBanner s={snap} mt={mt} />
               <OverdriveBanner s={snap} mt={mt} />
               <LinkMeter s={snap} mt={mt} />
@@ -701,6 +734,14 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
         <div className="banner">CONNECTING ゲームサーバーに接続中</div>
       ) : null}
       {finishing ? <div className="od-call-big">RAIJIN OVERDRIVE</div> : null}
+      {combat && intro && now < intro.until && !snap?.crisis ? (
+        <div className="act-intro" role="status">
+          <span className="no sw-num">ACT {ACTS[intro.phase].no} / 3</span>
+          <b>{ACTS[intro.phase].ja}</b>
+          <span className="en">{ACTS[intro.phase].en}</span>
+          <p>{ACTS[intro.phase].goal}</p>
+        </div>
+      ) : null}
       {combat && !finishing && moment && now < moment.until ? (
         <div className={`moment ${moment.tone}`} role="status">
           <b>{moment.big}</b>
