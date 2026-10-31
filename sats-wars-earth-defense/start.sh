@@ -82,29 +82,42 @@ fi
 OPERATOR_PASSWORD_SHOWN="$(sed -n 's/^OPERATOR_PASSWORD=//p' .env | tail -1)"
 mkdir -p data
 
-# --- 5. Build (only when the code changed since the last build) ----------------------
+# --- 5. An old game still running would keep serving the old version: stop it --------
+port_busy() { (echo >"/dev/tcp/127.0.0.1/$PORT") >/dev/null 2>&1; }
+if port_busy; then
+  # Only our own server answers /health with its sandbox/live mode; anything else is left alone.
+  if node -e "fetch('http://127.0.0.1:$PORT/health').then(r=>r.json()).then(j=>process.exit(j&&j.mode?0:1),()=>process.exit(1))" 2>/dev/null &&
+    command -v lsof >/dev/null 2>&1; then
+    say "前に起動したゲームがまだ動いていたので止めます（ポート $PORT）"
+    for pid in $(lsof -ti "tcp:$PORT" -sTCP:LISTEN); do kill "$pid" 2>/dev/null || true; done
+    for _ in $(seq 1 20); do
+      port_busy || break
+      sleep 0.5
+    done
+  fi
+  port_busy && fail "ポート $PORT が別のアプリに使われています。そのアプリを止めるか、PORT=4500 ./start.sh で別のポートを使ってください。"
+fi
+
+# --- 6. Build (when the version or the code changed since the last build) ------------
+VERSION="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+VERSION_DATE="$(git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M' 2>/dev/null || echo '')"
 STAMP=".build-stamp"
 needs_build=0
 for d in apps/server/dist apps/display/dist apps/pilot/dist apps/operator/dist; do
   [[ -d "$d" ]] || needs_build=1
 done
-if [[ $needs_build -eq 0 && -f "$STAMP" ]]; then
-  changed="$(find apps packages -name node_modules -prune -o -name dist -prune -o -type f -newer "$STAMP" -print -quit)"
-  [[ -n "$changed" ]] && needs_build=1
-elif [[ ! -f "$STAMP" ]]; then
+if [[ ! -f "$STAMP" || "$(cat "$STAMP" 2>/dev/null)" != "$VERSION" ]]; then
+  needs_build=1
+elif [[ -n "$(find apps packages -name node_modules -prune -o -name dist -prune -o -type f -newer "$STAMP" -print -quit)" ]]; then
   needs_build=1
 fi
 if [[ $needs_build -eq 1 ]]; then
   say "ビルドしています（1分ほど）"
   "${PNPM[@]}" build
-  touch "$STAMP"
+  echo "$VERSION" >"$STAMP"
 fi
 
-# --- 6. Start ----------------------------------------------------------------------
-if (echo >"/dev/tcp/127.0.0.1/$PORT") >/dev/null 2>&1; then
-  fail "ポート $PORT はすでに使われています。前に起動したゲームが残っていれば、そのターミナルで Ctrl+C してから再実行してください（別のポートなら PORT=4500 ./start.sh）。"
-fi
-
+# --- 7. Start ----------------------------------------------------------------------
 say "ゲームサーバーを起動しています"
 NODE_ENV=development APP_MODE=sandbox WEB_MODE=static PORT="$PORT" LOG_LEVEL="${LOG_LEVEL:-warn}" \
   node --disable-warning=ExperimentalWarning apps/server/dist/index.mjs &
@@ -123,13 +136,16 @@ cat <<EOF
 
   ================================================================
    SATS WARS: EARTH DEFENSE を起動しました（SANDBOX・お金は動きません）
+   バージョン  $VERSION（$VERSION_DATE）
 
    大画面     http://localhost:$PORT/display/
    運営       http://localhost:$PORT/operator/
    運営パスワード  $OPERATOR_PASSWORD_SHOWN
    スマホ     大画面の QR を読み取る（PC と同じ Wi-Fi に接続）
 
-   すぐ遊ぶ：運営画面で「DEMO BOTS」をオン → 「START 出撃」
+   すぐ遊ぶ：運営画面で「DEMO BOTS」をオン → 一番上の「出撃する」
+   新しい画面の目印：運営画面の一番上に「今の状態 NOW」、大画面の左上に「今やること」
+   （古い画面のままなら、ブラウザで再読み込み：Mac は ⌘+Shift+R）
    止める：このターミナルで Ctrl+C
   ================================================================
 
