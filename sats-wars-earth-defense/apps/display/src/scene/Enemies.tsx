@@ -254,8 +254,8 @@ const Enemy = memo(function Enemy({ enemy }: { enemy: PublicEnemy }) {
   useEffect(() => {
     registerAnchor(`enemy:${enemy.id}`, group.current);
     const off = fxBus.on((e) => {
-      if (e.type === 'weapon_fired' && e.enemyId === enemy.id) hitFlash.current = 1;
-      if (e.type === 'enemy_destroyed' && e.enemyId === enemy.id) {
+      if (e.type === 'action' && e.kind === 'ATTACK') hitFlash.current = e.paid ? 1 : 0.5;
+      if (e.type === 'boss_destroyed' && e.enemyId === enemy.id) {
         dead.add(enemy.id);
         if (group.current) group.current.visible = false;
       }

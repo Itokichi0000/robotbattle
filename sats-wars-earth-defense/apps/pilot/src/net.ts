@@ -1,14 +1,12 @@
 import { MatchStore, newClientId } from '@swed/client';
 import type {
+  ActionKind,
   ActionResult,
   PaymentIntentView,
   PaymentsStatus,
-  PilotActionInput,
   PilotClientToServer,
   PilotIdentity,
   PilotServerToClient,
-  SeatId,
-  SeatRequestResult,
   SessionStatusMsg,
 } from '@swed/shared';
 import { io, type Socket } from 'socket.io-client';
@@ -29,7 +27,7 @@ export interface PilotSessionState {
   mode: 'sandbox' | 'live';
   status: SessionStatusMsg | null;
   error: string | null;
-  /** Shown once: why this phone was signed out or unseated. */
+  /** Shown once: why this phone was signed out. */
   notice: 'SESSION_REPLACED' | 'KICKED' | null;
   lnurlDomain: string;
 }
@@ -147,45 +145,10 @@ function matchId(): string {
   return session.status?.matchId ?? store.getState().snap?.matchId ?? '';
 }
 
-async function ack<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
-
-export function joinSeat(seatId: SeatId): Promise<SeatRequestResult> {
-  return ack(
-    () =>
-      socket
-        .timeout(5_000)
-        .emitWithAck('pilot:joinSeat', { matchId: matchId(), seatId, requestId: newClientId('r') }),
-    { ok: false, reasonCode: 'NETWORK' },
-  );
-}
-
-export function ready(): Promise<SeatRequestResult> {
-  return ack(
-    () =>
-      socket
-        .timeout(5_000)
-        .emitWithAck('pilot:ready', { matchId: matchId(), requestId: newClientId('r') }),
-    { ok: false, reasonCode: 'NETWORK' },
-  );
-}
-
-export function leaveSeat(): Promise<SeatRequestResult> {
-  return ack(() => socket.timeout(5_000).emitWithAck('pilot:leave', { matchId: matchId() }), {
-    ok: true,
-    seatId: null,
-  });
-}
-
-/** Sends an intent; on a lost ack it retries once with the same id (the server dedupes). */
-export async function sendAction(seatId: SeatId, action: PilotActionInput): Promise<ActionResult> {
+/** Sends one button press; on a lost ack it retries once with the same id (the server dedupes). */
+export async function sendAction(kind: ActionKind): Promise<ActionResult> {
   const clientActionId = newClientId('a');
-  const req = { matchId: matchId(), seatId, clientActionId, action };
+  const req = { matchId: matchId(), clientActionId, action: { kind } };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       return await socket.timeout(3_000).emitWithAck('pilot:action', req);
@@ -243,7 +206,7 @@ export async function pollLnurl(attemptId: string): Promise<LnurlPoll> {
   }
 }
 
-/* ------------------------------------------------------- callsign / sync */
+/* --------------------------------------------------------------- callsign */
 
 export async function saveCallsign(
   callsign: string | null,
@@ -262,28 +225,24 @@ export async function saveCallsign(
   }
 }
 
-/** RAIJIN OVERDRIVE confirmation for this pilot's role (spec §11.4 pilot:syncFinisher). */
-export async function syncNow(): Promise<ActionResult> {
-  const clientActionId = newClientId('s');
-  try {
-    return await socket
-      .timeout(3_000)
-      .emitWithAck('pilot:syncFinisher', { matchId: matchId(), clientActionId });
-  } catch {
-    return { clientActionId, accepted: false, reasonCode: 'NETWORK' };
-  }
-}
-
-/* --------------------------------------------------------- energy pulses */
+/* ------------------------------------------------------ Lightning actions */
 
 export interface PaymentsState {
+  /** The action the open pay sheet is for (null = closed). */
+  action: ActionKind | null;
   quote: PaymentsStatus | null;
   intent: PaymentIntentView | null;
   error: string | null;
   retryAfterMs: number | null;
 }
 
-let payments: PaymentsState = { quote: null, intent: null, error: null, retryAfterMs: null };
+let payments: PaymentsState = {
+  action: null,
+  quote: null,
+  intent: null,
+  error: null,
+  retryAfterMs: null,
+};
 const payListeners = new Set<Listener>();
 function setPayments(patch: Partial<PaymentsState>) {
   payments = { ...payments, ...patch };
@@ -306,15 +265,23 @@ export async function loadQuote(): Promise<void> {
   }
 }
 
+/** Opens the pay sheet for one action; nothing is billed until the pilot confirms. */
+export function openPay(action: ActionKind): void {
+  setPayments({ action, intent: null, error: null, retryAfterMs: null });
+  void loadQuote();
+}
+
 /** Creates the invoice only after the pilot confirmed amount and receiver on screen. */
-export async function requestPulse(): Promise<void> {
+export async function requestPaid(): Promise<void> {
+  const action = payments.action;
+  if (!action) return;
   setPayments({ error: null, retryAfterMs: null });
   try {
     const res = await fetch('/api/payments/intent', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ matchId: matchId() }),
+      body: JSON.stringify({ matchId: matchId(), action }),
     });
     const body = (await res.json()) as PaymentIntentView & {
       error?: string;
@@ -345,6 +312,8 @@ export async function refreshIntent(): Promise<void> {
   }
 }
 
-export function closePulse(): void {
-  setPayments({ intent: null, error: null, retryAfterMs: null });
+export function closePay(): void {
+  setPayments({ action: null, intent: null, error: null, retryAfterMs: null });
+  // "N left" under the buttons counts this payment from now on.
+  void loadQuote();
 }

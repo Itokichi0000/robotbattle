@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { isCombatPhase } from '@swed/shared';
-import type { PaymentIntentView, PaymentsStatus, PulseRefusal } from '@swed/shared';
+import { ACTION_KINDS, isCombatPhase } from '@swed/shared';
+import type { ActionKind, PaymentIntentView, PaymentsStatus, PulseRefusal } from '@swed/shared';
+import { paidEffect } from '@swed/game-engine';
 import type { Db } from '../db';
 import { audit, nowIso, tx } from '../db';
 import type { MatchRuntime } from '../runtime';
@@ -10,10 +11,9 @@ import type { PaymentMode, PaymentProvider } from './provider';
 import type { SandboxPaymentProvider } from './sandbox';
 
 /**
- * Shared energy pulses (spec §8, D-032): a fixed-size Lightning payment that ends a REACTOR
- * BLACKOUT at once and adds the same RAIJIN gauge the crew's own re-route would. Rules that
- * keep money from deciding the fight:
- *   - only during a blackout; one size only (default 21 sats → +20), cooldown and caps
+ * Lightning actions (spec §8, D-033): a fixed-size payment (default 21 sats) that makes one
+ * of the three actions big — 撃つ / 守る / 直す. Rules that keep money from deciding the fight:
+ *   - one size only; the same effect for everyone; per-person and per-match caps, cooldown
  *   - settlement is confirmed by asking the backend; webhooks are only a hint
  *   - each intent applies at most once (DB status transition + engine intent id)
  *   - a payment that settles after its round is recorded as unapplied, never carried over
@@ -25,6 +25,7 @@ interface IntentRow {
   pilot_id: string;
   match_id: string;
   seat_id: string | null;
+  action: ActionKind | null;
   amount_sats: number;
   mode: PaymentMode;
   provider: string;
@@ -100,6 +101,7 @@ export class PaymentService {
   private view(r: IntentRow): PaymentIntentView {
     return {
       intentId: r.id,
+      action: r.action ?? 'ATTACK',
       status: r.status,
       applied: r.applied,
       amountSats: r.amount_sats,
@@ -113,21 +115,17 @@ export class PaymentService {
 
   /** Limits for the current match, from the frozen match config. */
   private limits() {
-    const p = this.deps.runtime.state.config.pulses;
-    return {
-      perPilot: p.perPilotPerMatch,
-      cooldownMs: p.cooldownMs,
-      maxPerMatch: p.maxPerMatch,
-      gain: this.deps.runtime.state.config.crisis.recoverGauge,
-    };
+    const p = this.deps.runtime.state.config.paid;
+    return { perPilot: p.perPilotPerMatch, cooldownMs: p.cooldownMs, maxPerMatch: p.maxPerMatch };
   }
 
-  /**
-   * Sats have one job (D-032): end a REACTOR BLACKOUT at once. Outside a blackout there is
-   * nothing to pay for, so no invoice is made.
-   */
-  private pulseUseful(): boolean {
-    return !!this.deps.runtime.state.crisis;
+  /** Effect of one Lightning action right now, per action (the same for every payer). */
+  private effects(): Record<ActionKind, number> {
+    const s = this.deps.runtime.state;
+    return Object.fromEntries(ACTION_KINDS.map((k) => [k, paidEffect(s, k)])) as Record<
+      ActionKind,
+      number
+    >;
   }
 
   /** Everything the phone needs to show before the pilot decides (amount, receiver, limits). */
@@ -144,18 +142,18 @@ export class PaymentService {
       mode: this.mode,
       enabled: this.enabled,
       amountSats: this.deps.amountSats,
-      capacitorGain: lim.gain,
+      effect: this.effects(),
       recipient: this.deps.recipient,
       remaining: Math.max(0, lim.perPilot - mine.n),
       cooldownUntil: lastAt ? new Date(lastAt + lim.cooldownMs).toISOString() : null,
-      inCombat: isCombatPhase(s.phase) && this.deps.runtime.seatOf(pilot.id) !== null,
-      crisis: this.pulseUseful(),
+      inCombat: isCombatPhase(s.phase) && this.deps.runtime.isJoined(pilot.id),
     };
   }
 
   async createIntent(
     pilot: PilotRow,
     matchId: string,
+    action: ActionKind,
   ): Promise<
     | { ok: true; intent: PaymentIntentView }
     | { ok: false; code: PulseRefusal; retryAfterMs?: number }
@@ -164,8 +162,8 @@ export class PaymentService {
     const s = rt.state;
     if (!this.enabled) return { ok: false, code: 'PAYMENTS_DISABLED' };
     if (matchId !== s.matchId) return { ok: false, code: 'STALE_MATCH' };
-    const seat = rt.seatOf(pilot.id);
-    if (!seat || !isCombatPhase(s.phase)) return { ok: false, code: 'NOT_IN_COMBAT' };
+    if (!rt.isJoined(pilot.id) || !isCombatPhase(s.phase))
+      return { ok: false, code: 'NOT_IN_COMBAT' };
     if (this.creating.has(pilot.id)) return { ok: false, code: 'PULSE_PENDING' };
     const db = this.deps.db;
     const lim = this.limits();
@@ -191,8 +189,6 @@ export class PaymentService {
       )
       .get(s.matchId) as { n: number };
     if (total.n >= lim.maxPerMatch) return { ok: false, code: 'PULSE_MATCH_LIMIT' };
-    // Only during a blackout: never sell a pulse when there is nothing to fix.
-    if (!this.pulseUseful()) return { ok: false, code: 'NO_CRISIS' };
 
     const intentId = `pi_${randomUUID()}`;
     this.creating.add(pilot.id);
@@ -200,19 +196,19 @@ export class PaymentService {
       const inv = await this.deps.provider.createInvoice({
         intentId,
         amountSats: this.deps.amountSats,
-        memo: `SATS WARS shared energy pulse (match #${s.matchNumber})`,
+        memo: `SATS WARS Lightning ${action} (match #${s.matchNumber})`,
         expiresInSeconds: INVOICE_TTL_SECONDS,
         webhookUrl: this.deps.webhookUrl,
       });
       db.prepare(
         `INSERT INTO payment_intents
-           (id, pilot_id, match_id, seat_id, amount_sats, mode, provider, payment_hash, payment_request, status, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+           (id, pilot_id, match_id, seat_id, action, amount_sats, mode, provider, payment_hash, payment_request, status, created_at, expires_at)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       ).run(
         intentId,
         pilot.id,
         s.matchId,
-        seat,
+        action,
         this.deps.amountSats,
         this.mode,
         this.deps.provider.name,
@@ -225,7 +221,7 @@ export class PaymentService {
         db,
         `pilot:${pilot.public_name}`,
         'PULSE_INTENT',
-        `${intentId} ${this.mode} ${this.deps.amountSats}sats`,
+        `${intentId} ${action} ${this.mode} ${this.deps.amountSats}sats`,
       );
       return { ok: true, intent: this.view(this.row(intentId)!) };
     } catch (err) {
@@ -261,7 +257,13 @@ export class PaymentService {
         // Invoice issued → confirmed here: the honest "Lightning speed" number for the screen
         // (includes the payer's own time in the wallet; never shown for VIRTUAL pulses).
         const settleMs = Math.max(0, Date.now() - Date.parse(r.created_at));
-        const out = rt.applyPulse(r.id, r.seat_id, r.mode === 'sandbox', settleMs);
+        const out = rt.applyPaid(
+          r.id,
+          r.pilot_id,
+          r.action ?? 'ATTACK',
+          r.mode === 'sandbox',
+          settleMs,
+        );
         applied = out ? 'applied' : 'unapplied';
         if (!out) note = 'engine refused (duplicate or not in combat)';
       } else {
@@ -276,7 +278,7 @@ export class PaymentService {
       audit(
         db,
         'payments',
-        applied === 'applied' ? 'PULSE_APPLIED' : 'PULSE_UNAPPLIED',
+        applied === 'applied' ? 'LIGHTNING_APPLIED' : 'LIGHTNING_UNAPPLIED',
         `${r.id} via ${via} ${note}`.trim(),
       );
       return applied;
@@ -351,7 +353,9 @@ export class PaymentService {
     this.autoSettleVirtual = enabled;
     return {
       ok: true,
-      message: enabled ? 'VIRTUAL pulses confirm automatically' : 'VIRTUAL pulses wait for SETTLE',
+      message: enabled
+        ? 'VIRTUAL payments confirm automatically'
+        : 'VIRTUAL payments wait for SETTLE',
     };
   }
 
@@ -363,7 +367,7 @@ export class PaymentService {
     const sandbox = this.deps.provider as SandboxPaymentProvider;
     if (!sandbox.settle(r.payment_hash)) return { ok: false, message: 'already settled' };
     this.confirmSettled(r, via);
-    return { ok: true, message: `VIRTUAL pulse ${intentId} settled` };
+    return { ok: true, message: `VIRTUAL payment ${intentId} settled` };
   }
 
   /** Operator: connectivity and reachability checks before turning live payments on. */
@@ -422,7 +426,7 @@ export class PaymentService {
     this.liveEnabled = false;
     return {
       ok: true,
-      message: this.mode === 'live' ? 'LIVE payments OFF' : 'sandbox pulses stay VIRTUAL',
+      message: this.mode === 'live' ? 'LIVE payments OFF' : 'sandbox payments stay VIRTUAL',
     };
   }
 
@@ -445,7 +449,7 @@ export class PaymentService {
       autoSettleVirtual: this.autoSettleVirtual,
       recipient: this.deps.recipient,
       amountSats: this.deps.amountSats,
-      capacitorGain: lim.gain,
+      effect: this.effects(),
       perPilotPerMatch: lim.perPilot,
       cooldownSec: Math.round(lim.cooldownMs / 1000),
       maxPerMatch: lim.maxPerMatch,
@@ -457,7 +461,7 @@ export class PaymentService {
         applied: r.applied,
         amountSats: r.amount_sats,
         mode: r.mode,
-        seatId: r.seat_id,
+        action: r.action ?? 'ATTACK',
         createdAt: r.created_at,
         currentMatch: r.match_id === s.matchId,
         note: r.note,

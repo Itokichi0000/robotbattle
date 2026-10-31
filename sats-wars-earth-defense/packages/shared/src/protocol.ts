@@ -1,8 +1,7 @@
-import type { ActionResult, PilotActionInput, SeatRequestResult } from './actions';
-import type { PresetId } from './config';
+import type { ActionResult, PilotActionInput } from './actions';
+import type { ActionKind, PresetId } from './config';
 import type { MatchEvent, MatchEventType } from './events';
 import type { Phase } from './phases';
-import type { SeatId } from './seats';
 import type { PublicMatchState } from './state';
 
 /**
@@ -30,13 +29,6 @@ export interface MatchEventMsg {
   serverTime: number;
   type: MatchEventType;
   payload: MatchEvent;
-}
-
-export interface SeatChangedMsg {
-  seatId: SeatId;
-  pilotDisplayName: string | null;
-  connected: boolean;
-  isAutoSupport: boolean;
 }
 
 export interface DisplaySettings {
@@ -73,7 +65,6 @@ export type PulseRefusal =
   | 'PULSE_LIMIT'
   | 'PULSE_COOLDOWN'
   | 'PULSE_MATCH_LIMIT'
-  | 'NO_CRISIS'
   | 'BACKEND_UNAVAILABLE';
 
 export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }> = {
@@ -82,15 +73,11 @@ export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }
     en: 'Energy pulses are switched off',
   },
   STALE_MATCH: { ja: 'この作戦は終了しました', en: 'That round is over' },
-  NOT_IN_COMBAT: { ja: '搭乗中の戦闘中だけ送れます', en: 'Only aboard, during combat' },
+  NOT_IN_COMBAT: { ja: '戦闘中だけ送れます', en: 'Only during the battle' },
   PULSE_PENDING: { ja: '支払い待ちの請求書があります', en: 'You already have an open invoice' },
   PULSE_LIMIT: { ja: 'この作戦の上限（3回）に達しました', en: 'Limit for this round reached' },
-  PULSE_COOLDOWN: { ja: '少し待ってから（30秒に1回）', en: 'Once every 30 s' },
+  PULSE_COOLDOWN: { ja: '少し待ってから', en: 'Wait a little' },
   PULSE_MATCH_LIMIT: { ja: 'この作戦全体の上限に達しました', en: 'Round-wide limit reached' },
-  NO_CRISIS: {
-    ja: 'sats を送れるのは炉心停止（ブラックアウト）中だけです',
-    en: 'Sats can only be sent during a reactor blackout',
-  },
   BACKEND_UNAVAILABLE: {
     ja: '決済サーバーに接続できません。ゲームはそのまま続けられます',
     en: 'Payment backend unavailable. Keep playing',
@@ -99,6 +86,8 @@ export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }
 
 export interface PaymentIntentView {
   intentId: string;
+  /** The action this payment powers (撃つ / 守る / 直す). */
+  action: ActionKind;
   status: 'pending' | 'settled' | 'expired' | 'failed' | 'canceled';
   applied: 'applied' | 'unapplied' | null;
   amountSats: number;
@@ -116,21 +105,20 @@ export interface PaymentsStatus {
   mode: 'sandbox' | 'live';
   enabled: boolean;
   amountSats: number;
-  /** RAIJIN gauge a pulse adds (the same as the crew's own fix). */
-  capacitorGain: number;
+  /** Effect of one Lightning action, per action. */
+  effect: Record<ActionKind, number>;
   recipient: string;
   remaining: number;
   cooldownUntil: string | null;
   inCombat: boolean;
-  /** REACTOR BLACKOUT in progress: the only time a pulse can be sent (D-032). */
-  crisis: boolean;
 }
 
 export interface SessionStatusMsg {
   authenticated: boolean;
   pilot: PilotIdentity | null;
   matchId: string;
-  assignedSeat: SeatId | null;
+  /** Counted in the current match (joins automatically while the phone is connected). */
+  joined: boolean;
 }
 
 /* ---------------------------------------------------------------- display */
@@ -138,7 +126,6 @@ export interface SessionStatusMsg {
 export interface DisplayServerToClient {
   'match:snapshot': (msg: MatchSnapshotMsg) => void;
   'match:event': (msg: MatchEventMsg) => void;
-  'seat:changed': (msg: SeatChangedMsg) => void;
   'display:settings': (msg: DisplaySettings) => void;
 }
 
@@ -148,15 +135,8 @@ export interface DisplayClientToServer {
 
 /* ------------------------------------------------------------------ pilot */
 
-export interface JoinSeatReq {
-  matchId: string;
-  seatId: SeatId;
-  requestId: string;
-}
-
 export interface PilotActionReq {
   matchId: string;
-  seatId: SeatId;
   clientActionId: string;
   action: PilotActionInput;
 }
@@ -164,7 +144,6 @@ export interface PilotActionReq {
 export interface PilotServerToClient {
   'match:snapshot': (msg: MatchSnapshotMsg) => void;
   'match:event': (msg: MatchEventMsg) => void;
-  'seat:changed': (msg: SeatChangedMsg) => void;
   'pilot:actionResult': (msg: ActionResult) => void;
   'pilot:sessionStatus': (msg: SessionStatusMsg) => void;
   /** Only to the paying pilot (spec §11.4). */
@@ -174,25 +153,12 @@ export interface PilotServerToClient {
 }
 
 export interface PilotClientToServer {
-  'pilot:joinSeat': (req: JoinSeatReq, ack: (res: SeatRequestResult) => void) => void;
-  'pilot:ready': (
-    req: { matchId: string; requestId: string },
-    ack: (res: SeatRequestResult) => void,
-  ) => void;
   'pilot:action': (req: PilotActionReq, ack: (res: ActionResult) => void) => void;
-  'pilot:leave': (req: { matchId: string }, ack: (res: SeatRequestResult) => void) => void;
-  /** Spec §11.4: RAIJIN OVERDRIVE confirmation for the pilot's role. */
-  'pilot:syncFinisher': (
-    req: { matchId: string; clientActionId: string },
-    ack: (res: ActionResult) => void,
-  ) => void;
 }
 
 /* --------------------------------------------------------------- operator */
 
 export type OperatorCommand =
-  | { command: 'ATTRACT' }
-  | { command: 'OPEN_LOBBY' }
   | { command: 'START' }
   | { command: 'SKIP_DEPLOY' }
   | { command: 'PAUSE' }
@@ -200,21 +166,18 @@ export type OperatorCommand =
   | { command: 'END' }
   | { command: 'RESET' }
   | { command: 'NEXT_ROUND' }
-  | { command: 'SET_AUTO_SUPPORT'; enabled: boolean }
-  | { command: 'KICK_SEAT'; seatId: SeatId }
+  | { command: 'SET_AUTO_START'; enabled: boolean }
   | { command: 'SET_PRESET'; presetId: Exclude<PresetId, 'TEST'> }
   | { command: 'SET_DISPLAY'; settings: Partial<DisplaySettings> }
-  /** Labelled demo bots fill empty seats and play (exhibition attract loop). */
+  /** Labelled demo bots join the crowd and play (exhibition attract loop). */
   | { command: 'SET_DEMO_BOTS'; enabled: boolean }
-  /** Show only PILOT-XXXX names on the big screen. */
+  /** Show only PILOT-XXXX names. */
   | { command: 'SET_HIDE_CALLSIGNS'; hidden: boolean }
   | { command: 'SANDBOX_SETTLE'; intentId: string }
   | { command: 'PAYMENTS_CHECK' }
   | { command: 'PAYMENTS_ENABLE_LIVE'; confirm: string }
   | { command: 'PAYMENTS_DISABLE' }
-  | { command: 'SET_AUTO_SETTLE_VIRTUAL'; enabled: boolean }
-  /** Start a REACTOR BLACKOUT now, to show the GRID PULSE scene on demand. */
-  | { command: 'TRIGGER_BLACKOUT' };
+  | { command: 'SET_AUTO_SETTLE_VIRTUAL'; enabled: boolean };
 
 export type OperatorCommandName = OperatorCommand['command'];
 
@@ -247,7 +210,7 @@ export interface OperatorPaymentsView {
   autoSettleVirtual: boolean;
   recipient: string;
   amountSats: number;
-  capacitorGain: number;
+  effect: Record<ActionKind, number>;
   perPilotPerMatch: number;
   cooldownSec: number;
   maxPerMatch: number;
@@ -262,7 +225,7 @@ export interface OperatorPaymentsView {
     applied: PaymentIntentView['applied'];
     amountSats: number;
     mode: AppMode;
-    seatId: string | null;
+    action: ActionKind;
     createdAt: string;
     currentMatch: boolean;
     note: string | null;
@@ -272,6 +235,7 @@ export interface OperatorPaymentsView {
 export interface OperatorStatusMsg {
   mode: AppMode;
   demoBots: boolean;
+  autoStart: boolean;
   hideCallsigns: boolean;
   payments: OperatorPaymentsView;
   presetId: PresetId;

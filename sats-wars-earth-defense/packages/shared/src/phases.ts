@@ -1,33 +1,27 @@
-/** Match state machine (spec §6.5). PAUSE is a flag on the state, not a phase. */
+/**
+ * Match state machine (D-033). PAUSE is a flag on the state, not a phase.
+ *   LOBBY → COUNTDOWN → DEPLOYMENT → BATTLE → VICTORY | DEFEAT → RESULTS → (next match) LOBBY
+ */
 export const PHASES = [
-  'ATTRACT',
   'LOBBY',
   'COUNTDOWN',
   'DEPLOYMENT',
-  'WAVE_1',
-  'WAVE_2',
-  'BOSS',
+  'BATTLE',
   'VICTORY',
   'DEFEAT',
   'RESULTS',
 ] as const;
 export type Phase = (typeof PHASES)[number];
 
-export const COMBAT_PHASES: readonly Phase[] = ['WAVE_1', 'WAVE_2', 'BOSS'];
-export const PREMATCH_PHASES: readonly Phase[] = ['ATTRACT', 'LOBBY'];
-
 export function isCombatPhase(p: Phase): boolean {
-  return COMBAT_PHASES.includes(p);
+  return p === 'BATTLE';
 }
 
 export const PHASE_LABEL: Record<Phase, { ja: string; en: string }> = {
-  ATTRACT: { ja: 'パイロット募集中', en: 'PILOTS WANTED' },
-  LOBBY: { ja: '搭乗受付', en: 'BOARDING' },
+  LOBBY: { ja: '参加受付中', en: 'JOIN NOW' },
   COUNTDOWN: { ja: '出撃準備', en: 'LAUNCH SEQUENCE' },
   DEPLOYMENT: { ja: '出撃', en: 'DEPLOYMENT' },
-  WAVE_1: { ja: '第1波', en: 'WAVE 01' },
-  WAVE_2: { ja: '第2波', en: 'WAVE 02' },
-  BOSS: { ja: 'NULL CORE 迎撃', en: 'WAVE 03 / BOSS' },
+  BATTLE: { ja: 'NULL CORE 迎撃', en: 'DEFEND JAPAN' },
   VICTORY: { ja: '撃退成功', en: 'VICTORY' },
   DEFEAT: { ja: '防衛失敗', en: 'DEFEAT' },
   RESULTS: { ja: '作戦記録', en: 'DEBRIEF' },

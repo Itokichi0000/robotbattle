@@ -1,12 +1,12 @@
 # SATS WARS: EARTH DEFENSE
 
-**ONE MECH. EIGHT PILOTS. DEFEND JAPAN.** — 8人の力で、日本を守れ。
+**ONE MECH. EVERYONE PILOTS. DEFEND JAPAN.** — みんなで雷神を動かして、日本を守れ。
 
 ビットコイン関連カンファレンス向けの参加型3Dブラウザゲーム。会場の大画面に巨大メカ **RAIJIN-01（雷神）** と侵略体
-**NULL SWARM / NULL CORE** の戦闘がリアルタイム3Dで映り、来場者はスマホで機体の一部（8席・4役割）に搭乗して協力し、
-日本の都市を守ります。仕様の正本は [`CLAUDE.md`](CLAUDE.md)（オーナー提供 BUILD DIRECTIVE v1.0）。
+**NULL CORE** の戦闘がリアルタイム3Dで映り、QR を読んだ来場者全員がスマホの3つのボタン（撃つ・守る・直す）で
+一緒に雷神を動かし、日本の都市を守ります。タップは無料、**21 sats** を送ると同じ行動の大きい版になります（D-033）。仕様の正本は [`CLAUDE.md`](CLAUDE.md)（オーナー提供 BUILD DIRECTIVE v1.0）。
 
-> 現在の到達点：**Phase 0〜4 と Phase 6 の自動 QA**。8席すべての操作・RAIJIN OVERDRIVE・LNURL-auth 認証・共有エネルギーパルス
+> 現在の到達点：**群衆レイド（D-033）＋ Phase 3/4 の認証・決済＋自動 QA**。3ボタンの群衆プレイ・LNURL-auth 認証・21 sats の大きい行動
 > （sandbox の VIRTUAL 決済と、承認後にだけ有効にできる LNbits 実決済アダプター）まで動きます。**3D の本番アート（Phase 5）は未着手**で、
 > 画面に「仮モデル」と明示しています。実ウォレット・実決済・会場 GPU での試験は未実施（公開ドメインとオーナー承認が必要）。
 > 進捗と次の作業は [`docs/00_execution_plan.md`](docs/00_execution_plan.md) と [`NEXT_ACTIONS.md`](NEXT_ACTIONS.md)。
@@ -38,9 +38,9 @@ git clone https://github.com/Itokichi0000/robotbattle.git
 cd robotbattle && git checkout claude/new-session-ik9unw && ./start.sh
 ```
 
-すぐ遊ぶには：運営画面にログイン → 「DEMO BOTS」をオン → 「出撃する」（運営画面の一番上に、今押すべきボタンが1つ出ます）。スマホは PC と同じ Wi-Fi で大画面の QR を読み取ります。
+すぐ遊ぶには：運営画面にログイン → 「DEMO BOTS」をオン → 約30秒で自動出撃（待たずに始めるなら「出撃する」）。スマホは PC と同じ Wi-Fi で大画面の QR を読み取ります。
 ポートを変えるときは `PORT=4500 ./start.sh`、ブラウザを開かないときは `./start.sh --no-open`。
-常に sandbox（VIRTUAL パルスのみ・お金は動かない）で起動します。
+常に sandbox（21 sats は VIRTUAL のみ・お金は動かない）で起動します。
 
 ### 手動で起動する場合（開発用）
 
@@ -65,29 +65,23 @@ OPERATOR_PASSWORD=change-me-rehearsal pnpm dev
 - スマホは PC と同じ Wi-Fi に接続し、大画面の QR を読み取ります。QR の URL は `PUBLIC_BASE_URL`（未設定なら LAN の IP を推測）。
 - 大画面はキー `F` でフルスクリーン、最初のクリック/キーで音声を有効化（キオスク運用は `docs/04_conference_runbook.md`）。
 
-### 遊び方（3幕・ゲージ1本、D-032）
+### 遊び方（ボタンは3つだけ、D-033）
 
-試合は **3幕**。大画面の左上に「今の幕の目的」と「今やること」が常に出ます。数字は上部の4つだけ
-（残り時間・守った都市・機体・**雷神ゲージ**）。
-
-| 幕    | 名前           | 目的                                                                   |
-| ----- | -------------- | ---------------------------------------------------------------------- |
-| 第1幕 | ドローン迎撃   | 敵ドローンを撃ち落とす。違う役割の成功をつなぐと雷神ゲージがたまる     |
-| 第2幕 | 都市を守れ     | 予告された都市への攻撃を盾で防ぐ。3都市を失うと負け                    |
-| 第3幕 | NULL CORE 撃破 | 雷神ゲージ満タンで必殺技（4役割が SYNC NOW）。時間内にボスを倒せば勝利 |
+試合は **参加受付 → 出撃 → 戦闘（2分）→ 結果**。大画面とスマホに「今やること」が1行で出て、そのボタンが光ります。
 
 1. 大画面の QR → スマホで「Lightningウォレットで認証」（LNURL-auth・無料・支払いなし）。sandbox では「ウォレットなしで DEMO GUEST」も可。
-   コールサインは任意で、「大画面に表示する」を選んだときだけ表示。
-2. 8席から1つ選んで `READY`。空席は AUTO SUPPORT（人より弱い）、展示時は運営の DEMO BOTS（交代可）。運営画面の「出撃する」で開始。
-3. **砲撃 左/右**：ドラッグで照準 → チャージ満タンの瞬間に発射（PERFECT SHOT）。予告中の敵を先に倒すとその攻撃は消える。
-4. **防衛 左/右**：予告された方向へスワイプして盾を展開（左＝前方/左、右＝右/後方）。
-5. **電力 A**：炉心出力 100% を武器/防衛/機動/修理に配分。**電力 B**：過負荷で切れた回路のタイルを回してつなぎ直す。
-6. **整備 A/B**：担当部位を選び、ボルトを指でぐるっと回して締める。
-7. **雷神ゲージ**（チームで1本）：命中・防御・**連携**（違う役割の成功を10秒以内につなぐ）でたまる。ボス戦で満タンになると必殺技
-   RAIJIN OVERDRIVE（4役割が5秒以内に SYNC NOW、人のいない役割は AUTO が代理）。
-8. **炉心停止（ブラックアウト）**：第2幕・第3幕の途中で起きる（運営が「炉心停止を起こす」でいつでも起こせる）。エネルギー回復が 30% に落ち、
-   直し方は2つ：① 電力B が回路をつなぐ ② 誰かがスマホから **21 sats** を送る（任意）。**どちらでも即時復旧＋雷神ゲージ +20%**。
-   **sats を送れるのはこのときだけ**。送ると大画面の炉心に雷が落ち、実決済なら「請求から着金まで X 秒」が出る。払わなくても勝てる。
+   **これで参加完了**（席選びなし・人数上限なし）。最初の1人から約30秒で自動出撃。運営の「出撃する」で即開始も可。途中参加もOK。
+2. スマホのボタンは3つ。タップは**無料**で小さい効果（1人 0.7 秒に1回）：
+
+| ボタン | 効果（無料タップ）                                               | 21 sats（大きい版）    | 足りないと        |
+| ------ | ---------------------------------------------------------------- | ---------------------- | ----------------- |
+| 撃つ   | ボスの HP を削る                                                 | max(60, ボス HP の 5%) | 時間切れで負け    |
+| 守る   | シールドを貯める（予告された都市への攻撃を、必要値に届けば防ぐ） | シールド +60           | 3都市落ちたら負け |
+| 直す   | 雷神の装甲を戻す（ボスの爪で減る）                               | 装甲 +50               | 装甲 0 で負け     |
+
+3. 各ボタン横の **21 sats** は任意。押すと確認画面（金額・受取先・VIRTUAL/実決済の別）→ 承認後に請求書。着金をサーバーが確認してから一度だけ効く。
+   固定額・1人1試合3回・15秒に1回・1試合全体15回まで。誰がいくら払ったかは表示しない。払わなくても勝てる（2人以上の無料プレイで勝てる設計）。
+4. ボス HP は出撃時の人数で決まり、途中参加があると比例して増える。DEMO BOTS（6体、DEMO 表示）は同じ「今やること」に従ってタップする。
 
 ## コマンド
 
@@ -99,22 +93,22 @@ pnpm typecheck    # tsc --noEmit
 pnpm format:check # Prettier
 pnpm build        # server を esbuild、3アプリを vite build
 pnpm start        # 本番起動（apps/server/dist + apps/*/dist を配信）
-pnpm e2e          # Playwright：本番ビルドで 縦切り / LNURL-auth + VIRTUAL パルス / 8席フルソーティー（先に pnpm build）
+pnpm e2e          # Playwright：本番ビルドで 3ボタン / LNURL-auth + VIRTUAL 21 sats / BOT と1試合通し（先に pnpm build）
 ```
 
-- 画面キャプチャ：`OPERATOR_PASSWORD=... pnpm --filter @swed/server exec tsx ../../tools/perf/capture-phase2.ts http://localhost:4400 docs/qa/phase2`
-- 負荷試験：`OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://localhost:4400 --pilots 8 --displays 3 --seconds 90`
+- 画面キャプチャ：`OPERATOR_PASSWORD=... pnpm --filter @swed/server exec tsx ../../tools/perf/capture-d033.ts http://localhost:4400 docs/qa/d033`
+- 負荷試験：`OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://localhost:4400 --pilots 30 --displays 3 --seconds 90`
 - テスト用 LNURL-auth ウォレット（リハーサル用。資金を持たずログイン署名だけ）：`pnpm --filter @swed/server lnurl-wallet 'LNURL1...' [合言葉]`
 
 ## 構成
 
 ```
 apps/server      Fastify 5 + Socket.IO 4。権威サーバー（20Hz シミュレーション、10Hz スナップショット）、SQLite、セッション、
-                 LNURL-auth（LUD-04）、共有エネルギーパルス（sandbox / LNbits）、運営、DEMO BOTS
+                 LNURL-auth（LUD-04）、21 sats の大きい行動（sandbox / LNbits）、運営、DEMO BOTS
 apps/display     大画面：React + React Three Fiber。仮 RAIJIN・敵・格納庫・東京湾・日本ホログラム・VFX・カメラ・HUD（ref 05）
-apps/pilot       スマホ：React。認証 → 席選択 → READY → 8席の役割コンソール（ref 06）・OVERDRIVE・パルス → デブリーフ
-apps/operator    運営：React。進行・AUTO SUPPORT・DEMO BOTS・席・共有エネルギー（SETTLE / LIVE 化）・画質/音量・接続/FPS・監査ログ
-packages/shared       席・役割・フェーズ・都市/日本地図・GameConfig/プリセット・状態/イベント/Socket 契約・Zod（サーバー専用）
+apps/pilot       スマホ：React。認証 → 参加 → 3ボタン（無料タップ＋21 sats の確認シート）→ 結果
+apps/operator    運営：React。進行・自動出撃・DEMO BOTS・参加人数とボタン別の回数・21 sats（SETTLE / LIVE 化）・画質/音量・接続/FPS・監査ログ
+packages/shared       3行動・フェーズ・都市/日本地図・GameConfig/プリセット・状態/イベント/Socket 契約・Zod（サーバー専用）
 packages/game-engine  決定的ルール（純粋関数 reduce / advanceTo）、ヒント、BOT、ヘッドレス対戦
 packages/client       クライアント共通ストア（スナップショット + イベント）、React フック
 packages/ui-tokens    色・フォント・アイコン（SVG）・フレーム
@@ -127,7 +121,7 @@ references/      オーナー提供の参考画像6点（ゲームには組み�
 
 ## 安全と運営の確認事項（必読）
 
-- **実決済は既定で無効**。sandbox（既定）では共有エネルギーパルスは VIRTUAL（お金は動かない）。LNbits の実決済アダプターは実装済みですが、
+- **実決済は既定で無効**。sandbox（既定）では21 sats の大きい行動は VIRTUAL（お金は動かない）。LNbits の実決済アダプターは実装済みですが、
   `APP_MODE=live` には LNbits の **invoice/read key のみ**・受取先名・https の公開 URL が必須で、起動しても **LIVE OFF** から始まり、
   運営が接続確認（LNbits と公開 Webhook）を通して `LIVE` と入力しない限り請求書は作られません。**オーナーの明示承認なしに LIVE にしないこと**
   （手順は `docs/03_auth_and_payment.md`）。送金（`out:true`）・Admin key は使いません。

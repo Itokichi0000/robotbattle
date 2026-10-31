@@ -3,29 +3,37 @@ import type { MatchSnapshotMsg } from '@swed/shared';
 import { BASE, OPERATOR_PASSWORD } from './playwright.config';
 
 /**
- * PHASE 1 acceptance: two phones in different roles drive one RAIJIN; the big screen and
- * the server agree. Every assertion about outcomes reads the server's public state.
+ * D-033 acceptance: two phones scan in (no seats), press the three buttons, and the big
+ * screen and the server agree. Every assertion about outcomes reads the server's public state.
  */
+
+// The browser is shared by every spec: close the phones a test opened, or they stay in the
+// crowd (RESET keeps connected players) and the next test starts with extra people.
+test.afterEach(async ({ browser }) => {
+  for (const c of browser.contexts()) await c.close();
+});
 
 async function publicMatch(page: Page): Promise<MatchSnapshotMsg> {
   const res = await page.request.get(`${BASE}/api/public/match`);
   return (await res.json()) as MatchSnapshotMsg;
 }
 
-async function phone(browser: Browser, seat: RegExp): Promise<Page> {
+async function phone(browser: Browser): Promise<Page> {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const p = await ctx.newPage();
   await p.goto('/pilot/');
   await p.getByRole('button', { name: /DEMO GUEST/ }).click();
-  await expect(p.getByText('搭乗する席を選ぶ')).toBeVisible();
-  await p.getByRole('button', { name: seat }).click();
-  await expect(p.getByText('搭乗完了')).toBeVisible();
-  await p.getByRole('button', { name: /READY/ }).click();
-  await expect(p.getByText(/出撃待機中/)).toBeVisible();
+  // Scanning is joining: straight into the crowd, no seat to pick.
+  await expect(p.getByText('参加しました')).toBeVisible();
+  await expect(p.getByText(/ボタンは3つだけ/)).toBeVisible();
   return p;
 }
 
-test('two phones, one mech: gunner damages on the server, shield blocks a telegraphed strike', async ({
+/** The free button for an action (the big one on the left of each row). */
+const freeButton = (p: Page, name: '撃つ' | '守る' | '直す') =>
+  p.locator('.act-free').filter({ has: p.locator('.act-name', { hasText: name }) });
+
+test('two phones, one mech: free taps change the server state, the big screen follows', async ({
   browser,
 }) => {
   const operatorCtx = await browser.newContext();
@@ -39,7 +47,7 @@ test('two phones, one mech: gunner damages on the server, shield blocks a telegr
   await op.goto('/operator/');
   await expect(op.getByText('今の状態 NOW')).toBeVisible();
   await expect(op.getByText('SANDBOX（架空のお金・テスト）')).toBeVisible();
-  // Specs share one server: start from an empty mech whatever ran before (bots off too).
+  // Specs share one server: start from an empty lobby whatever ran before (bots off too).
   await expect(op.locator('.payments')).toBeVisible(); // operator status has arrived
   if (await op.getByLabel(/DEMO BOTS/).isChecked()) await op.getByLabel(/DEMO BOTS/).uncheck();
   await op.getByRole('button', { name: /RESET/ }).click();
@@ -50,81 +58,61 @@ test('two phones, one mech: gunner damages on the server, shield blocks a telegr
   ).newPage();
   await display.goto('/display/?q=SAFE');
   await expect(display.locator('.stage canvas')).toBeVisible({ timeout: 60_000 });
-  await expect(display.getByText('SCAN TO BECOME A PILOT')).toBeVisible();
+  await expect(display.getByText('SCAN TO JOIN')).toBeVisible();
   await expect(display.locator('img[src="/api/public/join.svg"]')).toBeVisible();
+  await expect(display.getByText(/ボタンは3つだけ/)).toBeVisible();
 
-  const gunner = await phone(browser, /砲撃 左/);
-  const guard = await phone(browser, /防衛 左/);
+  const a = await phone(browser);
+  const b = await phone(browser);
 
-  // The big screen lights the two stations; the match moved from ATTRACT to LOBBY.
-  await expect(display.locator('.seat-plate.on')).toHaveCount(2);
   let m = await publicMatch(op);
   expect(m.phase).toBe('LOBBY');
-  expect(m.state.seats.GUNNER_L.ready && m.state.seats.SHIELD_L.ready).toBe(true);
+  expect(m.state.humans).toBe(2);
+  await expect(display.locator('.pilots-count')).toContainText('02');
   expect(JSON.stringify(m)).not.toMatch(/pilotId/);
 
   await op.getByRole('button', { name: /START/ }).click();
-  await expect.poll(async () => (await publicMatch(op)).phase, { timeout: 20_000 }).toBe('WAVE_1');
+  await expect.poll(async () => (await publicMatch(op)).phase, { timeout: 20_000 }).toBe('BATTLE');
   await expect(display.locator('.topbar')).toBeVisible();
+  await expect(display.locator('.bossbar')).toBeVisible();
 
-  // GUNNER: LOCK → CHARGE → FIRE. The server applies the damage.
-  await expect(gunner.getByText('TARGET LOCK')).toBeVisible();
-  const lockBtn = gunner.getByRole('button', { name: /ロックオン/ });
-  await expect(lockBtn).toBeEnabled();
+  // ATTACK: one free tap takes boss HP down on the server.
+  const hp0 = (await publicMatch(op)).state.boss!.hp;
+  await freeButton(a, '撃つ').click();
   await expect
-    .poll(
-      async () => {
-        const s = (await publicMatch(op)).state;
-        return s.enemies.some((e) => e.arrivesAt <= s.t);
-      },
-      { timeout: 20_000 },
-    )
+    .poll(async () => (await publicMatch(op)).state.boss!.hp, { timeout: 10_000 })
+    .toBeLessThan(hp0);
+  await expect(a.locator('.mine')).toContainText('撃つ 1');
+
+  // DEFEND and REPAIR reach the server too (counted per button for the whole crowd).
+  await freeButton(b, '守る').click();
+  await b.waitForTimeout(800); // the free cooldown
+  await freeButton(b, '直す').click();
+  await expect
+    .poll(async () => {
+      const f = (await publicMatch(op)).state.stats.free;
+      return f.DEFEND >= 1 && f.REPAIR >= 1;
+    })
     .toBe(true);
-  await lockBtn.click();
-  const fireBtn = gunner.getByRole('button', { name: /発射/ });
-  await expect(fireBtn).toBeEnabled({ timeout: 15_000 });
-  await fireBtn.click();
-  await expect
-    .poll(async () => (await publicMatch(op)).state.seats.GUNNER_L.stats.hits, { timeout: 15_000 })
-    .toBeGreaterThanOrEqual(1);
-  await expect(gunner.locator('.sysline .msg.ok')).toBeVisible();
 
-  // DEFENSE: wait for a strike in FRONT/LEFT, deploy inside the guard window.
-  await expect
-    .poll(
-      async () => {
-        const t = await guard
-          .locator('.next-threat b')
-          .textContent()
-          .catch(() => null);
-        const lead = t ? parseFloat(t) : null;
-        if (lead !== null && lead < 1.3) {
-          await guard
-            .getByRole('button', { name: /シールド展開/ })
-            .click({ timeout: 2_000 })
-            .catch(() => undefined);
-        }
-        return (await publicMatch(op)).state.seats.SHIELD_L.stats.blocks;
-      },
-      { timeout: 60_000, intervals: [100] },
-    )
-    .toBeGreaterThanOrEqual(1);
+  // The phone always shows what to press now, and the same button is lit.
+  await expect(a.locator('.now-call')).toBeVisible();
+  await expect(a.locator('.act.rec')).toHaveCount(1);
 
   // Operator PAUSE reaches every phone; the match clock freezes.
   await op.getByRole('button', { name: /PAUSE/ }).click();
-  await expect(gunner.getByText(/作戦一時停止中/)).toBeVisible();
+  await expect(a.getByText(/作戦一時停止中/)).toBeVisible();
   const t0 = (await publicMatch(op)).state.t;
-  await gunner.waitForTimeout(1_500);
+  await a.waitForTimeout(1_500);
   expect((await publicMatch(op)).state.t).toBe(t0);
   await op.getByRole('button', { name: /RESUME/ }).click();
-  await expect(gunner.getByText(/作戦一時停止中/)).toBeHidden();
+  await expect(a.getByText(/作戦一時停止中/)).toBeHidden();
 
-  // A phone that reloads mid-fight keeps its seat (held for 60 s by the server).
-  await gunner.reload();
-  await expect(gunner.getByText('TARGET LOCK')).toBeVisible({ timeout: 20_000 });
+  // A phone that reloads mid-fight is still in the crowd (held by the server).
+  await a.reload();
+  await expect(freeButton(a, '撃つ')).toBeVisible({ timeout: 20_000 });
   m = await publicMatch(op);
-  expect(m.state.seats.GUNNER_L.occupied).toBe(true);
-  expect(m.state.seats.GUNNER_L.connected).toBe(true);
+  expect(m.state.humans).toBe(2);
 });
 
 test('pilot sign-in is free and never asks for keys; operator needs a password', async ({

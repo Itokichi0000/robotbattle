@@ -1,5 +1,6 @@
 import { useFrame } from '@react-three/fiber';
 import { enemyPositionAt } from '@swed/game-engine';
+import { SEAT_IDS } from '@swed/shared';
 import type { GunnerSeatId, SeatId } from '@swed/shared';
 import { COLORS } from '@swed/ui-tokens';
 import { useEffect, useMemo, useRef } from 'react';
@@ -323,16 +324,33 @@ export function Raijin() {
   useEffect(
     () =>
       fxBus.on((e) => {
-        if (e.type === 'seat_assigned') pulse.current[e.seatId] = 1;
-        // Every confirmed station action lights its station once (power, router, repair, sync).
-        if ((e.type === 'power_routed' || e.type === 'circuit_restored') && !e.auto && e.seatId)
-          pulse.current[e.seatId] = 0.8;
-        if ((e.type === 'part_repaired' || e.type === 'threat_blocked') && !e.auto && e.seatId)
-          pulse.current[e.seatId] = 0.8;
-        if (e.type === 'overdrive_sync' && e.seatId) pulse.current[e.seatId] = 1;
-        if (e.type === 'sats_pulse_settled' && e.seatId) pulse.current[e.seatId] = 1;
-        if (e.type === 'weapon_fired' && (e.seatId === 'GUNNER_L' || e.seatId === 'GUNNER_R'))
-          kick.current[e.seatId] = 1;
+        // D-033: one crowd, three actions. Each confirmed action lights the stations that
+        // perform it on the one machine: guns fire, shoulders shield, the frame repairs.
+        if (e.type === 'action') {
+          if (e.kind === 'ATTACK') {
+            const sides: GunnerSeatId[] = e.paid
+              ? ['GUNNER_L', 'GUNNER_R']
+              : [Math.random() < 0.5 ? 'GUNNER_L' : 'GUNNER_R'];
+            for (const g of sides) {
+              kick.current[g] = 1;
+              pulse.current[g] = e.paid ? 1 : 0.6;
+            }
+          } else if (e.kind === 'DEFEND') {
+            pulse.current.SHIELD_L = e.paid ? 1 : 0.6;
+            pulse.current.SHIELD_R = e.paid ? 1 : 0.6;
+          } else {
+            pulse.current.ENGINEER_LEGS = e.paid ? 1 : 0.6;
+            pulse.current.ENGINEER_CORE = e.paid ? 1 : 0.6;
+          }
+          if (e.paid) {
+            pulse.current.POWER_CORE = 1;
+            pulse.current.POWER_ROUTER = 1;
+          }
+        }
+        if (e.type === 'player_joined') {
+          const id = SEAT_IDS[Math.floor(Math.random() * SEAT_IDS.length)];
+          if (id) pulse.current[id] = 1;
+        }
       }),
     [],
   );
@@ -358,8 +376,9 @@ export function Raijin() {
       if (!g || !g.parent) continue;
       let want = IDLE_ARM.clone();
       if (seat === 'GUNNER_L') want.x *= -1;
-      const gs = snap?.gunners[seat];
-      const target = gs?.targetId ? snap?.enemies.find((e) => e.id === gs.targetId) : undefined;
+      // Both guns track NULL CORE once it has arrived.
+      const target =
+        snap?.phase === 'BATTLE' ? snap.enemies.find((e) => e.arrivesAt <= mt) : undefined;
       if (target && snap) {
         const p = enemyPositionAt(target.orbit, target.spawnedAt, mt);
         tmpV.set(p.x, p.y, p.z);
@@ -375,17 +394,14 @@ export function Raijin() {
         const bend = target ? 0 : 0.75;
         elbow.current.rotation.x += (bend - elbow.current.rotation.x) * (1 - Math.exp(-dt * 4));
       }
-      // Charge glow grows from lock to ready, then breathes until the shot.
+      // Muzzle glow flares with each shot, then settles to a low idle charge.
       const gl = glow.current;
       if (gl) {
-        if (gs?.targetId && target) {
-          const span = Math.max(1, gs.readyAt - gs.lockedAt);
-          const k = Math.min(1, Math.max(0, (mt - gs.lockedAt) / span));
-          const ready = mt >= gs.readyAt;
+        if (target) {
+          const k = kick.current[seat];
           gl.visible = true;
-          const s = ready ? 0.9 + Math.sin(t * 12) * 0.1 : 0.2 + k * 0.6;
-          gl.scale.setScalar(s);
-          (gl.material as THREE.MeshBasicMaterial).opacity = ready ? 0.85 : 0.35 + k * 0.4;
+          gl.scale.setScalar(0.35 + k * 0.7 + Math.sin(t * 6) * 0.04);
+          (gl.material as THREE.MeshBasicMaterial).opacity = 0.35 + k * 0.5;
         } else gl.visible = false;
       }
     }
@@ -409,23 +425,21 @@ export function Raijin() {
       head.current.rotation.y +=
         (THREE.MathUtils.clamp(yaw, -0.8, 0.8) - head.current.rotation.y) * Math.min(1, dt * 2);
     }
-    // Seat stations: human pilot = bright, AUTO SUPPORT = dim steady, idle = dark.
-    for (const seat of Object.keys(stations) as SeatId[]) {
-      const ps = snap?.seats[seat];
+    // Stations light up as the crowd grows (one more for each player, up to all eight).
+    (Object.keys(stations) as SeatId[]).forEach((seat, i) => {
       const p = pulse.current[seat] ?? 0;
-      const base = ps?.occupied ? 2.6 : ps?.auto ? 0.3 : 0.06;
+      const base = (snap?.players ?? 0) > i ? 2.6 : 0.12;
       stations[seat].emissiveIntensity = (base + p * 6) * powered * (1 - 0.8 * anim.blackout);
       pulse.current[seat] = Math.max(0, p - dt * 1.2);
-    }
+    });
     thrusterMat.emissiveIntensity = 0.4 + thrust * 6 + Math.sin(t * 40) * thrust * 0.6;
-    // The chest reactor brightens as the RAIJIN gauge fills, and burns at OVERDRIVE READY.
-    const charge = snap ? Math.min(1, snap.teamCapacitor / snap.hints.overdriveCapacitorMin) : 0;
-    const od = snap && snap.overdrive.status !== 'IDLE' ? 3 + Math.sin(t * 5) * 0.8 : 0;
-    // Blackout: the reactor nearly dies (a weak flicker); a full RAIJIN gauge makes it surge.
+    // The chest reactor glows with the shield charge and surges on a Lightning action.
+    const charge = snap ? Math.min(1, snap.shield / Math.max(1, snap.shieldMax)) : 0;
+    // Armour critical: the reactor flickers low so the hall sees RAIJIN needs repairs.
     const dark = 1 - 0.85 * anim.blackout;
     const surge = anim.gaugeFull ? 2.5 + Math.sin(t * 6) * 0.6 : 0;
     coreMat.emissiveIntensity =
-      (1.2 + charge * 5 + od + surge + Math.sin(t * 2) * 0.25) * powered * dark;
+      (1.2 + charge * 4 + surge + Math.sin(t * 2) * 0.25) * powered * dark;
     visorMat.emissiveIntensity = 3.2 * powered * (1 - 0.7 * anim.blackout);
   });
 

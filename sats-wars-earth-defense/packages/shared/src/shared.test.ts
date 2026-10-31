@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACTION_KINDS,
   bearingToDirection,
+  bossHpFor,
   CITY_IDS,
   CITY_POINTS,
   configHash,
   ENGINEER_COVERAGE,
   formatClock,
   MECH_PART_IDS,
+  mechHitFor,
   PRESETS,
   ROLES,
   SEAT_IDS,
   SEATS,
   SHIELD_COVERAGE,
   shieldSeatFor,
+  strikeNeedFor,
 } from './index';
 import { operatorCommandSchema, pilotActionReqSchema } from './schemas';
 
@@ -64,21 +68,32 @@ describe('config', () => {
     expect(configHash(PRESETS.STANDARD)).not.toBe(configHash(PRESETS.SHORT));
   });
 
-  it('runs STANDARD at about 210 s of combat and SHORT at about 150 s', () => {
-    const combat = (p: keyof typeof PRESETS) =>
-      PRESETS[p].timings.wave1Ms + PRESETS[p].timings.wave2Ms + PRESETS[p].timings.bossMs;
-    expect(combat('STANDARD')).toBe(210_000);
-    expect(combat('SHORT')).toBe(150_000);
+  it('runs STANDARD at 120 s and SHORT at 90 s of battle', () => {
+    expect(PRESETS.STANDARD.timings.battleMs).toBe(120_000);
+    expect(PRESETS.SHORT.timings.battleMs).toBe(90_000);
   });
 
-  it('power distribution sums to 100', () => {
-    const d = PRESETS.STANDARD.power.defaultDistribution;
-    expect(d.weapon + d.shield + d.mobility + d.repair).toBe(100);
+  it('a Lightning action is the same size for everyone and bigger than a free tap', () => {
+    for (const p of Object.values(PRESETS)) {
+      for (const k of ACTION_KINDS)
+        expect(p.paid.effect[k]).toBeGreaterThanOrEqual(p.free.effect[k] * 10);
+      expect(p.paid.amountSats).toBe(21);
+    }
   });
 
-  it('telegraphs attacks at least 4 s ahead', () => {
-    for (const p of Object.values(PRESETS))
-      expect(p.timings.threatWarnMs).toBeGreaterThanOrEqual(4_000);
+  it('announces city strikes at least 4 s ahead', () => {
+    for (const p of Object.values(PRESETS)) {
+      expect(p.strikes.warnMs).toBeGreaterThanOrEqual(4_000);
+      expect(p.mech.hitWarnMs).toBeGreaterThanOrEqual(2_000);
+    }
+  });
+
+  it('grows the boss with the crowd, but slower than the crowd grows', () => {
+    const c = PRESETS.STANDARD;
+    expect(bossHpFor(c, 10)).toBeGreaterThan(bossHpFor(c, 1));
+    expect(bossHpFor(c, 10)).toBeLessThan(bossHpFor(c, 1) * 10);
+    expect(strikeNeedFor(c, 200)).toBe(c.strikes.needMax);
+    expect(mechHitFor(c, 200)).toBe(Math.round(c.mech.hitDamage * c.mech.hitMaxScale));
   });
 });
 
@@ -91,21 +106,13 @@ describe('formatClock', () => {
 });
 
 describe('schemas', () => {
-  it('accepts a well-formed action and rejects extra fields or unknown seats', () => {
-    const ok = {
-      matchId: 'm1',
-      seatId: 'GUNNER_L',
-      clientActionId: 'abcdefgh1234',
-      action: { actionType: 'FIRE', payload: {} },
-    };
+  it('accepts one of the three actions and nothing else', () => {
+    const ok = { matchId: 'm1', clientActionId: 'abcdefgh1234', action: { kind: 'ATTACK' } };
     expect(pilotActionReqSchema.safeParse(ok).success).toBe(true);
     expect(pilotActionReqSchema.safeParse({ ...ok, hp: 9999 }).success).toBe(false);
-    expect(pilotActionReqSchema.safeParse({ ...ok, seatId: 'PILOT_9' }).success).toBe(false);
+    expect(pilotActionReqSchema.safeParse({ ...ok, action: { kind: 'NUKE' } }).success).toBe(false);
     expect(
-      pilotActionReqSchema.safeParse({
-        ...ok,
-        action: { actionType: 'FIRE', payload: { damage: 9999 } },
-      }).success,
+      pilotActionReqSchema.safeParse({ ...ok, action: { kind: 'ATTACK', damage: 9999 } }).success,
     ).toBe(false);
   });
 

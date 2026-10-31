@@ -69,8 +69,7 @@ export function JapanHolo({ position = [4, 34, -112] as [number, number, number]
     for (const id of CITY_IDS) registerAnchor(`city:${id}`, cityRefs.current[id] ?? null);
     registerAnchor('holo:japan', group.current);
     const off = fxBus.on((e) => {
-      if ((e.type === 'city_damaged' || e.type === 'city_lost') && e.cityId)
-        flash.current[e.cityId] = 1;
+      if (e.type === 'strike_hit' || e.type === 'strike_blocked') flash.current[e.cityId] = 1;
     });
     return () => {
       off();

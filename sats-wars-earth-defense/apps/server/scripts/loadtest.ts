@@ -1,18 +1,17 @@
 /**
- * Venue load test against a running sandbox server: N pilot phones (eight seated, the rest
- * watching), D big screens, one operator. Seated phones play like attentive pilots with the
- * same bot logic as the demo bots, through the real pilot socket (cookies, acks, limits).
+ * Venue load test against a running sandbox server: N phones in the crowd (D-033: no seats,
+ * everyone plays), D big screens, one operator. Phones press what the screen recommends,
+ * like the demo bots, through the real pilot socket (cookies, acks, limits).
  *
  *   OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://127.0.0.1:4400 \
- *     --pilots 8 --displays 3 --seconds 90 [--mash]
+ *     --pilots 40 --displays 3 --seconds 90 [--mash]
  *
  * Reports action round-trip latency, refusals, snapshot cadence and size per screen.
  * Sandbox only: it signs in with DEMO GUEST and never touches payments.
  */
 import { randomUUID } from 'node:crypto';
-import { botDecide, type BotMemory } from '@swed/game-engine';
-import { SEAT_IDS } from '@swed/shared';
-import type { MatchSnapshotMsg, PublicMatchState, SeatId } from '@swed/shared';
+import { botChoose } from '@swed/game-engine';
+import type { MatchSnapshotMsg, PublicMatchState } from '@swed/shared';
 import { io, type Socket } from 'socket.io-client';
 
 const arg = (name: string, def: string) => {
@@ -20,13 +19,13 @@ const arg = (name: string, def: string) => {
   return i > 0 ? process.argv[i + 1]! : def;
 };
 const url = arg('url', 'http://127.0.0.1:4400');
-const pilots = Number(arg('pilots', '8'));
+const pilots = Number(arg('pilots', '30'));
 const displays = Number(arg('displays', '2'));
 const seconds = Number(arg('seconds', '60'));
-// --mash: every seated phone sends every 50 ms (a crowd hammering buttons). Whatever the bot
-// would not do is sent as SYNC_NOW, which the server refuses cheaply. Checks the rate limit.
+// --mash: every phone sends every 50 ms (a crowd hammering buttons): the free cooldown and the
+// socket rate limit refuse the excess cheaply.
 const mash = process.argv.includes('--mash');
-const everyMs = mash ? 50 : 300;
+const everyMs = mash ? 50 : 900;
 const password = process.env.OPERATOR_PASSWORD;
 if (!password) throw new Error('Set OPERATOR_PASSWORD');
 const origin = new URL(url).origin;
@@ -84,10 +83,8 @@ const screens = Array.from({ length: displays }, () => {
 
 interface Phone {
   s: Socket;
-  seat: SeatId | null;
   state: PublicMatchState | null;
   matchId: string;
-  mem: BotMemory;
 }
 const phones: Phone[] = [];
 for (let i = 0; i < pilots; i++) {
@@ -97,7 +94,7 @@ for (let i = 0; i < pilots; i++) {
     body: '{}',
   });
   const s = connect('/pilot', cookieFrom(res, 'sw_pilot'));
-  const ph: Phone = { s, seat: null, state: null, matchId: '', mem: {} };
+  const ph: Phone = { s, state: null, matchId: '' };
   s.on('match:snapshot', (m: MatchSnapshotMsg) => {
     ph.state = m.state;
     ph.matchId = m.matchId;
@@ -105,23 +102,7 @@ for (let i = 0; i < pilots; i++) {
   phones.push(ph);
 }
 await sleep(1_500);
-for (const [i, ph] of phones.entries()) {
-  const seat = SEAT_IDS[i];
-  if (!seat) continue;
-  const r = (await ph.s.timeout(5_000).emitWithAck('pilot:joinSeat', {
-    matchId: ph.matchId,
-    seatId: seat,
-    requestId: randomUUID(),
-  })) as { ok: boolean; reasonCode?: string };
-  if (!r.ok) throw new Error(`join ${seat}: ${r.reasonCode}`);
-  ph.seat = seat;
-  await ph.s
-    .timeout(5_000)
-    .emitWithAck('pilot:ready', { matchId: ph.matchId, requestId: randomUUID() });
-}
-console.log(
-  `seated ${phones.filter((p) => p.seat).length}, watching ${phones.filter((p) => !p.seat).length}, screens ${displays}`,
-);
+console.log(`phones ${phones.length} (all in the crowd), screens ${displays}`);
 console.log('START', await opCmd({ command: 'START' }));
 
 const lat: number[] = [];
@@ -130,40 +111,34 @@ let sent = 0;
 let lost = 0;
 const until = performance.now() + seconds * 1_000;
 await Promise.all(
-  phones
-    .filter((p) => p.seat)
-    .map(async (ph) => {
-      while (performance.now() < until) {
-        await sleep(everyMs + Math.random() * 50);
-        const st = ph.state;
-        if (!st || !ph.seat) continue;
-        const action =
-          botDecide(st, ph.seat, st.t, 1, ph.mem) ??
-          (mash ? { actionType: 'SYNC_NOW' as const, payload: {} } : null);
-        if (!action) continue;
-        const t0 = performance.now();
-        sent += 1;
-        try {
-          const r = (await ph.s.timeout(3_000).emitWithAck('pilot:action', {
-            matchId: ph.matchId,
-            seatId: ph.seat,
-            clientActionId: randomUUID(),
-            action,
-          })) as { accepted: boolean; reasonCode?: string };
-          lat.push(performance.now() - t0);
-          if (!r.accepted)
-            refused.set(r.reasonCode ?? '?', (refused.get(r.reasonCode ?? '?') ?? 0) + 1);
-        } catch {
-          lost += 1;
-        }
+  phones.map(async (ph) => {
+    while (performance.now() < until) {
+      await sleep(everyMs + Math.random() * 300);
+      const st = ph.state;
+      if (!st) continue;
+      const kind = botChoose(st, Math.random(), 0.85);
+      const t0 = performance.now();
+      sent += 1;
+      try {
+        const r = (await ph.s.timeout(3_000).emitWithAck('pilot:action', {
+          matchId: ph.matchId,
+          clientActionId: randomUUID(),
+          action: { kind },
+        })) as { accepted: boolean; reasonCode?: string };
+        lat.push(performance.now() - t0);
+        if (!r.accepted)
+          refused.set(r.reasonCode ?? '?', (refused.get(r.reasonCode ?? '?') ?? 0) + 1);
+      } catch {
+        lost += 1;
       }
-    }),
+    }
+  }),
 );
 
 const health = (await (await fetch(`${url}/health`)).json()) as { phase: string };
 const end = phones[0]?.state;
 const report = {
-  mode: mash ? 'mash (every 50 ms)' : 'attentive pilots',
+  mode: mash ? 'mash (every 50 ms)' : 'crowd tapping ~1/s',
   pilots,
   displays,
   seconds,
@@ -184,7 +159,9 @@ const report = {
     gapMaxms: Math.round(Math.max(0, ...stat.gaps)),
     events: stat.events,
   })),
-  match: end ? { t: end.t, sync: end.teamSync, core: end.coreHp, stats: end.stats } : null,
+  match: end
+    ? { t: end.t, players: end.players, boss: end.boss, mech: end.mechHp, stats: end.stats }
+    : null,
 };
 console.log(JSON.stringify(report, null, 2));
 await opCmd({ command: 'RESET' });

@@ -1,6 +1,6 @@
 import { useStore, useTicker } from '@swed/client';
 import { percent } from '@swed/game-engine';
-import { CITY_IDS, formatClock, PHASE_LABEL, SEAT_IDS, SEATS } from '@swed/shared';
+import { ACTION_LABEL, CITY_IDS, formatClock, PHASE_LABEL } from '@swed/shared';
 import type {
   OperatorCommand,
   OperatorPaymentsView,
@@ -85,22 +85,13 @@ function Toggle({
   );
 }
 
-/** The steps of one round, so staff always see where they are (D-032). */
+/** The steps of one round, so staff always see where they are (D-033). */
 const FLOW: Array<{ key: string; label: string; phases: string[] }> = [
-  { key: 'lobby', label: '受付', phases: ['ATTRACT', 'LOBBY'] },
+  { key: 'lobby', label: '参加受付', phases: ['LOBBY'] },
   { key: 'deploy', label: '出撃', phases: ['COUNTDOWN', 'DEPLOYMENT'] },
-  { key: 'w1', label: '第1幕 ドローン迎撃', phases: ['WAVE_1'] },
-  { key: 'w2', label: '第2幕 都市を守れ', phases: ['WAVE_2'] },
-  { key: 'boss', label: '第3幕 NULL CORE 撃破', phases: ['BOSS'] },
+  { key: 'battle', label: '戦闘（撃つ・守る・直す）', phases: ['BATTLE'] },
   { key: 'done', label: '結果', phases: ['VICTORY', 'DEFEAT', 'RESULTS'] },
 ];
-
-/** People and demo bots aboard, counted apart (`humans` counts every occupied seat). */
-function crew(s: PublicMatchState) {
-  const people = SEAT_IDS.filter((id) => s.seats[id].occupied && !s.seats[id].bot).length;
-  const bots = SEAT_IDS.filter((id) => s.seats[id].occupied && s.seats[id].bot).length;
-  return { people, bots };
-}
 
 type Act = {
   label: string;
@@ -113,12 +104,11 @@ type Act = {
 /** What the round is doing in one sentence, and the actions that make sense right now. */
 function plan(s: PublicMatchState, mt: number): { title: string; detail: string; acts: Act[] } {
   const p = s.phase;
-  const { people, bots } = crew(s);
-  const aboard = bots ? `人 ${people}人 ＋ BOT ${bots}` : `${people}人`;
-  const left = s.combatEndsAt !== null ? formatClock(s.combatEndsAt - mt) : '--:--';
+  const crowd = s.bots ? `人 ${s.humans}人 ＋ BOT ${s.bots}` : `${s.humans}人`;
+  const left = s.phaseEndsAt !== null ? formatClock(s.phaseEndsAt - mt) : '--:--';
   const cities = CITY_IDS.filter((id) => !s.cities[id].lost).length;
-  const gauge = Math.round(Math.min(100, s.teamCapacitor));
-  const fight = `残り ${left} ・ 都市 ${cities}/${CITY_IDS.length} ・ 機体 ${percent(s.coreHp, s.coreMax)}% ・ 雷神ゲージ ${gauge}%`;
+  const boss = s.boss ? percent(s.boss.hp, s.boss.maxHp) : 100;
+  const fight = `残り ${left} ・ ボス ${boss}% ・ 都市 ${cities}/${CITY_IDS.length} ・ 雷神 ${percent(s.mechHp, s.mechMax)}% ・ 参加 ${crowd}`;
   const end: Act = {
     label: '作戦を中止 END',
     note: 'この回を敗北扱いで終わらせ、結果画面へ',
@@ -126,63 +116,46 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
     tone: 'danger',
     confirm: 'この作戦を中止しますか？ / End this match now?',
   };
-  if (p === 'ATTRACT')
+  if (p === 'LOBBY') {
+    const auto =
+      s.autoStartAt !== null
+        ? `あと ${formatClock(s.autoStartAt - mt)} で自動出撃します。`
+        : s.players > 0
+          ? '自動出撃はオフです。'
+          : '最初の1人が参加すると、自動出撃のカウントが始まります。';
     return {
-      title: '待機中（客寄せ画面）',
-      detail: `大画面に QR とタイトルを表示中。誰かが QR から搭乗すると自動で受付になります（搭乗 ${aboard}）`,
-      acts: [
-        {
-          label: '搭乗受付を始める',
-          note: '大画面に8つの席を表示して、パイロットを募集します',
-          cmd: { command: 'OPEN_LOBBY' },
-          tone: 'primary',
-        },
-        {
-          label: 'すぐ出撃 START',
-          note: '今いる人だけで出撃。空席は AUTO SUPPORT（AI）が担当',
-          cmd: { command: 'START' },
-        },
-      ],
-    };
-  if (p === 'LOBBY')
-    return {
-      title: `搭乗受付中 — ${aboard} / 8席`,
+      title: `参加受付中 — ${crowd}`,
       detail:
-        people === 0
-          ? 'まだ誰も乗っていません。大画面の QR をスマホで読み取ってもらいましょう'
-          : '揃ったら出撃。空席は AUTO SUPPORT（AI）が担当するので、1人からでも遊べます',
+        s.players === 0
+          ? `大画面の QR をスマホで読み取ってもらいましょう。読んだ人は全員そのまま参加です（席はありません）。${auto}`
+          : `${auto} 待たずに始めるなら「出撃する」。途中参加もできます。`,
       acts: [
         {
           label: '出撃する START',
-          note: '約8秒の出撃演出のあと、第1幕が始まります（全体 約3分半）',
+          note: '約8秒の出撃演出のあと、戦闘が始まります（戦闘 約2分）',
           cmd: { command: 'START' },
           tone: 'primary',
         },
-        {
-          label: '客寄せ画面に戻す',
-          note: '席の一覧を閉じてタイトル画面へ（搭乗中の人はそのまま）',
-          cmd: { command: 'ATTRACT' },
-        },
       ],
     };
+  }
   if (p === 'COUNTDOWN' || p === 'DEPLOYMENT')
     return {
-      title: '出撃中 — 演出が終わると第1幕',
-      detail: '機体が格納庫から出撃しています。演出中はスマホの操作を受け付けません',
+      title: '出撃中 — 演出が終わると戦闘',
+      detail: '雷神が格納庫から出撃しています。スマホには3つのボタンが表示されています',
       acts: [
         {
           label: '演出をスキップ SKIP',
-          note: 'すぐに第1幕を始めます',
+          note: 'すぐに戦闘を始めます',
           cmd: { command: 'SKIP_DEPLOY' },
           tone: 'primary',
         },
       ],
     };
-  if (p === 'WAVE_1' || p === 'WAVE_2' || p === 'BOSS') {
-    const act = FLOW.find((f) => f.phases.includes(p))!.label;
+  if (p === 'BATTLE') {
     if (s.paused)
       return {
-        title: `一時停止中 — ${act}`,
+        title: '一時停止中',
         detail: `大画面とスマホに「一時停止」と表示中。${fight}`,
         acts: [
           {
@@ -194,21 +167,16 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
           end,
         ],
       };
+    const strike = s.threats.find((th) => th.target.type === 'CITY');
     return {
-      title: s.crisis ? `${act} — 炉心停止中！` : `${act} — 戦闘中`,
-      detail: s.crisis ? `電力B が回路をつなぐか、誰かが sats を送ると復旧。${fight}` : fight,
+      title: strike ? '戦闘中 — 都市に攻撃予告！（みんなで「守る」）' : '戦闘中',
+      detail: fight,
       acts: [
         {
           label: '一時停止 PAUSE',
           note: 'トラブルや説明のときに。タイマーも止まります',
           cmd: { command: 'PAUSE' },
           tone: 'primary',
-        },
-        {
-          label: '炉心停止を起こす',
-          note: 'sats の見せ場を今すぐ。全員のスマホに「21 sats で即時復旧」が出ます（電力B が直してもOK）',
-          cmd: { command: 'TRIGGER_BLACKOUT' },
-          tone: 'warn',
         },
         end,
       ],
@@ -221,7 +189,8 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
         : p === 'DEFEAT'
           ? '敗北 — 結果を表示中'
           : '結果表示中',
-    detail: '何もしなくても、結果表示のあと自動で次の受付（客寄せ画面）に戻ります',
+    detail:
+      '何もしなくても、結果表示のあと自動で次の受付に戻ります（参加中のスマホはそのまま次へ）',
     acts: [
       {
         label: '次の作戦へ NEXT',
@@ -265,7 +234,7 @@ function NowPanel({
           </li>
         ))}
       </ol>
-      <div className={`state${s.crisis ? ' crisis' : ''}`}>
+      <div className={`state${s.threats.some((t) => t.target.type === 'CITY') ? ' crisis' : ''}`}>
         <b>{now.title}</b>
         <p>{now.detail}</p>
       </div>
@@ -288,7 +257,7 @@ function NowPanel({
               label: 'RESET',
               note: '',
               cmd: { command: 'RESET' },
-              confirm: '最初からやり直します。全員の席を解放しますか？ / Reset and free all seats?',
+              confirm: 'この回を捨てて、最初の受付からやり直しますか？ / Reset to a fresh lobby?',
             })
           }
         >
@@ -300,7 +269,7 @@ function NowPanel({
 }
 
 /** Exhibition switches, each said in one plain sentence. */
-function DemoSettings({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => void }) {
+function DemoSettings({ onResult }: { onResult: (m: string) => void }) {
   const st = useSyncExternalStore(statusStore.subscribe, statusStore.get, statusStore.get);
   const run = async (cmd: OperatorCommand) => {
     const r = await command(cmd);
@@ -313,21 +282,26 @@ function DemoSettings({ s, onResult }: { s: PublicMatchState; onResult: (m: stri
       <h2>展示の設定 EXHIBITION</h2>
       <div className="opts">
         <Toggle
+          checked={st?.autoStart ?? true}
+          onToggle={(v) => run({ command: 'SET_AUTO_START', enabled: v })}
+        >
+          <span>
+            <b>自動出撃 — 最初の1人が来たら自動で始める</b>
+            <small>
+              最初の参加から約30秒で出撃します。オフにすると「出撃する」を押すまで待ちます
+            </small>
+          </span>
+        </Toggle>
+        <Toggle
           checked={st?.demoBots ?? false}
           onToggle={(v) => run({ command: 'SET_DEMO_BOTS', enabled: v })}
         >
           <span>
             <b>DEMO BOTS — 無人でも試合を回す</b>
-            <small>空席を BOT で埋め、受付が静かなら自動で出撃。人が乗ると BOT と交代します</small>
-          </span>
-        </Toggle>
-        <Toggle
-          checked={s.autoSupport}
-          onToggle={(v) => run({ command: 'SET_AUTO_SUPPORT', enabled: v })}
-        >
-          <span>
-            <b>AUTO SUPPORT — 空席の役割を AI が補助</b>
-            <small>人より弱い最低限の操作。オフにすると空席の役割は何もしません</small>
+            <small>
+              BOT 6体が観客役で参加し、ときどき VIRTUAL の 21 sats も見せます（DEMO
+              と表示・お金は動きません）
+            </small>
           </span>
         </Toggle>
         {sandbox && st ? (
@@ -369,8 +343,8 @@ function Advanced({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
               void run({ command: 'SET_PRESET', presetId: e.target.value as 'STANDARD' | 'SHORT' })
             }
           >
-            <option value="STANDARD">STANDARD — 戦闘 3分30秒</option>
-            <option value="SHORT">SHORT — 戦闘 2分30秒（混雑時）</option>
+            <option value="STANDARD">STANDARD — 戦闘 2分</option>
+            <option value="SHORT">SHORT — 戦闘 1分30秒（混雑時）</option>
           </select>
         </label>
         <Toggle
@@ -379,7 +353,7 @@ function Advanced({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         >
           <span>
             <b>コールサインを全員非表示</b>
-            <small>大画面の名前をすべて PILOT-XXXX に（不適切な名前が出たときに）</small>
+            <small>名前をすべて PILOT-XXXX に（不適切な名前が出たときに）</small>
           </span>
         </Toggle>
       </div>
@@ -415,77 +389,41 @@ function Advanced({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
   );
 }
 
-function Seats({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => void }) {
+/** Who is in, and what the crowd is pressing. */
+function Crowd({ s }: { s: PublicMatchState }) {
+  const kinds = ['ATTACK', 'DEFEND', 'REPAIR'] as const;
   return (
     <section className="panel sw-frame">
       <h2>
-        席 SEATS — 人 {crew(s).people}
-        {crew(s).bots ? ` ・ BOT ${crew(s).bots}` : ''} / 8
+        参加者 PLAYERS — 人 {s.humans}
+        {s.bots ? ` ・ BOT ${s.bots}` : ''}
       </h2>
+      <p className="explain">
+        QR を読んだ人は全員参加（席・人数の上限なし）。スマホを閉じても約45秒は人数に数えます。
+        ボスの強さは出撃時の人数で決まり、途中参加があると少し強くなります。
+      </p>
       <table>
         <thead>
           <tr>
-            <th>#</th>
-            <th>席</th>
-            <th>だれ</th>
-            <th>状態</th>
-            <th />
+            <th>ボタン</th>
+            <th style={{ textAlign: 'right' }}>タップ（無料）</th>
+            <th style={{ textAlign: 'right' }}>21 sats</th>
           </tr>
         </thead>
         <tbody>
-          {SEAT_IDS.map((id) => {
-            const seat = s.seats[id];
-            return (
-              <tr key={id}>
-                <td className="sw-num">{SEATS[id].no}</td>
-                <td>
-                  {SEATS[id].labelJa} <small>{SEATS[id].labelEn}</small>
-                </td>
-                <td>
-                  {seat.occupied ? (
-                    <>
-                      {seat.displayName} {seat.bot ? <em>BOT</em> : null}
-                    </>
-                  ) : seat.auto ? (
-                    <em>AUTO SUPPORT（AI）</em>
-                  ) : (
-                    <em>空席</em>
-                  )}
-                </td>
-                <td>
-                  {seat.occupied
-                    ? seat.connected
-                      ? seat.ready
-                        ? '準備完了'
-                        : '搭乗中'
-                      : '再接続待ち'
-                    : seat.open
-                      ? '募集中'
-                      : '閉鎖'}
-                </td>
-                <td>
-                  {seat.occupied ? (
-                    <button
-                      className="b small warn"
-                      onClick={async () => {
-                        if (
-                          !window.confirm(
-                            `${SEATS[id].labelEn} のパイロットを降ろしますか？ / Kick this pilot?`,
-                          )
-                        )
-                          return;
-                        const r = await command({ command: 'KICK_SEAT', seatId: id });
-                        onResult(`${r.ok ? 'OK' : 'できませんでした'} — ${r.message}`);
-                      }}
-                      title="この席を空けます（AUTO SUPPORT が代わりに担当）"
-                    >
-                      KICK
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
+          {kinds.map((k) => (
+            <tr key={k}>
+              <td>
+                {ACTION_LABEL[k].ja} <small>{ACTION_LABEL[k].en}</small>
+              </td>
+              <td className="sw-num" style={{ textAlign: 'right' }}>
+                {s.stats.free[k]}
+              </td>
+              <td className="sw-num" style={{ textAlign: 'right' }}>
+                {s.stats.paid[k]}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </section>
@@ -600,7 +538,7 @@ function CheckLine({ name, c }: { name: string; c: OperatorPaymentsView['checks'
 }
 
 /**
- * Shared energy pulses (spec §8). Sandbox: staff settle VIRTUAL invoices here. Live: the
+ * Lightning actions (spec §8, D-033). Sandbox: staff settle VIRTUAL invoices here. Live: the
  * operator checks the backend and the public webhook, then types LIVE; OFF is one click.
  */
 function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) => void }) {
@@ -620,7 +558,7 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
   return (
     <section className="panel sw-frame payments">
       <h2>
-        sats（共有エネルギー）{' '}
+        21 sats の大きい一撃{' '}
         <b className={live ? (p.liveEnabled ? 'danger' : 'muted') : 'ally'}>
           {live
             ? p.liveEnabled
@@ -630,10 +568,10 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         </b>
       </h2>
       <p className="explain">
-        sats を送れるのは <b>炉心停止（ブラックアウト）の間だけ</b>。パイロットが {p.amountSats}{' '}
-        sats を送ると即時復旧し、雷神ゲージ +{p.capacitorGain}%。電力B
-        が回路をつないでも同じ効果なので、払わなくても勝てます。
-        {s.crisis ? <strong> いま炉心停止中 — 送信できます</strong> : null}
+        戦闘中、スマホの各ボタンの横にある「{p.amountSats}{' '}
+        sats」を押して支払うと、同じ行動の大きい版になります （撃つ {p.effect.ATTACK} ダメージ ・
+        守る +{p.effect.DEFEND} ・ 直す +{p.effect.REPAIR}）。
+        全員同じ大きさで、上限があるのでお金だけでは勝てません。払わなくても無料タップで遊べます。
       </p>
       <div className="kv">
         <div>
@@ -647,14 +585,15 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         <div>
           <span>1回</span>
           <b className="sw-num">
-            {p.amountSats} sats → 炉心復旧 ＋ 雷神ゲージ +{p.capacitorGain}%
+            {p.amountSats} sats → 撃つ {p.effect.ATTACK} / 守る +{p.effect.DEFEND} / 直す +
+            {p.effect.REPAIR}
           </b>
         </div>
         <div>
           <span>上限</span>
           <b className="sw-num">
             1人 {p.perPilotPerMatch}回/試合 ・ {p.cooldownSec}秒に1回 ・ 全体 {p.maxPerMatch}回 ・
-            この回 {s.stats.pulses}回
+            この回 {s.stats.lightning}回
           </b>
         </div>
         <div>
@@ -726,7 +665,7 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         <thead>
           <tr>
             <th>時刻</th>
-            <th>席</th>
+            <th>行動</th>
             <th>支払い</th>
             <th>ゲーム反映</th>
             <th />
@@ -736,14 +675,14 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
           {p.recent.length === 0 ? (
             <tr>
               <td colSpan={5}>
-                <em>まだありません（炉心停止中にパイロットが送ると、ここに出ます）</em>
+                <em>まだありません（戦闘中にスマホから 21 sats を送ると、ここに出ます）</em>
               </td>
             </tr>
           ) : (
             p.recent.map((r) => (
               <tr key={r.intentId}>
                 <td className="sw-num">{r.createdAt.slice(11, 19)}</td>
-                <td>{r.seatId ?? '—'}</td>
+                <td>{ACTION_LABEL[r.action].ja}</td>
                 <td className={r.status === 'settled' ? 'ally' : undefined}>
                   {r.status} {r.mode === 'sandbox' ? <em>VIRTUAL</em> : null}
                 </td>
@@ -845,9 +784,9 @@ export function App() {
         <>
           <NowPanel s={s} mt={store.matchTime(now)} toast={toast} onResult={setToast} />
           <div className="grid">
-            <Seats s={s} onResult={setToast} />
+            <Crowd s={s} />
             <Payments s={s} onResult={setToast} />
-            <DemoSettings s={s} onResult={setToast} />
+            <DemoSettings onResult={setToast} />
           </div>
           <details className="advanced">
             <summary>

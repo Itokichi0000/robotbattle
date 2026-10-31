@@ -1,42 +1,40 @@
 import { useTicker } from '@swed/client';
 import { PULSE_REFUSAL_TEXT } from '@swed/shared';
-import type { PulseRefusal } from '@swed/shared';
+import type { PublicMatchState, PulseRefusal } from '@swed/shared';
 import { IconBolt } from '@swed/ui-tokens';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { closePulse, loadQuote, paymentsStore, refreshIntent, requestPulse } from '../net';
-import { useL } from '../ui';
+import { closePay, paymentsStore, refreshIntent, requestPaid } from '../net';
+import { ACTION_VAR, actionName, effectText, useL } from '../ui';
 
 /**
- * Shared energy pulse (spec §8, §9.7). Separate from the role controls: a pulse is never
- * required and never bought by tapping FIRE. The sheet states the amount, the receiver,
- * whether the money is real or VIRTUAL, and that a payment may not be refundable, before
- * any invoice exists. Pilot sign-in QR and payment QR look different on purpose.
+ * Lightning action (spec §8, §9.7, D-033): 21 sats makes the chosen action big. It is never
+ * one tap: the sheet states the effect, the amount, the receiver, whether the money is real
+ * or VIRTUAL, and that a payment may not be refundable — before any invoice exists. The
+ * payment QR looks different from the sign-in QR on purpose.
  */
-export function PulseSheet({ onClose }: { onClose: () => void }) {
+export function PaySheet({ s }: { s: PublicMatchState }) {
   const { L } = useL();
   const p = useSyncExternalStore(paymentsStore.subscribe, paymentsStore.get, paymentsStore.get);
   const [busy, setBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [copied, setCopied] = useState(false);
-  const now = useTicker(1_000);
-  void now;
+  useTicker(1_000);
 
-  useEffect(() => {
-    void loadQuote();
-  }, []);
   useEffect(() => {
     if (p.intent?.status !== 'pending') return;
     const id = setInterval(() => void refreshIntent(), 3_000);
     return () => clearInterval(id);
   }, [p.intent?.status, p.intent?.intentId]);
 
+  const kind = p.intent?.action ?? p.action;
+  if (!kind) return null;
   const q = p.quote;
   const live = q?.mode === 'live';
-  const close = () => {
-    closePulse();
-    onClose();
-  };
+  const big = q?.effect[kind] ?? s.hints.paid[kind];
+  const free = s.hints.free[kind];
+  const times = Math.max(1, Math.round(big / Math.max(1, free)));
   const err = p.error ? PULSE_REFUSAL_TEXT[p.error as PulseRefusal] : null;
+  const name = actionName(kind, L);
 
   let body: React.ReactNode;
   if (p.intent) {
@@ -45,11 +43,11 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
     if (i.status === 'pending') {
       body = (
         <>
-          <p className="pulse-amount sw-num">{i.amountSats} sats</p>
+          <p className="pay-amount sw-num">{i.amountSats} sats</p>
           <p className="note">{L(`受取先：${i.recipient}`, `To: ${i.recipient}`)}</p>
           {i.mode === 'live' && i.paymentRequest ? (
             <>
-              <a className="btn primary action" href={`lightning:${i.paymentRequest}`}>
+              <a className="btn primary" href={`lightning:${i.paymentRequest}`}>
                 <IconBolt size={20} />
                 <span>{L('ウォレットで支払う', 'Pay in wallet')}</span>
               </a>
@@ -83,8 +81,8 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
             <p className="virtual">
               VIRTUAL —{' '}
               {L(
-                'テスト用の架空の請求書です。運営スタッフが確定するとパルスが届きます。',
-                'A test invoice with no real money. Staff confirm it in the console.',
+                'テスト用の架空の請求書です（お金は動きません）。運営が確定すると大きな一撃が届きます。',
+                'A test invoice, no real money. When staff confirm it, the big action lands.',
               )}
             </p>
           )}
@@ -97,12 +95,12 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
     } else if (i.status === 'settled') {
       body =
         i.applied === 'applied' ? (
-          <p className="pulse-ok">
-            {L(
-              `着金しました。炉心復旧 ＋ 雷神ゲージ +${q?.capacitorGain ?? 20}%`,
-              `Landed: reactor restored, RAIJIN gauge +${q?.capacitorGain ?? 20}%`,
-            )}
-          </p>
+          <div className="pay-ok">
+            <IconBolt size={36} />
+            <b>{L(`着金！ 大きく${name}`, `Landed! Big ${name}`)}</b>
+            <span>{effectText(kind, big, L)}</span>
+            <small>{L('大画面を見て！', 'Look at the big screen!')}</small>
+          </div>
         ) : (
           <p className="err">
             {L(
@@ -124,19 +122,16 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
   } else {
     body = (
       <>
-        <p className="pulse-what">
-          {L(
-            `送ると止まった炉心がすぐ復旧し、雷神ゲージ +${q?.capacitorGain ?? 20}%。電力B が回路をつないでも同じ効果なので、払わなくても勝てます。`,
-            `Restores the stopped reactor at once and adds +${q?.capacitorGain ?? 20}% to the RAIJIN gauge. POWER B's repair does the same, so you can win without paying.`,
-          )}
-          {q && !q.crisis
-            ? L(
-                ' いまは炉心停止中ではないので送れません。',
-                ' There is no blackout right now, so nothing to send.',
-              )
-            : null}
+        <p className="pay-what">
+          <b>{effectText(kind, big, L)}</b>
+          <span>
+            {L(
+              `無料タップの約 ${times} 回分を一撃で。全員同じ大きさで、多く払っても強くなりません。`,
+              `About ${times} free taps in one go. Same size for everyone; paying more never makes it bigger.`,
+            )}
+          </span>
         </p>
-        <dl className="pulse-terms">
+        <dl className="pay-terms">
           <div>
             <dt>{L('金額', 'Amount')}</dt>
             <dd className="sw-num">{q ? `${q.amountSats} sats` : '…'}</dd>
@@ -158,21 +153,24 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
             <dd className="sw-num">{q ? q.remaining : '…'}</dd>
           </div>
         </dl>
-        {live ? (
-          <p className="note">
-            {L(
-              '送金後の返金はできない場合があります。金額は固定で、多く払っても強くなりません。',
-              'Payments may not be refundable. The amount is fixed; paying more never makes you stronger.',
-            )}
-          </p>
-        ) : null}
+        <p className="note">
+          {live
+            ? L(
+                '送金後の返金はできない場合があります。払わなくても無料タップで一緒に戦えます。',
+                'Payments may not be refundable. You can keep playing free without paying.',
+              )
+            : L(
+                '払わなくても無料タップで一緒に戦えます。',
+                'You can keep playing free without paying.',
+              )}
+        </p>
         {err ? <p className="err">{L(err.ja, err.en)}</p> : null}
         <button
-          className={`btn primary ${live ? 'action' : 'ally'}`}
-          disabled={busy || !q?.enabled || !q.inCombat || q.remaining <= 0 || !q.crisis}
+          className="btn primary"
+          disabled={busy || !q?.enabled || !q.inCombat || q.remaining <= 0}
           onClick={async () => {
             setBusy(true);
-            await requestPulse();
+            await requestPaid();
             setBusy(false);
           }}
         >
@@ -193,13 +191,8 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
               {!q?.enabled
                 ? L('現在停止中', 'Currently off')
                 : !q.inCombat
-                  ? L('搭乗中の戦闘中だけ', 'Only aboard, during combat')
-                  : !q.crisis
-                    ? L('炉心停止のときだけ送れます', 'Only during a blackout')
-                    : L(
-                        `炉心復旧 ＋ 雷神ゲージ +${q.capacitorGain}%`,
-                        `Reactor back + gauge +${q.capacitorGain}%`,
-                      )}
+                  ? L('戦闘中だけ送れます', 'Only during the battle')
+                  : L(`大きく${name}`, `Big ${name}`)}
             </small>
           </span>
         </button>
@@ -208,21 +201,18 @@ export function PulseSheet({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="sheet-back" onClick={close}>
+    <div className="sheet-back" onClick={closePay}>
       <div
-        className={`sheet sw-frame${live ? ' live' : ''}${p.quote?.crisis ? ' crisis' : ''}`}
+        className={`sheet sw-frame${live ? ' live' : ''}`}
         role="dialog"
-        aria-label={L('共有エネルギー', 'Shared energy')}
+        aria-label={L(`21 sats で大きく${name}`, `Big ${name} for 21 sats`)}
+        style={{ ['--acc' as string]: ACTION_VAR[kind] }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sheet-head">
           <IconBolt size={18} />
-          <b>
-            {p.quote?.crisis
-              ? L('sats で炉心を即時復旧', 'Restore the reactor with sats')
-              : L('sats（炉心停止のときだけ）', 'Sats (blackouts only)')}
-          </b>
-          <button className="ph-lang" onClick={close} aria-label={L('閉じる', 'Close')}>
+          <b>{L(`Lightning で大きく${name}`, `Big ${name} with Lightning`)}</b>
+          <button className="ph-lang" onClick={closePay} aria-label={L('閉じる', 'Close')}>
             ×
           </button>
         </div>

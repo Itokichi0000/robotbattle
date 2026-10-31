@@ -1,32 +1,23 @@
 import { randomBytes } from 'node:crypto';
-import type {
-  MatchEventMsg,
-  OperatorCommandResult,
-  PaymentIntentView,
-  SeatRequestResult,
-} from '@swed/shared';
+import type { MatchEventMsg, OperatorCommandResult, PaymentIntentView } from '@swed/shared';
 import type { Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collect, cookiePair, emitAck, eventually, key, TestServer } from './testHarness';
+import { collect, cookiePair, emitAck, eventually, TestServer } from './testHarness';
 import { signedCallback } from './testWallet';
 
 /**
- * Shared energy pulses (spec §8, Phase 4 done criteria, D-032): one intent lands exactly
- * once, payment is never required to play, sandbox never pretends to be real money, and live
- * mode needs staff approval and backend confirmation.
+ * Lightning actions (spec §8, D-033): 21 sats makes one of 撃つ / 守る / 直す big. One intent
+ * lands exactly once, payment is never required to play, sandbox never pretends to be real
+ * money, and live mode needs staff approval and backend confirmation.
  */
 
 let srv: TestServer;
 afterEach(async () => srv?.stop());
 
-async function seatedInCombat(cookie: string, seatId = 'GUNNER_L'): Promise<Socket> {
+/** A phone that scanned the QR: connecting is joining the crowd. */
+async function joined(cookie: string): Promise<Socket> {
   const phone = await srv.connect('/pilot', cookie);
-  const r = await emitAck<SeatRequestResult>(phone, 'pilot:joinSeat', {
-    matchId: srv.runtime.state.matchId,
-    seatId,
-    requestId: key(),
-  });
-  expect(r.ok).toBe(true);
+  await eventually(() => Object.values(srv.runtime.state.players).some((p) => p.connected));
   return phone;
 }
 
@@ -35,34 +26,35 @@ async function operator() {
   return (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
 }
 
-/** Into the fight, with a REACTOR BLACKOUT on: the only time sats can be sent (D-032). */
-async function launch(op: (c: object) => Promise<OperatorCommandResult>, blackout = true) {
+/** Into the fight. */
+async function launch(op: (c: object) => Promise<OperatorCommandResult>) {
   expect((await op({ command: 'START' })).ok).toBe(true);
   expect((await op({ command: 'SKIP_DEPLOY' })).ok).toBe(true);
   srv.advance(500);
-  if (blackout) expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
 }
 
-async function intent(cookie: string) {
+async function intent(cookie: string, action: 'ATTACK' | 'DEFEND' | 'REPAIR' = 'ATTACK') {
   const res = await srv.post(
     '/api/payments/intent',
-    { matchId: srv.runtime.state.matchId },
+    { matchId: srv.runtime.state.matchId, action },
     cookie,
   );
   return { status: res.status, body: (await res.json()) as PaymentIntentView & { error?: string } };
 }
 
-describe('sandbox (VIRTUAL) pulses', () => {
-  it('quote → intent → staff settles → blackout ends, RAIJIN gauge +20 exactly once, owner notified', async () => {
+const bossHp = () => srv.runtime.state.enemies[0]!.hp;
+
+describe('sandbox (VIRTUAL) Lightning actions', () => {
+  it('quote → intent → staff settles → the big action lands exactly once, owner notified', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
-    const phone = await seatedInCombat(cookie);
+    const phone = await joined(cookie);
     const statuses = collect<PaymentIntentView>(phone, 'payment:status');
     const display = await srv.connect('/display');
     const events = collect<MatchEventMsg>(display, 'match:event');
     const op = await operator();
 
-    // Not in combat yet: no pulses (and no payment is ever needed to play).
+    // Not in combat yet: nothing to pay for (and no payment is ever needed to play).
     expect((await intent(cookie)).body.error).toBe('NOT_IN_COMBAT');
     await launch(op);
 
@@ -74,16 +66,29 @@ describe('sandbox (VIRTUAL) pulses', () => {
       mode: 'sandbox',
       enabled: true,
       amountSats: 21,
-      capacitorGain: 20,
       remaining: 3,
       inCombat: true,
-      crisis: true,
     });
+    const effect = quote.effect as Record<string, number>;
+    expect(effect.ATTACK).toBeGreaterThanOrEqual(60);
     expect(String(quote.recipient)).toMatch(/VIRTUAL/);
 
-    const first = await intent(cookie);
+    // Unknown actions are refused before anything is billed.
+    const bad = await srv.post(
+      '/api/payments/intent',
+      { matchId: srv.runtime.state.matchId, action: 'NUKE' },
+      cookie,
+    );
+    expect(bad.status).toBe(400);
+
+    const first = await intent(cookie, 'ATTACK');
     expect(first.status).toBe(200);
-    expect(first.body).toMatchObject({ status: 'pending', mode: 'sandbox', amountSats: 21 });
+    expect(first.body).toMatchObject({
+      status: 'pending',
+      mode: 'sandbox',
+      amountSats: 21,
+      action: 'ATTACK',
+    });
     expect(first.body.paymentRequest).toMatch(/^VIRTUAL-SANDBOX-21SATS-/);
     expect((await intent(cookie)).body.error).toBe('PULSE_PENDING');
 
@@ -93,99 +98,62 @@ describe('sandbox (VIRTUAL) pulses', () => {
       (await srv.fetch(`/api/payments/intent/${first.body.intentId}`, { cookie: other })).status,
     ).toBe(404);
 
-    const cap0 = srv.runtime.state.teamCapacitor;
+    const hp0 = bossHp();
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(true);
-    expect(srv.runtime.state.teamCapacitor).toBe(Math.min(100, cap0 + 20));
-    expect(srv.runtime.state.crisis).toBeNull();
+    expect(hp0 - bossHp()).toBe(effect.ATTACK);
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(false);
+    expect(hp0 - bossHp()).toBe(effect.ATTACK);
     await eventually(() => statuses.some((s) => s.status === 'settled' && s.applied === 'applied'));
-    const pulse = await eventually(() => events.find((e) => e.type === 'sats_pulse_settled'));
-    expect(pulse.payload).toMatchObject({ seatId: 'GUNNER_L', gain: 20, virtual: true });
-    expect(events.filter((e) => e.type === 'sats_pulse_settled')).toHaveLength(1);
+    const big = await eventually(() =>
+      events.find((e) => e.payload.type === 'action' && e.payload.paid),
+    );
+    expect(big.payload).toMatchObject({ kind: 'ATTACK', paid: true, virtual: true, count: 1 });
+    expect(srv.runtime.state.stats.lightning).toBe(1);
 
-    // Cooldown: 30 s between pulses per pilot (checked before the blackout rule).
-    expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
-    expect((await intent(cookie)).body.error).toBe('PULSE_COOLDOWN');
+    // Cooldown between one person's Lightning actions.
+    expect((await intent(cookie, 'DEFEND')).body.error).toBe('PULSE_COOLDOWN');
     const view = (await (
       await srv.fetch(`/api/payments/intent/${first.body.intentId}`, { cookie })
     ).json()) as PaymentIntentView;
     expect(view).toMatchObject({ status: 'settled', applied: 'applied', paymentRequest: null });
   });
 
-  it('caps pulses per pilot per round', async () => {
+  it('caps Lightning actions per person per round; 守る and 直す work the same way', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
-    await seatedInCombat(cookie);
+    await joined(cookie);
     const op = await operator();
     await launch(op);
-    for (let i = 0; i < 3; i++) {
-      if (!srv.runtime.state.crisis) await op({ command: 'TRIGGER_BLACKOUT' });
-      const r = await intent(cookie);
+    srv.runtime.state.mechHp = 20;
+    const kinds = ['DEFEND', 'REPAIR', 'ATTACK'] as const;
+    for (const k of kinds) {
+      const r = await intent(cookie, k);
       expect(r.status).toBe(200);
       await op({ command: 'SANDBOX_SETTLE', intentId: r.body.intentId });
       srv.built.db
         .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
         .run();
     }
-    await op({ command: 'TRIGGER_BLACKOUT' });
+    expect(srv.runtime.state.stats.paid).toEqual({ ATTACK: 1, DEFEND: 1, REPAIR: 1 });
+    expect(srv.runtime.state.mechHp).toBeGreaterThan(20);
     expect((await intent(cookie)).body.error).toBe('PULSE_LIMIT');
   });
 
-  it('no invoice outside a blackout: sats have one job, and there is nothing to fix', async () => {
+  it('staff can let VIRTUAL payments confirm themselves (demo without a cashier)', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
-    await seatedInCombat(cookie);
+    await joined(cookie);
     const op = await operator();
-    await launch(op, false);
-    const quote = async () =>
-      (await (await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })).json()) as {
-        crisis: boolean;
-      };
-    expect((await quote()).crisis).toBe(false);
-    const r = await intent(cookie);
-    expect(r.status).toBe(409);
-    expect(r.body.error).toBe('NO_CRISIS');
-    expect(srv.built.db.prepare('SELECT COUNT(*) AS n FROM payment_intents').get()).toEqual({
-      n: 0,
-    });
-    // Staff can start one on demand (the GRID PULSE scene for visitors); then it can be sent.
-    expect((await op({ command: 'TRIGGER_BLACKOUT' })).ok).toBe(true);
-    expect((await quote()).crisis).toBe(true);
-    expect((await intent(cookie)).status).toBe(200);
-  });
-
-  it('a pulse during a REACTOR BLACKOUT restores it; staff can let VIRTUAL pulses confirm themselves', async () => {
-    srv = await new TestServer().start();
-    const cookie = await srv.demoGuest();
-    await seatedInCombat(cookie);
-    const op = await operator();
-    await launch(op, false);
-    const display = await srv.connect('/display');
-    const events = collect<MatchEventMsg>(display, 'match:event');
-    // The scheduled blackout (forced to the wave start here).
-    srv.runtime.state.config.crisis.atMs.WAVE_1 = 0;
-    srv.advance(200);
-    expect(srv.runtime.state.crisis?.kind).toBe('BLACKOUT');
-    const q = (await (
-      await fetch(`${srv.url}/api/payments/quote`, { headers: { cookie } })
-    ).json()) as { crisis: boolean };
-    expect(q).toMatchObject({ crisis: true });
+    await launch(op);
     expect((await op({ command: 'SET_AUTO_SETTLE_VIRTUAL', enabled: true })).ok).toBe(true);
-    const r = await intent(cookie);
+    const r = await intent(cookie, 'DEFEND');
     expect(r.status).toBe(200);
-    // Nobody presses SETTLE: one poller pass after the short pause confirms it by itself.
     srv.built.db
       .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
       .run();
     await srv.built.payments.poll();
-    expect(srv.runtime.state.stats.pulses).toBe(1);
-    expect(srv.runtime.state.crisis).toBeNull();
-    await eventually(() =>
-      events.some((m) => m.payload.type === 'crisis_resolved' && m.payload.by === 'PULSE'),
-    );
-    const pulse = events.find((m) => m.payload.type === 'sats_pulse_settled')!.payload;
-    expect(pulse).toMatchObject({ virtual: true, crisis: true, settleMs: null });
-    expect(srv.runtime.state.stats.blackoutsByPulse).toBe(1);
+    expect(srv.runtime.state.stats.paid.DEFEND).toBe(1);
+    expect(srv.runtime.state.shield).toBeGreaterThan(0);
   });
 });
 
@@ -244,14 +212,14 @@ async function lnurlPilot(seed: string): Promise<string> {
   return cookiePair(st, 'sw_pilot')!;
 }
 
-describe('live (LNbits) pulses', () => {
+describe('live (LNbits) Lightning actions', () => {
   it('stay OFF until staff run the checks and confirm; then apply exactly once on confirmed payment', async () => {
     const ln = fakeLnbits();
     srv = await new TestServer(LIVE, { fetch: ln.f }).start();
     // No DEMO GUEST in live mode: pilots sign in with their wallet.
     expect((await srv.post('/api/auth/demo-guest', {})).status).toBe(403);
     const cookie = await lnurlPilot('ivy-wallet');
-    const phone = await seatedInCombat(cookie);
+    const phone = await joined(cookie);
     const statuses = collect<PaymentIntentView>(phone, 'payment:status');
     const op = await operator();
     await launch(op);
@@ -283,25 +251,26 @@ describe('live (LNbits) pulses', () => {
     );
     const hash = [...ln.invoices.keys()][0]!;
 
-    const cap0 = srv.runtime.state.teamCapacitor;
+    const hp0 = bossHp();
     // A forged webhook (wrong token) is refused; a webhook for an unpaid invoice changes nothing.
     expect(
       (await srv.post('/api/payments/webhook/lnbits?token=nope', { payment_hash: hash })).status,
     ).toBe(403);
     const hook = `/api/payments/webhook/lnbits?token=test-webhook-secret-0123456789`;
     expect((await srv.post(hook, { payment_hash: hash })).status).toBe(200);
-    expect(srv.runtime.state.teamCapacitor).toBe(cap0);
+    expect(bossHp()).toBe(hp0);
 
     ln.pay(hash);
-    // Duplicate, concurrent webhooks: the pulse lands once.
+    // Duplicate, concurrent webhooks: the action lands once.
     await Promise.all([
       srv.post(hook, { payment_hash: hash }),
       srv.post(hook, { payment_hash: hash }),
       srv.post(hook, { payment_hash: hash }),
     ]);
     await srv.built.payments.poll();
-    expect(srv.runtime.state.teamCapacitor).toBe(Math.min(100, cap0 + 20));
-    expect(srv.runtime.state.stats.pulses).toBe(1);
+    expect(hp0 - bossHp()).toBeGreaterThanOrEqual(60);
+    expect(srv.runtime.state.stats.lightning).toBe(1);
+    expect(srv.runtime.state.stats.virtual).toBe(0);
     await eventually(() => statuses.find((s) => s.status === 'settled' && s.applied === 'applied'));
     const rows = srv.built.db
       .prepare("SELECT * FROM payment_intents WHERE status = 'settled'")
@@ -313,7 +282,7 @@ describe('live (LNbits) pulses', () => {
     const ln = fakeLnbits();
     srv = await new TestServer(LIVE, { fetch: ln.f }).start();
     const cookie = await lnurlPilot('jun-wallet');
-    await seatedInCombat(cookie, 'SHIELD_L');
+    await joined(cookie);
     const op = await operator();
     await launch(op);
     await op({ command: 'PAYMENTS_CHECK' });
@@ -327,9 +296,9 @@ describe('live (LNbits) pulses', () => {
       .prepare('SELECT status, applied, note FROM payment_intents WHERE id = ?')
       .get(r.body.intentId);
     expect(row).toMatchObject({ status: 'settled', applied: 'unapplied' });
-    expect(srv.runtime.state.stats.pulses).toBe(0);
+    expect(srv.runtime.state.stats.lightning).toBe(0);
     const audit = srv.built.db
-      .prepare("SELECT action FROM audit_log WHERE action = 'PULSE_UNAPPLIED'")
+      .prepare("SELECT action FROM audit_log WHERE action = 'LIGHTNING_UNAPPLIED'")
       .all();
     expect(audit).toHaveLength(1);
   });
@@ -338,7 +307,7 @@ describe('live (LNbits) pulses', () => {
     const ln = fakeLnbits();
     srv = await new TestServer(LIVE, { fetch: ln.f }).start();
     const cookie = await lnurlPilot('kai-wallet');
-    await seatedInCombat(cookie);
+    await joined(cookie);
     const op = await operator();
     await launch(op);
     await op({ command: 'PAYMENTS_CHECK' });
@@ -348,7 +317,7 @@ describe('live (LNbits) pulses', () => {
     const t0 = srv.runtime.state.t;
     srv.advance(2_000);
     expect(srv.runtime.state.t).toBeGreaterThan(t0);
-    expect(srv.runtime.state.phase).toBe('WAVE_1');
+    expect(srv.runtime.state.phase).toBe('BATTLE');
     expect((await op({ command: 'PAYMENTS_DISABLE' })).ok).toBe(true);
     expect((await intent(cookie)).body.error).toBe('PAYMENTS_DISABLED');
   });

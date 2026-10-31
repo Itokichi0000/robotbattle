@@ -150,7 +150,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     runtime,
     provider,
     recipient: env.PAYMENT_RECIPIENT_LABEL ?? 'SATS WARS SANDBOX — VIRTUAL（架空・テスト）',
-    amountSats: env.PULSE_AMOUNT_SATS ?? PRESETS[env.MATCH_PRESET].pulses.amountSats,
+    amountSats: env.PULSE_AMOUNT_SATS ?? PRESETS[env.MATCH_PRESET].paid.amountSats,
     webhookUrl: env.APP_MODE === 'live' ? `${webhookBase}?token=${env.webhookSecret}` : undefined,
     pingUrl: `${webhookBase}/ping?token=${env.webhookSecret}`,
     notify: (pilotId, view) => realtime.notifyPayment(pilotId, view),

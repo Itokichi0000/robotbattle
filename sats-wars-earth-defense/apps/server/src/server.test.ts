@@ -7,7 +7,6 @@ import type {
   MatchSnapshotMsg,
   OperatorCommand,
   OperatorCommandResult,
-  SeatRequestResult,
   SessionStatusMsg,
 } from '@swed/shared';
 import { io as ioClient, type Socket } from 'socket.io-client';
@@ -94,10 +93,6 @@ function collect<T>(s: Socket, ev: string): T[] {
   return out;
 }
 
-async function settle() {
-  await new Promise((r) => setTimeout(r, 30));
-}
-
 /** Socket delivery is asynchronous; poll instead of guessing a delay (CI machines are slow). */
 async function eventually<T>(
   fn: () => T | undefined | null | false,
@@ -154,7 +149,7 @@ describe('join QR address', () => {
 describe('http', () => {
   it('serves health and the join QR for the configured public URL', async () => {
     const health = (await (await fetch(`${url}/health`)).json()) as HealthInfo;
-    expect(health).toMatchObject({ ok: true, mode: 'sandbox', phase: 'ATTRACT' });
+    expect(health).toMatchObject({ ok: true, mode: 'sandbox', phase: 'LOBBY' });
     const join = (await (await fetch(`${url}/api/public/join`)).json()) as JoinInfo;
     expect(join.joinUrl).toBe(`${ORIGIN}/pilot/`);
     expect(join.qrSvg).toContain('<svg');
@@ -189,15 +184,12 @@ describe('http', () => {
 
   it('never leaks pilot ids in the public match', async () => {
     const cookie = await demoGuest();
-    const pilot = await connect('/pilot', cookie);
-    const snap = (await (await fetch(`${url}/api/public/match`)).json()) as MatchSnapshotMsg;
-    await emitAck<SeatRequestResult>(pilot, 'pilot:joinSeat', {
-      matchId: snap.matchId,
-      seatId: 'GUNNER_L',
-      requestId: key(),
-    });
+    await connect('/pilot', cookie);
+    await eventually(
+      () => built.runtime.state.players && Object.keys(built.runtime.state.players).length === 1,
+    );
     const after = JSON.stringify(await (await fetch(`${url}/api/public/match`)).json());
-    expect(after).toContain('"occupied":true');
+    expect(after).toContain('"players":1');
     expect(after).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
   });
 });
@@ -223,150 +215,103 @@ describe('sockets', () => {
     ).rejects.toBeTruthy();
   });
 
-  it('PHASE 1 SLICE: two phones in different roles drive one RAIJIN seen on the display', async () => {
+  it('SLICE: scanning joins the crowd; three buttons drive one RAIJIN seen on the display', async () => {
     const display = await connect('/display');
     const displayEvents = collect<MatchEventMsg>(display, 'match:event');
     const displaySnaps = collect<MatchSnapshotMsg>(display, 'match:snapshot');
 
-    const gunner = await connect('/pilot', await demoGuest());
-    const guard = await connect('/pilot', await demoGuest());
-    const gunnerStatus = collect<SessionStatusMsg>(gunner, 'pilot:sessionStatus');
+    const a = await connect('/pilot', await demoGuest());
+    const b = await connect('/pilot', await demoGuest());
     const operator = await connect('/operator', await operatorCookie());
     const op = (c: OperatorCommand) =>
       emitAck<OperatorCommandResult>(operator, 'operator:command', c);
-
+    await eventually(() => built.runtime.snapshotMsg().state.players === 2);
     const matchId = built.runtime.state.matchId;
-    expect(
-      await emitAck<SeatRequestResult>(gunner, 'pilot:joinSeat', {
-        matchId,
-        seatId: 'GUNNER_L',
-        requestId: key(),
-      }),
-    ).toEqual({ ok: true, seatId: 'GUNNER_L' });
-    // Same seat twice: refused. Different role: fine.
-    expect(
-      await emitAck<SeatRequestResult>(guard, 'pilot:joinSeat', {
-        matchId,
-        seatId: 'GUNNER_L',
-        requestId: key(),
-      }),
-    ).toEqual({ ok: false, reasonCode: 'SEAT_TAKEN' });
-    expect(
-      await emitAck<SeatRequestResult>(guard, 'pilot:joinSeat', {
-        matchId,
-        seatId: 'SHIELD_L',
-        requestId: key(),
-      }),
-    ).toEqual({ ok: true, seatId: 'SHIELD_L' });
-    await eventually(() => gunnerStatus.at(-1)?.assignedSeat === 'GUNNER_L');
-    expect(built.runtime.state.phase).toBe('LOBBY');
+
+    // Before the battle the buttons answer "not yet", in words.
+    const early = await emitAck<ActionResult>(a, 'pilot:action', {
+      matchId,
+      clientActionId: key(),
+      action: { kind: 'ATTACK' },
+    });
+    expect(early).toMatchObject({ accepted: false, reasonCode: 'NOT_IN_COMBAT' });
 
     expect((await op({ command: 'START' })).ok).toBe(true);
     expect((await op({ command: 'SKIP_DEPLOY' })).ok).toBe(true);
-    advance(3_000); // both tutorial drones have arrived
+    advance(2_000);
+    const boss = built.runtime.state.enemies[0]!;
+    const hp = boss.hp;
 
-    // Gunner: LOCK → CHARGE → FIRE on the right-side drone (the front one is the shield's
-    // tutorial attacker; leave it alive). The server lowers the enemy HP.
-    const right = built.runtime.state.enemies.find((e) => e.orbit.bearing0 > 45)!;
-    const lock = await emitAck<ActionResult>(gunner, 'pilot:action', {
+    // 撃つ: the server lowers the boss HP. A retry with the same key does not count twice.
+    const k = key();
+    const fire = await emitAck<ActionResult>(a, 'pilot:action', {
       matchId,
-      seatId: 'GUNNER_L',
-      clientActionId: key(),
-      action: { actionType: 'LOCK', payload: { targetId: right.id } },
+      clientActionId: k,
+      action: { kind: 'ATTACK' },
     });
-    expect(lock.accepted).toBe(true);
-    const targetId = built.runtime.state.gunners.GUNNER_L.targetId!;
-    const hpBefore = built.runtime.state.enemies.find((e) => e.id === targetId)!.hp;
-    advance(1_500);
-    const fireKey = key();
-    const fire = await emitAck<ActionResult>(gunner, 'pilot:action', {
+    expect(fire).toMatchObject({ clientActionId: k, accepted: true });
+    const retry = await emitAck<ActionResult>(a, 'pilot:action', {
       matchId,
-      seatId: 'GUNNER_L',
-      clientActionId: fireKey,
-      action: { actionType: 'FIRE', payload: {} },
-    });
-    expect(fire).toMatchObject({ clientActionId: fireKey, accepted: true });
-    // A retry with the same key does not fire twice.
-    const retry = await emitAck<ActionResult>(gunner, 'pilot:action', {
-      matchId,
-      seatId: 'GUNNER_L',
-      clientActionId: fireKey,
-      action: { actionType: 'FIRE', payload: {} },
+      clientActionId: k,
+      action: { kind: 'ATTACK' },
     });
     expect(retry.accepted).toBe(true);
-    // AUTO SUPPORT flies the empty right gun too; count only this pilot's shots.
-    await eventually(() =>
-      displayEvents.some(
-        (e) => e.payload.type === 'weapon_fired' && e.payload.seatId === 'GUNNER_L',
-      ),
+    expect(built.runtime.state.enemies[0]!.hp).toBe(
+      hp - built.runtime.state.config.free.effect.ATTACK,
     );
-    const shots = displayEvents.filter(
-      (e) => e.type === 'weapon_fired' && 'seatId' in e.payload && e.payload.seatId === 'GUNNER_L',
+    // Mashing faster than the free cooldown is refused, not multiplied.
+    const mash = await emitAck<ActionResult>(a, 'pilot:action', {
+      matchId,
+      clientActionId: key(),
+      action: { kind: 'ATTACK' },
+    });
+    expect(mash.reasonCode).toBe('COOLDOWN');
+
+    // 守る from the other phone fills the shared shield.
+    const guard = await emitAck<ActionResult>(b, 'pilot:action', {
+      matchId,
+      clientActionId: key(),
+      action: { kind: 'DEFEND' },
+    });
+    expect(guard.accepted).toBe(true);
+    advance(300);
+    const batch = await eventually(() =>
+      displayEvents.find((e) => e.payload.type === 'action' && e.payload.kind === 'DEFEND'),
     );
-    expect(shots).toHaveLength(1);
-    const shot = shots[0]!.payload as Extract<MatchEventMsg['payload'], { type: 'weapon_fired' }>;
-    const autoDamage = displayEvents
-      .filter(
-        (e) =>
-          e.payload.type === 'weapon_fired' && e.payload.auto && e.payload.enemyId === targetId,
-      )
-      .reduce((a, e) => a + (e.payload as { damage: number }).damage, 0);
-    const hpAfter = built.runtime.state.enemies.find((e) => e.id === targetId)?.hp ?? 0;
-    expect(hpAfter).toBe(Math.max(0, hpBefore - shot.damage - autoDamage));
-    expect(shot.auto).toBe(false);
+    expect(batch.payload).toMatchObject({ paid: false, count: 1 });
+    await eventually(() => (displaySnaps.at(-1)?.state.shield ?? 0) > 0);
 
-    // The guard cannot fire someone else's gun, and cannot fire at all.
-    const steal = await emitAck<ActionResult>(guard, 'pilot:action', {
-      matchId,
-      seatId: 'GUNNER_L',
-      clientActionId: key(),
-      action: { actionType: 'FIRE', payload: {} },
-    });
-    expect(steal.reasonCode).toBe('NOT_YOUR_SEAT');
+    // A city strike is announced well ahead on every screen.
+    advance(built.runtime.state.config.strikes.firstAtMs);
+    const warn = await eventually(() =>
+      displayEvents.find((e) => e.payload.type === 'threat_warning' && e.payload.target === 'CITY'),
+    );
+    const w = warn.payload as Extract<MatchEventMsg['payload'], { type: 'threat_warning' }>;
+    expect(w.impactAt - warn.serverTime).toBeGreaterThanOrEqual(4_000);
 
-    // Shield: wait for the scripted FRONT strike, deploy just before impact.
-    let threat = built.runtime.state.threats.find((t) => t.dir === 'FRONT');
-    for (let i = 0; i < 100 && !threat; i++) {
-      advance(100);
-      threat = built.runtime.state.threats.find((t) => t.dir === 'FRONT');
-    }
-    expect(threat).toBeTruthy();
-    expect(threat!.impactAt - threat!.warnAt).toBeGreaterThanOrEqual(4_000);
-    advance(threat!.impactAt - built.runtime.state.t - 700);
-    const deploy = await emitAck<ActionResult>(guard, 'pilot:action', {
-      matchId,
-      seatId: 'SHIELD_L',
-      clientActionId: key(),
-      action: { actionType: 'DEPLOY_SHIELD', payload: { dir: 'FRONT' } },
-    });
-    expect(deploy.accepted).toBe(true);
-    advance(900);
-    const blocked = await eventually(() => displayEvents.find((e) => e.type === 'threat_blocked'));
-    await eventually(() => (displaySnaps.at(-1)?.state.stats.threatsBlocked ?? 0) >= 1);
-    expect(blocked?.payload).toMatchObject({ seatId: 'SHIELD_L', dir: 'FRONT', auto: false });
-    expect(displaySnaps.at(-1)?.state.stats.threatsBlocked).toBeGreaterThanOrEqual(1);
-
-    // Every accepted and refused action is on record.
     const rows = built.db.prepare('SELECT action_type, accepted FROM action_events').all();
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.length).toBeGreaterThanOrEqual(3);
   });
 
   it('refuses malformed and client-authoritative payloads', async () => {
-    const gunner = await connect('/pilot', await demoGuest());
+    const p = await connect('/pilot', await demoGuest());
     const matchId = built.runtime.state.matchId;
-    await emitAck(gunner, 'pilot:joinSeat', { matchId, seatId: 'GUNNER_L', requestId: key() });
-    const forged = await emitAck<ActionResult>(gunner, 'pilot:action', {
+    const forged = await emitAck<ActionResult>(p, 'pilot:action', {
       matchId,
-      seatId: 'GUNNER_L',
       clientActionId: key(),
-      action: { actionType: 'FIRE', payload: { damage: 99999 } },
+      action: { kind: 'ATTACK', damage: 99999 },
     });
     expect(forged.reasonCode).toBe('INVALID');
-    const stale = await emitAck<ActionResult>(gunner, 'pilot:action', {
-      matchId: 'm_old',
-      seatId: 'GUNNER_L',
+    const unknown = await emitAck<ActionResult>(p, 'pilot:action', {
+      matchId,
       clientActionId: key(),
-      action: { actionType: 'FIRE', payload: {} },
+      action: { kind: 'NUKE' },
+    });
+    expect(unknown.reasonCode).toBe('INVALID');
+    const stale = await emitAck<ActionResult>(p, 'pilot:action', {
+      matchId: 'm_old',
+      clientActionId: key(),
+      action: { kind: 'ATTACK' },
     });
     expect(stale.reasonCode).toBe('STALE_MATCH');
   });
@@ -389,19 +334,19 @@ describe('sockets', () => {
     expect(built.runtime.state.phaseEndsAt).toBe(endsAt);
   });
 
-  it('holds a dropped pilot seat, and RESET opens a fresh match', async () => {
+  it('keeps a dropped phone in the crowd; the next match keeps connected phones; RESET works', async () => {
     const cookie = await demoGuest();
     const p1 = await connect('/pilot', cookie);
+    await eventually(() => Object.keys(built.runtime.state.players).length === 1);
+    const pilotId = Object.keys(built.runtime.state.players)[0]!;
     const matchId = built.runtime.state.matchId;
-    await emitAck(p1, 'pilot:joinSeat', { matchId, seatId: 'SHIELD_R', requestId: key() });
     p1.close();
-    await settle();
-    expect(built.runtime.state.seats.SHIELD_R.connected).toBe(false);
-    expect(built.runtime.state.seats.SHIELD_R.pilotId).not.toBeNull();
+    await eventually(() => built.runtime.state.players[pilotId]?.connected === false);
+    expect(built.runtime.snapshotMsg().state.players).toBe(1);
     const p2 = await connect('/pilot', cookie);
     const status = await new Promise<SessionStatusMsg>((r) => p2.once('pilot:sessionStatus', r));
-    expect(status.assignedSeat).toBe('SHIELD_R');
-    expect(built.runtime.state.seats.SHIELD_R.connected).toBe(true);
+    expect(status.joined).toBe(true);
+    await eventually(() => built.runtime.state.players[pilotId]?.connected === true);
 
     const operator = await connect('/operator', await operatorCookie());
     const res = await emitAck<OperatorCommandResult>(operator, 'operator:command', {
@@ -409,7 +354,8 @@ describe('sockets', () => {
     });
     expect(res.ok).toBe(true);
     expect(built.runtime.state.matchId).not.toBe(matchId);
-    expect(built.runtime.state.seats.SHIELD_R.pilotId).toBeNull();
+    // Still connected → already in the new match, no rescan.
+    expect(built.runtime.isJoined(pilotId)).toBe(true);
     const audit = built.db.prepare("SELECT action FROM audit_log WHERE action = 'RESET'").all();
     expect(audit).toHaveLength(1);
   });

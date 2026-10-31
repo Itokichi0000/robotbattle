@@ -70,7 +70,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: RouteContext): voi
     const pilot = pilotForToken(db, token);
     revokePilotSession(db, token);
     if (pilot) {
-      runtime.command({ type: 'SEAT_LEAVE', pilotId: pilot.id });
+      runtime.leave(pilot.id);
       realtime.disconnectPilot(pilot.id);
     }
     reply.header('Set-Cookie', cookieHeader(PILOT_COOKIE, '', cookieOpts(0, 'Lax')));

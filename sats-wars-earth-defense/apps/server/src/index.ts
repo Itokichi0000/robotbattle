@@ -26,7 +26,7 @@ const lines = [
   '  SATS WARS: EARTH DEFENSE — ONE MECH. EIGHT PILOTS.',
   `  mode       ${env.APP_MODE.toUpperCase()}${
     env.APP_MODE === 'sandbox'
-      ? ' (VIRTUAL pulses only, DEMO GUEST + LNURL-auth sign-in)'
+      ? ' (VIRTUAL 21 sats actions only, DEMO GUEST + LNURL-auth sign-in)'
       : ' (LNbits invoices; payments stay OFF until approved in /operator)'
   }`,
   `  display    http://localhost:${env.PORT}/display/`,

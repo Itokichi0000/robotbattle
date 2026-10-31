@@ -14,19 +14,13 @@ import type {
   PaymentIntentView,
   PilotClientToServer,
   PilotServerToClient,
-  SeatChangedMsg,
-  SeatId,
   SessionStatusMsg,
 } from '@swed/shared';
 import {
   displaySettingsPatchSchema,
   displayStatsSchema,
-  joinSeatReqSchema,
-  leaveReqSchema,
   operatorCommandSchema,
   pilotActionReqSchema,
-  readyReqSchema,
-  syncFinisherReqSchema,
 } from '@swed/shared/schemas';
 import { Server, type Namespace, type Socket } from 'socket.io';
 import type { Db } from './db';
@@ -83,14 +77,6 @@ class Bucket {
   }
 }
 
-const SEAT_EVENTS = new Set([
-  'seat_assigned',
-  'seat_released',
-  'seat_connection',
-  'seat_ready',
-  'auto_support_changed',
-]);
-
 export class Realtime {
   readonly io: Server;
   readonly display: DisplayNs;
@@ -107,7 +93,6 @@ export class Realtime {
   };
   private readonly displays = new Map<string, DisplayClientInfo>();
   private readonly pilotSockets = new Map<string, Set<string>>();
-  private readonly lastSeat = new Map<string, SeatId | null>();
   private statusTimer: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
 
@@ -152,13 +137,6 @@ export class Realtime {
     for (const ns of [this.display, this.pilot, this.operator]) {
       for (const m of msgs) ns.emit('match:event', m);
     }
-    if (msgs.some((m) => SEAT_EVENTS.has(m.type))) {
-      for (const m of msgs) {
-        const p = m.payload;
-        if ('seatId' in p && SEAT_EVENTS.has(m.type)) this.emitSeatChanged(p.seatId as SeatId);
-      }
-      this.syncPilotSeats();
-    }
   }
 
   onSnapshot = (msg: ReturnType<MatchRuntime['snapshotMsg']>): void => {
@@ -167,34 +145,12 @@ export class Realtime {
     this.operator.emit('match:snapshot', msg);
   };
 
+  /** A new match opened: every connected phone is already in it; tell them. */
   onMatchReplaced(): void {
-    this.syncPilotSeats(true);
-  }
-
-  private emitSeatChanged(seatId: SeatId): void {
-    const s = this.runtime.state;
-    const seat = s.seats[seatId];
-    const msg: SeatChangedMsg = {
-      seatId,
-      pilotDisplayName: seat.displayName,
-      connected: seat.connected,
-      isAutoSupport: seat.pilotId === null && s.autoSupport,
-    };
-    this.display.emit('seat:changed', msg);
-    this.pilot.emit('seat:changed', msg);
-  }
-
-  /** Tells each connected pilot which seat (if any) is theirs whenever that changes. */
-  private syncPilotSeats(force = false): void {
     for (const pilotId of this.pilotSockets.keys()) {
-      const seat = this.runtime.seatOf(pilotId);
-      if (force || this.lastSeat.get(pilotId) !== seat) {
-        this.lastSeat.set(pilotId, seat);
-        const socketId = this.pilotSockets.get(pilotId)?.values().next().value;
-        const pilot = socketId ? this.pilot.sockets.get(socketId)?.data.pilot : undefined;
-        if (pilot)
-          this.pilot.to(`pilot:${pilotId}`).emit('pilot:sessionStatus', this.sessionStatus(pilot));
-      }
+      const pilot = pilotById(this.opts.db, pilotId);
+      if (pilot)
+        this.pilot.to(`pilot:${pilotId}`).emit('pilot:sessionStatus', this.sessionStatus(pilot));
     }
   }
 
@@ -231,7 +187,7 @@ export class Realtime {
         showCallsign: !!pilot.show_callsign,
       },
       matchId: this.runtime.state.matchId,
-      assignedSeat: this.runtime.seatOf(pilot.id),
+      joined: this.runtime.isJoined(pilot.id),
     };
   }
 
@@ -279,44 +235,16 @@ export class Realtime {
       const set = this.pilotSockets.get(pilot.id) ?? new Set<string>();
       set.add(socket.id);
       this.pilotSockets.set(pilot.id, set);
-      if (set.size === 1) this.runtime.connection(pilot.id, true);
-      this.lastSeat.set(pilot.id, this.runtime.seatOf(pilot.id));
+      // Scanning the QR is joining: no seats to pick, no limit on people.
+      if (set.size === 1) {
+        const fresh = pilotById(db, pilot.id) ?? pilot;
+        this.runtime.connect(fresh, displayNameFor(fresh, this.hideCallsigns));
+      }
       socket.emit('pilot:sessionStatus', this.sessionStatus(pilot));
       socket.emit('match:snapshot', this.runtime.snapshotMsg());
 
-      const bucket = new Bucket(10, 6);
-      const limited = () => !bucket.take();
-
-      socket.on('pilot:joinSeat', (raw, ack) => {
-        if (typeof ack !== 'function') return;
-        if (limited()) return ack({ ok: false, reasonCode: 'RATE_LIMITED' });
-        const req = joinSeatReqSchema.safeParse(raw);
-        if (!req.success) return ack({ ok: false, reasonCode: 'INVALID' });
-        const fresh = pilotById(db, pilot.id) ?? pilot;
-        ack(
-          this.runtime.joinSeat(
-            fresh,
-            req.data.matchId,
-            req.data.seatId,
-            displayNameFor(fresh, this.hideCallsigns),
-          ),
-        );
-      });
-
-      socket.on('pilot:ready', (raw, ack) => {
-        if (typeof ack !== 'function') return;
-        if (limited()) return ack({ ok: false, reasonCode: 'RATE_LIMITED' });
-        const req = readyReqSchema.safeParse(raw);
-        if (!req.success) return ack({ ok: false, reasonCode: 'INVALID' });
-        ack(this.runtime.ready(pilot, req.data.matchId));
-      });
-
-      socket.on('pilot:leave', (raw, ack) => {
-        if (typeof ack !== 'function') return;
-        const req = leaveReqSchema.safeParse(raw);
-        if (!req.success) return ack({ ok: false, reasonCode: 'INVALID' });
-        ack(this.runtime.leave(pilot, req.data.matchId));
-      });
+      // A person taps at most ~1.5/s (the free cooldown); bursts are fine, scripts are not.
+      const bucket = new Bucket(8, 4);
 
       socket.on('pilot:action', (raw, ack) => {
         if (typeof ack !== 'function') return;
@@ -326,31 +254,13 @@ export class Realtime {
             ? String(raw.clientActionId).slice(0, 64)
             : '';
         if (!req.success) return ack({ clientActionId, accepted: false, reasonCode: 'INVALID' });
-        if (limited()) return ack({ clientActionId, accepted: false, reasonCode: 'RATE_LIMITED' });
-        const res = this.runtime.pilotAction(pilot, req.data);
-        ack(res);
-        socket.emit('pilot:actionResult', res);
-      });
-
-      socket.on('pilot:syncFinisher', (raw, ack) => {
-        if (typeof ack !== 'function') return;
-        const req = syncFinisherReqSchema.safeParse(raw);
-        const clientActionId =
-          typeof raw === 'object' && raw && 'clientActionId' in raw
-            ? String(raw.clientActionId).slice(0, 64)
-            : '';
-        if (!req.success) return ack({ clientActionId, accepted: false, reasonCode: 'INVALID' });
-        if (limited()) return ack({ clientActionId, accepted: false, reasonCode: 'RATE_LIMITED' });
-        const seatId = this.runtime.seatOf(pilot.id);
-        if (!seatId) return ack({ clientActionId, accepted: false, reasonCode: 'NOT_YOUR_SEAT' });
-        const res = this.runtime.pilotAction(pilot, {
-          matchId: req.data.matchId,
-          seatId,
-          clientActionId: req.data.clientActionId,
-          action: { actionType: 'SYNC_NOW', payload: {} },
-        });
-        ack(res);
-        socket.emit('pilot:actionResult', res);
+        if (!bucket.take())
+          return ack({ clientActionId, accepted: false, reasonCode: 'RATE_LIMITED' });
+        if (!this.runtime.isJoined(pilot.id)) {
+          const fresh = pilotById(db, pilot.id) ?? pilot;
+          this.runtime.connect(fresh, displayNameFor(fresh, this.hideCallsigns));
+        }
+        ack(this.runtime.pilotAction(pilot, req.data));
       });
 
       socket.on('disconnect', () => {
@@ -358,8 +268,7 @@ export class Realtime {
         s?.delete(socket.id);
         if (s && s.size === 0) {
           this.pilotSockets.delete(pilot.id);
-          this.lastSeat.delete(pilot.id);
-          this.runtime.connection(pilot.id, false);
+          this.runtime.disconnect(pilot.id);
         }
       });
     });
@@ -401,16 +310,12 @@ export class Realtime {
 
   async operatorCommand(cmd: OperatorCommand): Promise<OperatorCommandResult> {
     const rt = this.runtime;
-    const control = (
-      type: 'ATTRACT' | 'OPEN_LOBBY' | 'START' | 'SKIP_DEPLOY' | 'PAUSE' | 'RESUME' | 'END',
-    ) => {
+    const control = (type: 'START' | 'SKIP_DEPLOY' | 'PAUSE' | 'RESUME' | 'END') => {
       const r = rt.command({ type });
       const ok = r.outcome.kind === 'control' && r.outcome.ok;
       return { ok, message: ok ? `${type} done` : `${type} not possible in ${rt.state.phase}` };
     };
     switch (cmd.command) {
-      case 'ATTRACT':
-      case 'OPEN_LOBBY':
       case 'START':
       case 'SKIP_DEPLOY':
       case 'PAUSE':
@@ -418,29 +323,19 @@ export class Realtime {
       case 'END':
         return control(cmd.command);
       case 'RESET':
-        rt.replaceMatch('RESET', { attract: true });
+        rt.replaceMatch('RESET');
         return { ok: true, message: 'match reset' };
       case 'NEXT_ROUND': {
         const p = rt.state.phase;
         if (p !== 'VICTORY' && p !== 'DEFEAT' && p !== 'RESULTS') {
           return { ok: false, message: `NEXT ROUND is for after a result (now ${p}); use RESET` };
         }
-        rt.replaceMatch('NEXT_ROUND', { attract: true });
+        rt.replaceMatch('NEXT_ROUND');
         return { ok: true, message: 'next round opened' };
       }
-      case 'SET_AUTO_SUPPORT':
-        rt.setAutoSupport(cmd.enabled);
-        return { ok: true, message: `AUTO SUPPORT ${cmd.enabled ? 'on' : 'off'}` };
-      case 'KICK_SEAT': {
-        const pilotId = rt.state.seats[cmd.seatId].pilotId;
-        const r = rt.command({ type: 'SEAT_KICK', seatId: cmd.seatId });
-        const ok = r.outcome.kind === 'control' && r.outcome.ok;
-        if (ok && pilotId) {
-          this.pilot.to(`pilot:${pilotId}`).emit('pilot:notice', { code: 'KICKED' });
-          this.syncPilotSeats();
-        }
-        return { ok, message: ok ? `${cmd.seatId} released` : `${cmd.seatId} is empty` };
-      }
+      case 'SET_AUTO_START':
+        rt.setAutoStart(cmd.enabled);
+        return { ok: true, message: `AUTO START ${cmd.enabled ? 'on' : 'off'}` };
       case 'SET_PRESET':
         return { ok: true, message: rt.setPreset(cmd.presetId) };
       case 'SET_DISPLAY': {
@@ -454,9 +349,8 @@ export class Realtime {
         return { ok: true, message: `DEMO BOTS ${cmd.enabled ? 'on' : 'off'}` };
       case 'SET_HIDE_CALLSIGNS': {
         this.hideCallsigns = cmd.hidden;
-        for (const id of Object.keys(rt.state.seats) as SeatId[]) {
-          const pid = rt.state.seats[id].pilotId;
-          const pilot = pid && !rt.state.seats[id].bot ? pilotById(this.opts.db, pid) : null;
+        for (const p of Object.values(rt.state.players)) {
+          const pilot = p.bot ? null : pilotById(this.opts.db, p.pilotId);
           if (pilot) rt.rename(pilot.id, displayNameFor(pilot, cmd.hidden));
         }
         return {
@@ -475,18 +369,6 @@ export class Realtime {
         return this.payments.enableLive(cmd.confirm);
       case 'PAYMENTS_DISABLE':
         return this.payments.disable();
-      case 'TRIGGER_BLACKOUT': {
-        const r = rt.command({ type: 'TRIGGER_BLACKOUT' });
-        const ok = r.outcome.kind === 'control' && r.outcome.ok;
-        return {
-          ok,
-          message: ok
-            ? 'blackout started'
-            : rt.state.crisis
-              ? 'a blackout is already on'
-              : `blackout only during a wave or the boss fight (now ${rt.state.phase})`,
-        };
-      }
       case 'SET_AUTO_SETTLE_VIRTUAL':
         return this.payments.setAutoSettleVirtual(cmd.enabled);
     }
@@ -497,6 +379,7 @@ export class Realtime {
     return {
       mode: this.opts.env.APP_MODE,
       demoBots: this.runtime.demoBots,
+      autoStart: this.runtime.autoStart,
       hideCallsigns: this.hideCallsigns,
       payments: this.payments.operatorView(),
       presetId: this.runtime.state.presetId,

@@ -1,22 +1,7 @@
-import {
-  formatClock,
-  isCombatPhase,
-  PHASE_LABEL,
-  REASON_TEXT,
-  ROLE_IDS,
-  ROLES,
-  SEATS,
-} from '@swed/shared';
-import type { Lang, PublicMatchState, ReasonCode, RoleId, SeatId } from '@swed/shared';
-import {
-  IconBolt,
-  IconCrosshair,
-  IconShield,
-  IconSignal,
-  IconWrench,
-  ROLE_VAR,
-} from '@swed/ui-tokens';
-import { createContext, useContext, type ReactNode } from 'react';
+import { ACTION_LABEL, formatClock, PHASE_LABEL, REASON_TEXT } from '@swed/shared';
+import type { ActionKind, Lang, PublicMatchState, ReasonCode } from '@swed/shared';
+import { IconCrosshair, IconShield, IconSignal, IconWrench } from '@swed/ui-tokens';
+import { createContext, useContext } from 'react';
 
 /** Language context: Japanese first, English toggle (spec §3.4). */
 export const LangCtx = createContext<{
@@ -39,53 +24,57 @@ export function reasonText(
   return L(t.ja, t.en);
 }
 
-/** Top band of every phone screen: brand, role, wave clock, link state (ref 06). */
-/** Opens the shared-energy sheet from any console header (kept apart from role controls). */
-type Listener = () => void;
-let pulseOpen = false;
-const pulseListeners = new Set<Listener>();
-export const pulseUi = {
-  get: () => pulseOpen,
-  set: (v: boolean) => {
-    pulseOpen = v;
-    for (const l of pulseListeners) l();
-  },
-  subscribe: (l: Listener) => {
-    pulseListeners.add(l);
-    return () => pulseListeners.delete(l);
-  },
+export const ACTION_ICON: Record<ActionKind, typeof IconCrosshair> = {
+  ATTACK: IconCrosshair,
+  DEFEND: IconShield,
+  REPAIR: IconWrench,
 };
 
+/** CSS colour per action: amber shoots, cyan shields, mint repairs (spec §3.4 tokens). */
+export const ACTION_VAR: Record<ActionKind, string> = {
+  ATTACK: 'var(--sw-action)',
+  DEFEND: 'var(--sw-ally)',
+  REPAIR: 'var(--sw-repair)',
+};
+
+export function actionName(kind: ActionKind, L: (ja: string, en: string) => string): string {
+  return L(ACTION_LABEL[kind].ja, ACTION_LABEL[kind].en);
+}
+
+/** What one press does, in plain words. */
+export function effectText(
+  kind: ActionKind,
+  value: number,
+  L: (ja: string, en: string) => string,
+): string {
+  if (kind === 'ATTACK') return L(`ボスに ${value} ダメージ`, `${value} damage to the boss`);
+  if (kind === 'DEFEND') return L(`シールド +${value}`, `Shield +${value}`);
+  return L(`雷神の装甲 +${value}`, `RAIJIN armour +${value}`);
+}
+
+/** Top band: brand, phase, clock, players, link, language. */
 export function PilotHeader({
   s,
   mt,
-  seat,
   connected,
 }: {
   s: PublicMatchState | undefined;
   mt: number;
-  seat: SeatId | null;
   connected: boolean;
 }) {
   const { L, lang, setLang } = useL();
   const label = s ? PHASE_LABEL[s.phase] : null;
-  const end = s?.combatEndsAt ?? s?.phaseEndsAt ?? null;
-  const def = seat ? SEATS[seat] : null;
+  const end = s?.phase === 'LOBBY' ? (s.autoStartAt ?? null) : (s?.phaseEndsAt ?? null);
   return (
-    <header className="ph" style={def ? { ['--acc' as string]: ROLE_VAR[def.role] } : undefined}>
+    <header className="ph">
       <div className="ph-top">
-        {/* On a console the role bar below names the seat; the brand would crowd narrow phones. */}
-        {seat ? null : <span className="ph-brand">SATS WARS / PILOT</span>}
+        <span className="ph-brand">SATS WARS</span>
         <span className="ph-wave sw-num">{label ? (lang === 'ja' ? label.ja : label.en) : ''}</span>
         <span className="ph-time sw-num">{end !== null ? formatClock(end - mt) : '--:--'}</span>
-        {/* The one team meter (D-032). Sats are offered only by the blackout banner. */}
-        {seat && s && isCombatPhase(s.phase) ? (
-          <span
-            className={`ph-gauge sw-num${s.teamCapacitor >= s.hints.overdriveCapacitorMin ? ' full' : ''}`}
-            aria-label={L('雷神ゲージ', 'RAIJIN gauge')}
-          >
-            <IconBolt size={14} />
-            {Math.round(Math.min(100, (s.teamCapacitor / s.hints.overdriveCapacitorMin) * 100))}%
+        {s ? (
+          <span className="ph-crowd sw-num" aria-label={L('参加人数', 'Players')}>
+            {s.players}
+            {L('人', '')}
           </span>
         ) : null}
         <span
@@ -102,154 +91,33 @@ export function PilotHeader({
           {lang === 'ja' ? 'EN' : 'JA'}
         </button>
       </div>
-      {def ? (
-        <div className="ph-role">
-          <span className="no sw-num">{String(def.no).padStart(2, '0')}</span>
-          <span className="nm">{L(ROLES[def.role].labelJa, ROLES[def.role].labelEn)}</span>
-          <span className="en">{def.labelEn}</span>
-          <span className="part">{L(def.partJa, def.partEn)}</span>
-        </div>
-      ) : null}
-      {seat && s && isCombatPhase(s.phase) ? <LinkBar s={s} mt={mt} seat={seat} /> : null}
     </header>
   );
 }
 
-const ROLE_ICON: Record<RoleId, typeof IconBolt> = {
-  GUNNER: IconCrosshair,
-  DEFENSE: IconShield,
-  POWER: IconBolt,
-  ENGINEER: IconWrench,
-};
-
-/**
- * LINK CHAIN made visible (spec §6.6): which systems are in the live link, how long it stays
- * open, and whether YOUR success right now would extend it (and what that is worth).
- */
-export function LinkBar({ s, mt, seat }: { s: PublicMatchState; mt: number; seat: SeatId }) {
-  const { L } = useL();
-  const role = SEATS[seat].role;
-  const link = s.link && s.link.expiresAt > mt ? s.link : null;
-  const mineIn = !!link?.roles.includes(role);
-  const yours = !!link && !mineIn;
-  const n = link?.roles.length ?? 0;
-  const bonus =
-    role === 'GUNNER'
-      ? L(
-          `威力+${Math.round(n * s.hints.linkDamagePerRole * 100)}%`,
-          `+${Math.round(n * s.hints.linkDamagePerRole * 100)}% damage`,
-        )
-      : role === 'ENGINEER'
-        ? L('修理量アップ', 'bigger repair')
-        : L('ゲージ多め', 'more gauge');
-  const text = !link
-    ? L('連携 — 誰かが成功すると連携が始まる', 'LINK — any success starts a chain')
-    : mineIn
-      ? L(`連携 ×${n} — ほかの役割の成功を待つ`, `LINK ×${n} — waiting for other roles`)
-      : L(
-          `今あなたが成功で 連携 ×${n + 1}・雷神ゲージ↑（${bonus}）`,
-          `Succeed now: LINK ×${n + 1}, gauge up (${bonus})`,
-        );
-  return (
-    <div className={`link-bar${yours ? ' yours' : ''}${link ? ' live' : ''}`} aria-live="polite">
-      <div className="link-roles" aria-hidden>
-        {ROLE_IDS.map((r) => {
-          const Icon = ROLE_ICON[r];
-          const on = !!link?.roles.includes(r);
-          return (
-            <span
-              key={r}
-              className={`lr${on ? ' on' : ''}${r === role ? ' me' : ''}`}
-              style={{ ['--rc' as string]: ROLE_VAR[r] }}
-            >
-              <Icon size={14} />
-            </span>
-          );
-        })}
-      </div>
-      <span className="link-text">{text}</span>
-      {link ? (
-        <i
-          className="link-time"
-          style={{ width: `${Math.max(0, ((link.expiresAt - mt) / s.hints.linkWindowMs) * 100)}%` }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-export function Gauge({
+export function Bar({
   label,
   value,
   max,
-  accent,
+  tone,
   right,
 }: {
   label: string;
   value: number;
   max: number;
-  accent?: string;
+  tone: 'danger' | 'ally' | 'repair';
   right?: string;
 }) {
   const pct = Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100));
   return (
-    <div className="gauge" style={accent ? { ['--acc' as string]: accent } : undefined}>
-      <div className="g-row">
+    <div className={`bar ${tone}`}>
+      <div className="bar-row">
         <span>{label}</span>
         <span className="sw-num">{right ?? `${Math.round(pct)}%`}</span>
       </div>
-      <div className="g-bar">
+      <div className="bar-track">
         <i style={{ width: `${pct}%` }} />
       </div>
     </div>
-  );
-}
-
-/** "LOCK > CHARGE > FIRE": where the pilot is in the role's loop. */
-export function Flow({ steps, active }: { steps: string[]; active: number }) {
-  return (
-    <ol className="flow" aria-label="flow">
-      {steps.map((s, i) => (
-        <li key={s} className={i === active ? 'on' : i < active ? 'done' : ''}>
-          {s}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-export function SystemLine({
-  text,
-  tone,
-  connected,
-  mt,
-  s,
-}: {
-  text: string;
-  tone: 'ok' | 'bad' | 'info';
-  connected: boolean;
-  mt: number;
-  s?: PublicMatchState;
-}) {
-  const { L } = useL();
-  const end = s?.combatEndsAt ?? s?.phaseEndsAt ?? null;
-  return (
-    <footer className="sysline" role="status" aria-live="polite">
-      <div className={`msg ${tone}`}>{text || L('待機中', 'Standing by')}</div>
-      <div className="meta">
-        <span className={connected ? 'ok' : 'bad'}>
-          {connected ? 'CONNECTED' : L('再接続中 RECONNECTING', 'RECONNECTING')}
-        </span>
-        <span className="sw-num">{end !== null ? formatClock(end - mt) : ''}</span>
-      </div>
-    </footer>
-  );
-}
-
-export function Screen({ children, accent }: { children: ReactNode; accent?: string }) {
-  return (
-    <main className="screen" style={accent ? { ['--acc' as string]: accent } : undefined}>
-      {children}
-    </main>
   );
 }

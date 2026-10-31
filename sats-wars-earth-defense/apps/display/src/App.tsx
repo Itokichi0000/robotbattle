@@ -66,7 +66,7 @@ export function App() {
   useEffect(() => sfx.setVolume(cfg.muted ? 0 : cfg.volume), [cfg.muted, cfg.volume]);
 
   const phase = st.snap?.phase;
-  const indoor = !phase || phase === 'ATTRACT' || phase === 'LOBBY' || phase === 'COUNTDOWN';
+  const indoor = !phase || phase === 'LOBBY' || phase === 'COUNTDOWN';
   const ambience = indoor ? 'hangar' : phase === 'RESULTS' ? 'none' : 'battle';
   useEffect(() => {
     if (audioReady) sfx.ambience(ambience);

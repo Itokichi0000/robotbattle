@@ -17,18 +17,19 @@ export const anim = {
   hatch: 0,
   /** Rotating amber warning beacon 0..1. */
   alarm: 0,
-  /** REACTOR BLACKOUT: 1 while the reactor is dark (lights eased toward it each frame). */
+  /** Armour critical: 1 while RAIJIN is nearly down (lights eased toward it each frame). */
   blackoutTarget: 0,
   blackout: 0,
-  /** RAIJIN gauge full: the reactor surges, so the hall sees the finisher is ready. */
+  /** A Lightning action just landed: the reactor surges for a moment. */
   gaugeFull: false,
+  surgeUntil: 0,
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
-  anim.blackoutTarget = s?.crisis ? 1 : 0;
-  anim.gaugeFull = !!s && s.teamCapacitor >= s.hints.overdriveCapacitorMin;
+  anim.blackoutTarget = s && s.phase === 'BATTLE' && s.mechHp <= s.mechMax * 0.2 ? 0.6 : 0;
+  anim.gaugeFull = performance.now() < anim.surgeUntil;
   anim.alarm = 0;
   anim.hatch = 0;
   anim.liftY = 0;
@@ -40,12 +41,9 @@ export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
     return;
   }
   switch (s.phase) {
-    case 'ATTRACT':
-      anim.mode = 'hangar';
-      anim.powered = 0.6;
-      break;
     case 'LOBBY':
       anim.mode = 'hangar';
+      anim.powered = s.players > 0 ? 1 : 0.6;
       break;
     case 'COUNTDOWN':
       anim.mode = 'hangar';

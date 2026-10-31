@@ -1,13 +1,13 @@
 import { useFrame } from '@react-three/fiber';
 import { enemyPositionAt } from '@swed/game-engine';
-import { ROLE_IDS, ROLES, SEATS } from '@swed/shared';
-import type { Direction, MechPartId, RoleId, SeatId, ShieldSeatId } from '@swed/shared';
+import type { Direction, MechPartId, ShieldSeatId } from '@swed/shared';
 import { COLORS } from '@swed/ui-tokens';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { FX_TIME_SCALE } from '../capture';
 import { store } from '../net';
 import { anchorWorldPosition } from './anchors';
+import { anim } from './anim';
 import { cameraKick, finisher } from './cameraBus';
 import { lastEnemyPos } from './Enemies';
 import { fxBus } from './fxBus';
@@ -68,12 +68,6 @@ interface Orb {
   burst: number;
 }
 
-const LANE_STATION: Record<'weapon' | 'shield' | 'mobility' | 'repair', string[]> = {
-  weapon: ['cannonL', 'cannonR'],
-  shield: ['shoulderL', 'shoulderR'],
-  mobility: ['legs'],
-  repair: ['torso', 'legs'],
-};
 const BACKPACK_FALLBACK = new THREE.Vector3(0, 9.6, 1.6);
 
 interface Blast {
@@ -343,35 +337,7 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
         burst: 0,
       };
     });
-    // OVERDRIVE READY: a slow amber ring around the chest core, and one line per system
-    // that has synced, so the hall sees the four systems lock in one by one.
-    const odRing = new THREE.Mesh(
-      new THREE.TorusGeometry(1, 0.05, 8, 72),
-      new THREE.MeshBasicMaterial({
-        color: COLORS.action,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    odRing.visible = false;
-    const odLines = Object.fromEntries(
-      ROLE_IDS.map((r) => {
-        const mat = new THREE.MeshBasicMaterial({
-          color: COLORS.action,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          toneMapped: false,
-        });
-        const mesh = new THREE.Mesh(beamGeo, mat);
-        mesh.visible = false;
-        mesh.frustumCulled = false;
-        return [r, { mesh, mat }];
-      }),
-    ) as unknown as Record<RoleId, { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial }>;
-    return { beams, blasts, telegraphs, shields, combo, orbs, odRing, odLines };
+    return { beams, blasts, telegraphs, shields, combo, orbs };
   }, []);
 
   useEffect(() => {
@@ -379,9 +345,8 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
     for (const b of pools.beams) g.add(b.mesh);
     for (const b of pools.blasts) g.add(b.ball, b.ring);
     for (const t of pools.telegraphs) g.add(t.mesh, t.orb);
-    g.add(pools.shields.SHIELD_L.mesh, pools.shields.SHIELD_R.mesh, pools.combo, pools.odRing);
+    g.add(pools.shields.SHIELD_L.mesh, pools.shields.SHIELD_R.mesh, pools.combo);
     for (const o of pools.orbs) g.add(o.mesh);
-    for (const r of ROLE_IDS) g.add(pools.odLines[r].mesh);
   }, [pools]);
 
   const tmpA = useMemo(() => new THREE.Vector3(), []);
@@ -434,26 +399,6 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       if (anchorWorldPosition(`station:${id}`, out)) return out;
       return out.copy(id === 'backpack' ? BACKPACK_FALLBACK : PART_POS.CORE);
     };
-    const seatPos = (seat: SeatId, out: THREE.Vector3) => station(SEATS[seat].station, out);
-    const orb = (
-      from: THREE.Vector3,
-      to: THREE.Vector3,
-      color: string,
-      o: { dur?: number; delay?: number; arc?: number; size?: number; burst?: number } = {},
-    ) => {
-      const slot = pools.orbs.find((x) => x.dur <= 0) ?? pools.orbs[0]!;
-      slot.from.copy(from);
-      slot.to.copy(to);
-      slot.t = 0;
-      slot.dur = o.dur ?? 0.7;
-      slot.delay = o.delay ?? 0;
-      slot.arc = o.arc ?? 1.2;
-      slot.color = color;
-      slot.size = o.size ?? 0.3;
-      slot.burst = o.burst ?? 8;
-      slot.mat.color.set(color);
-      slot.mesh.visible = false;
-    };
     /** A jagged strike: short beams between jittered points, a bright core and a wide halo. */
     const lightning = (from: THREE.Vector3, to: THREE.Vector3, life: number) => {
       const n = 7;
@@ -478,211 +423,123 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
         .multiplyScalar(SHIELD_R * 0.92)
         .add(MECH_CENTER);
 
+    const bossPos = (out: THREE.Vector3) => {
+      const id = store.getState().snap?.state.boss?.id;
+      return !!id && enemyPos(id, out);
+    };
+    const muzzle = (left: boolean, out: THREE.Vector3) =>
+      anchorWorldPosition(`muzzle:${left ? 'GUNNER_L' : 'GUNNER_R'}`, out);
+    /** Lightning from the sky onto a point: the "21 sats" signature, whatever the action. */
+    const skyStrike = (at: THREE.Vector3, power: number) => {
+      lightning(at.clone().add(tmpC.set(6, 70, -30)), at.clone(), 0.9 * power);
+      later(0.08, () => lightning(at.clone().add(tmpC.set(-10, 64, -24)), at.clone(), 0.7 * power));
+      sparks.spawn(at, 120, COLORS.ally, 16, 0.9);
+      blast(at.clone(), 3 * power, '#bff6ff');
+      anim.surgeUntil = performance.now() + 2_500 / FX_TIME_SCALE;
+      cameraKick(0.8);
+    };
+
     return fxBus.on((e) => {
       switch (e.type) {
         case 'threat_warning':
           threatSource.current.set(e.threatId, e.sourceId);
           break;
-        case 'weapon_fired': {
-          const left = e.seatId === 'GUNNER_L';
-          if (!anchorWorldPosition(`muzzle:${e.seatId}`, tmpA)) break;
-          const a = tmpA.clone();
-          if (!enemyPos(e.enemyId, tmpB)) break;
-          const b = tmpB.clone();
-          beam(a, b, left ? '#ffcf7a' : '#bff6ff', left ? 0.42 : 0.2, left ? 0.32 : 0.22);
-          beam(a, b, left ? COLORS.action : COLORS.ally, left ? 0.9 : 0.5, left ? 0.18 : 0.14);
-          sparks.spawn(b, e.auto ? 14 : 34, left ? COLORS.action : COLORS.ally, 14, 0.7);
-          if (e.perfect && !e.auto) {
-            // PERFECT SHOT: a white-hot core to the beam and a brighter impact.
-            beam(a, b, '#ffffff', left ? 0.18 : 0.1, 0.4);
-            sparks.spawn(b, 40, '#ffffff', 18, 0.6);
+        case 'action': {
+          if (e.kind === 'ATTACK') {
+            if (!bossPos(tmpB)) break;
+            const b = tmpB.clone();
+            if (e.paid) {
+              // Lightning attack: both arms fire a white-hot beam and the sky strikes the boss.
+              for (const left of [true, false]) {
+                if (!muzzle(left, tmpA)) continue;
+                const a = tmpA.clone();
+                beam(a, b, '#ffffff', 0.5, 0.9);
+                beam(a, b, COLORS.action, 1.6, 0.8);
+                flashLevel.current[left ? 'L' : 'R'] = 1;
+              }
+              skyStrike(b, 1.2);
+              later(0.1, () => blast(b.clone(), 9, '#ffd08a'));
+              break;
+            }
+            // Free taps arrive batched: one or two beams, sparks sized by the crowd.
+            const shots = Math.min(2, e.count);
+            for (let i = 0; i < shots; i++) {
+              const left = Math.random() < 0.5;
+              if (!muzzle(left, tmpA)) continue;
+              const a = tmpA.clone();
+              beam(a, b, left ? '#ffcf7a' : '#bff6ff', 0.28, 0.25);
+              beam(a, b, left ? COLORS.action : COLORS.ally, 0.6, 0.16);
+              flashLevel.current[left ? 'L' : 'R'] = 0.7;
+            }
+            sparks.spawn(b, Math.min(80, 12 + e.count * 6), COLORS.action, 14, 0.7);
+            break;
           }
-          flashLevel.current[left ? 'L' : 'R'] = e.auto ? 0.4 : 1;
-          if (!e.auto) cameraKick(left ? 0.25 : 0.15);
+          if (e.kind === 'DEFEND') {
+            for (const seat of ['SHIELD_L', 'SHIELD_R'] as const) {
+              const sh = pools.shields[seat];
+              sh.ripple = Math.max(sh.ripple, e.paid ? 1 : 0.35);
+            }
+            if (e.paid) skyStrike(station('core', tmpA).clone(), 1);
+            break;
+          }
+          // REPAIR: welding sparks over the frame; Lightning floods it with light.
+          for (const part of ['CORE', 'LEG_L', 'LEG_R', 'ARM_L', 'ARM_R'] as const) {
+            if (!e.paid && Math.random() > 0.4) continue;
+            sparks.spawn(PART_POS[part], e.paid ? 50 : 14, COLORS.repair, 6, 0.6);
+          }
+          if (e.paid) {
+            skyStrike(station('core', tmpA).clone(), 1);
+            blast(PART_POS.CORE.clone(), 2.4, COLORS.repair);
+          }
           break;
         }
-        case 'enemy_destroyed': {
-          if (!enemyPos(e.enemyId, tmpA)) break;
-          const size = e.kind === 'NULL_CORE' ? 22 : e.kind === 'STRIKER' ? 6 : 3.5;
-          blast(tmpA.clone(), size);
-          sparks.spawn(
-            tmpA,
-            e.kind === 'NULL_CORE' ? 300 : 60,
-            '#ff9a4a',
-            e.kind === 'NULL_CORE' ? 40 : 18,
-            1.2,
-          );
-          if (e.kind === 'NULL_CORE') cameraKick(1.2);
-          break;
-        }
-        case 'threat_blocked': {
+        case 'strike_blocked': {
           const src = threatSource.current.get(e.threatId);
-          const sh = pools.shields[e.seatId as ShieldSeatId];
-          if (sh) {
+          for (const seat of ['SHIELD_L', 'SHIELD_R'] as const) {
+            const sh = pools.shields[seat];
             sh.ripple = 1;
             sh.dir = e.dir;
-            if (e.auto) sh.autoUntil = performance.now() + 700 / FX_TIME_SCALE;
           }
           shieldPoint(e.dir, tmpB);
           const b = tmpB.clone();
-          if (src && enemyPos(src, tmpA)) beam(tmpA.clone(), b, COLORS.danger, 0.5, 0.35);
-          sparks.spawn(b, e.perfect ? 70 : 40, COLORS.ally, 16, 0.8);
+          if (src && enemyPos(src, tmpA)) beam(tmpA.clone(), b, COLORS.danger, 0.9, 0.5);
+          sparks.spawn(b, 90, COLORS.ally, 16, 0.8);
+          cameraKick(0.4);
           break;
         }
-        case 'incoming_hit': {
+        case 'strike_hit': {
           const src = threatSource.current.get(e.threatId);
-          if (e.target.type === 'MECH') tmpB.copy(PART_POS[e.target.part]);
-          else tmpB.copy(DIR_VEC[e.dir]).multiplyScalar(260).setY(2);
+          tmpB.copy(DIR_VEC[e.dir]).multiplyScalar(260).setY(2);
           const b = tmpB.clone();
-          if (src && enemyPos(src, tmpA))
-            beam(tmpA.clone(), b, '#ff4060', e.target.type === 'MECH' ? 0.7 : 0.55, 0.4);
-          if (e.target.type === 'MECH') {
-            sparks.spawn(b, 50, '#ffb36b', 12, 0.6);
-            blast(b, 1.6, '#ff7a3a');
-            cameraKick(0.7);
-          } else {
-            blast(b, 16, '#ff6a3a');
-          }
+          if (src && enemyPos(src, tmpA)) beam(tmpA.clone(), b, '#ff4060', 1.1, 0.6);
+          blast(b, 18, '#ff6a3a');
+          cameraKick(0.6);
           break;
         }
-        case 'team_combo':
-          pools.combo.userData.life = 1;
-          pools.combo.userData.full = e.link >= 4;
-          pools.combo.visible = true;
-          break;
-        case 'part_repaired':
-          sparks.spawn(PART_POS[e.part], e.auto ? 14 : 40, COLORS.repair, 6, 0.6);
-          if (!e.auto) blast(PART_POS[e.part].clone(), 1.2, COLORS.repair);
-          break;
-        case 'repair_started':
-          sparks.spawn(PART_POS[e.part], 10, '#ffe2a8', 4, 0.35);
-          break;
-        case 'power_routed': {
-          // Chest reactor → the systems the new plan feeds, sized by their share.
-          const core = station('core', tmpA).clone();
-          (['weapon', 'shield', 'mobility', 'repair'] as const).forEach((lane, i) => {
-            const share = e.distribution[lane];
-            if (share < 10) return;
-            for (const id of LANE_STATION[lane]) {
-              orb(core, station(id, tmpB).clone(), COLORS.power, {
-                dur: 0.55,
-                delay: i * 0.06,
-                arc: 0.6,
-                size: 0.12 + share / 260,
-                burst: e.auto ? 3 : 6,
-              });
-            }
-          });
+        case 'mech_hit': {
+          const src = threatSource.current.get(e.threatId);
+          const b = PART_POS.CORE.clone();
+          if (src && enemyPos(src, tmpA)) beam(tmpA.clone(), b, '#ff4060', 0.7, 0.4);
+          sparks.spawn(b, 50, '#ffb36b', 12, 0.6);
+          blast(b, 1.8, '#ff7a3a');
+          cameraKick(0.7);
           break;
         }
-        case 'circuit_overload': {
-          const at = station('backpack', tmpA).clone();
-          sparks.spawn(at, 60, COLORS.danger, 10, 0.7);
-          blast(at, 1.8, '#ff6a4a');
-          cameraKick(0.25);
-          break;
-        }
-        case 'circuit_restored': {
-          const at = station('backpack', tmpA).clone();
-          sparks.spawn(at, e.auto ? 16 : 40, COLORS.power, 7, 0.55);
-          orb(at, station('core', tmpB).clone(), COLORS.power, { dur: 0.5, arc: 0.8, size: 0.25 });
-          break;
-        }
-        case 'sats_pulse_settled': {
-          // The shared pulse: Lightning strikes the chest reactor from the sky (the GRID PULSE
-          // moment), then the pilot's own station feeds it too (spec §8.1).
-          const core = station('core', tmpB).clone();
-          lightning(core.clone().add(tmpC.set(6, 70, -30)), core, e.crisis ? 0.9 : 0.6);
-          later(0.08, () =>
-            lightning(core.clone().add(tmpC.set(-10, 64, -24)), core, e.crisis ? 0.7 : 0.45),
-          );
-          sparks.spawn(core, e.crisis ? 140 : 70, COLORS.ally, 16, 0.9);
-          blast(core.clone(), e.crisis ? 3.2 : 2, '#bff6ff');
-          cameraKick(e.crisis ? 0.9 : 0.5);
-          const to = station('core', tmpB).clone();
-          const from = e.seatId
-            ? seatPos(e.seatId, tmpA).clone()
-            : to.clone().add(tmpC.set(0, 9, 4));
-          orb(from, to, COLORS.ally, { dur: 0.9, arc: 2.2, size: 0.55, burst: 50 });
-          later(0.9, () => {
-            pools.combo.userData.life = 1;
-            pools.combo.visible = true;
-          });
-          break;
-        }
-        case 'crisis_started': {
-          const core = station('core', tmpA).clone();
-          sparks.spawn(core, 90, COLORS.danger, 9, 0.7);
-          blast(core, 1.6, '#ff4a4a');
-          cameraKick(0.5);
-          break;
-        }
-        case 'crisis_resolved': {
-          if (e.by === 'PULSE') break; // the pulse case already struck
-          const core = station('core', tmpB).clone();
-          // POWER B's re-route (or AUTO): power runs back up the spine into the reactor.
-          orb(station('backpack', tmpA).clone(), core, COLORS.power, {
-            dur: 0.6,
-            arc: 1.2,
-            size: 0.5,
-            burst: 60,
-          });
-          later(0.6, () => blast(core.clone(), 2.2, COLORS.power));
-          break;
-        }
-        case 'crisis_failed': {
-          const core = station('core', tmpA).clone();
-          sparks.spawn(core, 160, '#ff6a3a', 14, 0.9);
-          blast(core, 3, '#ff4a2a');
-          cameraKick(1);
-          break;
-        }
-        case 'overdrive_window':
-          pools.odRing.userData.boost = 1;
-          break;
-        case 'overdrive_failed':
-          sparks.spawn(station('core', tmpA).clone(), 40, '#8aa0ad', 5, 0.5);
-          break;
-        case 'overdrive_fired': {
-          // Four systems converge on the chest core, then the main cannon lightning (3–5 s).
+        case 'boss_destroyed': {
           finisher.until = performance.now() + 4_800 / FX_TIME_SCALE;
-          const core = station('core', tmpA).clone();
-          const seats: SeatId[] = ROLE_IDS.flatMap((r) => ROLES[r].seats);
-          seats.forEach((seat, i) =>
-            orb(seatPos(seat, tmpB).clone(), core, COLORS.action, {
-              dur: 0.8,
-              delay: i * 0.05,
-              arc: 1.6,
-              size: 0.35,
-              burst: 12,
-            }),
-          );
-          later(1.05, () => {
-            const bossId = store.getState().snap?.state.boss?.id;
-            const from = station('core', tmpA).clone();
-            const to =
-              bossId && enemyPos(bossId, tmpB)
-                ? tmpB.clone()
-                : from.clone().add(tmpC.set(0, 30, -120));
-            beam(from, to, '#ffffff', 1.1, 1.5);
-            beam(from, to, COLORS.action, 2.8, 1.3);
-            beam(from, to, COLORS.ally, 4.6, 0.7);
-            sparks.spawn(from, 80, COLORS.action, 12, 0.9);
-            later(0.15, () => {
-              blast(to, 16, '#ffd08a');
-              sparks.spawn(to, 260, COLORS.action, 36, 1.3);
-              cameraKick(1.1);
-            });
+          if (!enemyPos(e.enemyId, tmpB)) break;
+          const to = tmpB.clone();
+          const from = station('core', tmpA).clone();
+          beam(from, to, '#ffffff', 1.1, 1.5);
+          beam(from, to, COLORS.action, 2.8, 1.3);
+          beam(from, to, COLORS.ally, 4.6, 0.7);
+          later(0.15, () => {
+            blast(to.clone(), 22, '#ffd08a');
+            sparks.spawn(to, 300, COLORS.action, 40, 1.3);
+            cameraKick(1.2);
           });
           break;
         }
-        case 'shield_deployed':
-          if (!e.auto)
-            pools.shields[e.seatId as ShieldSeatId].ripple = Math.max(
-              pools.shields[e.seatId as ShieldSeatId].ripple,
-              0.4,
-            );
-          break;
       }
     });
   }, [pools, sparks, tmpA, tmpB, tmpC]);
@@ -721,35 +578,6 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
         if (o.burst) sparks.spawn(o.to, o.burst, o.color, 5, 0.5);
       }
     }
-    // OVERDRIVE READY / CHARGING: ring around the core, one line per synced system.
-    const od = snap?.overdrive;
-    const ring = pools.odRing;
-    const coreOk = anchorWorldPosition('station:core', tmpC);
-    if (od && od.status !== 'IDLE' && coreOk) {
-      const boost = (ring.userData.boost as number | undefined) ?? 0;
-      ring.userData.boost = Math.max(0, boost - dt * 0.8);
-      ring.position.copy(tmpC);
-      ring.lookAt(s.camera.position);
-      // ≤ 1 Hz breathing, never a strobe.
-      const pulse = 0.5 + 0.5 * Math.sin((now / 1000) * Math.PI * 2 * 0.8);
-      ring.scale.setScalar((od.status === 'CHARGING' ? 2.2 : 2.8) + pulse * 0.4 + boost * 2);
-      (ring.material as THREE.MeshBasicMaterial).opacity = (0.35 + pulse * 0.35) * flashScale + 0.1;
-      ring.visible = true;
-    } else ring.visible = false;
-    for (const r of ROLE_IDS) {
-      const line = pools.odLines[r];
-      const on = !!od && od.status === 'CHARGING' && od.confirmed.includes(r) && coreOk;
-      line.mesh.visible = on;
-      if (!on) continue;
-      const seat = ROLES[r].seats[0]!;
-      if (!anchorWorldPosition(`station:${SEATS[seat].station}`, tmpA)) continue;
-      const dir = tmpB.copy(tmpC).sub(tmpA);
-      line.mesh.position.copy(tmpA);
-      line.mesh.quaternion.setFromUnitVectors(UP, dir.clone().normalize());
-      line.mesh.scale.set(0.08, dir.length(), 0.08);
-      line.mat.opacity = (od.autoRoles.includes(r) ? 0.4 : 0.85) * flashScale + 0.1;
-    }
-
     for (const b of pools.beams) {
       if (b.life <= 0) continue;
       b.life -= dt;
@@ -797,14 +625,14 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       (tg.orb.material as THREE.MeshBasicMaterial).opacity = 0.3 + k * 0.5;
       tg.orb.visible = true;
     });
-    // Shields: shown while the server says they are up; ripple on confirmed blocks.
+    // The shared shield: brighter as the crowd charges it, facing the announced strike.
+    const strike = snap?.threats.find((th) => th.target.type === 'CITY');
+    const shieldK = snap ? Math.min(1, snap.shield / Math.max(1, snap.shieldMax)) : 0;
     for (const seat of ['SHIELD_L', 'SHIELD_R'] as const) {
       const sh = pools.shields[seat];
-      const st = snap?.shields[seat];
-      const active = !!st?.dir && st.activeFrom <= mt && mt <= st.activeUntil;
-      const auto = now < sh.autoUntil;
-      if (active && st?.dir) sh.dir = st.dir;
-      const target = active ? 0.55 : auto ? 0.3 : 0;
+      if (strike) sh.dir = strike.dir;
+      else sh.dir = seat === 'SHIELD_L' ? 'FRONT' : 'RIGHT';
+      const target = snap?.phase === 'BATTLE' && shieldK > 0.02 ? 0.12 + shieldK * 0.5 : 0;
       sh.mat.uniforms.uAlpha!.value +=
         (target - sh.mat.uniforms.uAlpha!.value) * Math.min(1, dt * 10);
       sh.mat.uniforms.uRipple!.value = sh.ripple * flashScale;

@@ -3,6 +3,5 @@ export * from './bots';
 export * from './hints';
 export * from './orbit';
 export * from './public';
-export * from './router';
 export * from './sim';
 export { nextRandom } from './rng';

@@ -1,147 +1,93 @@
-import type {
-  ActionResult,
-  MatchEventMsg,
-  OperatorCommandResult,
-  SeatRequestResult,
-} from '@swed/shared';
+import type { ActionResult, MatchEventMsg, OperatorCommandResult } from '@swed/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collect, emitAck, eventually, key, TestServer } from './testHarness';
 
 let srv: TestServer;
 afterEach(async () => srv?.stop());
 
-describe('eight seats over sockets', () => {
-  it('every station can be boarded; SYNC NOW travels as pilot:syncFinisher', async () => {
-    srv = await new TestServer().start();
-    const matchId = srv.runtime.state.matchId;
-    const seats = ['GUNNER_L', 'SHIELD_L', 'POWER_CORE', 'ENGINEER_CORE'] as const;
-    const phones = [];
-    for (const seatId of seats) {
-      const p = await srv.connect('/pilot', await srv.demoGuest());
-      expect(
-        await emitAck<SeatRequestResult>(p, 'pilot:joinSeat', {
-          matchId,
-          seatId,
-          requestId: key(),
-        }),
-      ).toEqual({
-        ok: true,
-        seatId,
-      });
-      phones.push(p);
-    }
-    const display = await srv.connect('/display');
-    const events = collect<MatchEventMsg>(display, 'match:event');
-    const op = await srv.connect('/operator', await srv.operatorCookie());
-    const cmd = (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
-    await cmd({ command: 'START' });
-    await cmd({ command: 'SKIP_DEPLOY' });
-    srv.advance(500);
+const people = () =>
+  Object.values(srv.runtime.state.players).filter((p) => !p.bot && p.connected).length;
 
-    // POWER A sends a plan against the version it saw.
-    const v = srv.runtime.state.distributionVersion;
-    const plan = await emitAck<ActionResult>(phones[2]!, 'pilot:action', {
-      matchId,
-      seatId: 'POWER_CORE',
-      clientActionId: key(),
-      action: {
-        actionType: 'SET_POWER',
-        payload: {
-          distribution: { weapon: 50, shield: 30, mobility: 5, repair: 15 },
-          baseVersion: v,
-        },
-      },
-    });
-    expect(plan.accepted).toBe(true);
-    await eventually(() =>
-      events.find(
-        (e) => e.type === 'power_routed' && e.payload.type === 'power_routed' && !e.payload.auto,
+describe('a crowd over sockets', () => {
+  it('twelve phones join with no seats; each one can press all three buttons', async () => {
+    srv = await new TestServer().start();
+    const phones = [];
+    for (let i = 0; i < 12; i++) phones.push(await srv.connect('/pilot', await srv.demoGuest()));
+    await eventually(() => people() === 12);
+    expect(srv.runtime.snapshotMsg().state.players).toBe(12);
+    const op = await srv.connect('/operator', await srv.operatorCookie());
+    await emitAck(op, 'operator:command', { command: 'START' });
+    await emitAck(op, 'operator:command', { command: 'SKIP_DEPLOY' });
+    srv.advance(500);
+    const matchId = srv.runtime.state.matchId;
+    const kinds = ['ATTACK', 'DEFEND', 'REPAIR'] as const;
+    const results = await Promise.all(
+      phones.map((p, i) =>
+        emitAck<ActionResult>(p, 'pilot:action', {
+          matchId,
+          clientActionId: key(),
+          action: { kind: kinds[i % 3] },
+        }),
       ),
     );
-
-    // Not the boss yet: SYNC NOW is refused with a reason.
-    const early = await emitAck<ActionResult>(phones[0]!, 'pilot:syncFinisher', {
-      matchId,
-      clientActionId: key(),
-    });
-    expect(early.reasonCode).toBe('OVERDRIVE_NOT_READY');
-
-    // Jump into the boss fight with the gauges full (cities made unbreakable for this test).
-    const st = srv.runtime.state;
-    srv.runtime.state = {
-      ...st,
-      coreHp: 1_000_000,
-      config: { ...st.config, cities: { ...st.config.cities, lostForDefeat: 99 } },
-    };
-    const T = srv.runtime.state.config.timings;
-    srv.advance(T.wave1Ms + T.wave2Ms + 2_000);
-    expect(srv.runtime.state.phase).toBe('BOSS');
-    srv.runtime.state = {
-      ...srv.runtime.state,
-      teamSync: 95,
-      teamCapacitor: 100,
-      lastComboAt: srv.runtime.state.t,
-    };
-    srv.advance(100);
-    expect(srv.runtime.state.overdrive.status).toBe('READY');
-    for (const p of phones) {
-      const r = await emitAck<ActionResult>(p, 'pilot:syncFinisher', {
-        matchId,
-        clientActionId: key(),
-      });
-      expect(r.accepted).toBe(true);
-    }
-    const fired = await eventually(() => events.find((e) => e.type === 'overdrive_fired'));
-    expect(fired.payload).toMatchObject({ type: 'overdrive_fired', autoRoles: [] });
+    expect(results.every((r) => r.accepted)).toBe(true);
+    expect(srv.runtime.state.stats.free).toEqual({ ATTACK: 4, DEFEND: 4, REPAIR: 4 });
   });
 });
 
 describe('demo bots (exhibition loop)', () => {
-  it('fill empty seats as labelled bots, start after a quiet lobby, and step aside for people', async () => {
-    srv = await new TestServer().start();
+  it('join the crowd as labelled bots, start the round by themselves, and leave on request', async () => {
+    srv = await new TestServer({ MATCH_PRESET: 'TEST' }).start();
+    srv.runtime.state.config.timings.lobbyAutoStartMs = 2_000;
+    const display = await srv.connect('/display');
+    const events = collect<MatchEventMsg>(display, 'match:event');
     const op = await srv.connect('/operator', await srv.operatorCookie());
-    expect(
-      (
-        await emitAck<OperatorCommandResult>(op, 'operator:command', {
-          command: 'SET_DEMO_BOTS',
-          enabled: true,
-        })
-      ).ok,
-    ).toBe(true);
+    const cmd = (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
+    expect((await cmd({ command: 'SET_DEMO_BOTS', enabled: true })).ok).toBe(true);
     srv.advance(200);
-    const seats = Object.values(srv.runtime.state.seats);
-    expect(seats.every((s) => s.bot && s.displayName?.startsWith('DEMO-BOT'))).toBe(true);
-
-    // A visitor scans the QR and takes a bot's seat.
-    const phone = await srv.connect('/pilot', await srv.demoGuest());
-    const r = await emitAck<SeatRequestResult>(phone, 'pilot:joinSeat', {
-      matchId: srv.runtime.state.matchId,
-      seatId: 'GUNNER_L',
-      requestId: key(),
-    });
-    expect(r).toEqual({ ok: true, seatId: 'GUNNER_L' });
-    expect(srv.runtime.state.seats.GUNNER_L.bot).toBe(false);
-
-    srv.advance(13_000);
-    expect(['COUNTDOWN', 'DEPLOYMENT', 'WAVE_1']).toContain(srv.runtime.state.phase);
-    srv.advance(20_000);
-    // Bots play through the same rules: shots, plans and shields appear.
-    const s = srv.runtime.state;
-    const botActions = Object.values(s.seats)
-      .filter((x) => x.bot)
-      .reduce((a, x) => a + x.stats.actions, 0);
-    expect(botActions).toBeGreaterThan(0);
-
+    const bots = Object.values(srv.runtime.state.players).filter((p) => p.bot);
+    expect(bots.length).toBe(srv.runtime.state.config.bots.count);
+    expect(bots.every((b) => b.displayName.startsWith('DEMO-BOT'))).toBe(true);
+    srv.advance(2_500 + 2_000);
+    expect(srv.runtime.state.phase).toBe('BATTLE');
+    srv.advance(5_000);
     expect(
-      (
-        await emitAck<OperatorCommandResult>(op, 'operator:command', {
-          command: 'SET_DEMO_BOTS',
-          enabled: false,
-        })
-      ).ok,
-    ).toBe(true);
-    expect(Object.values(srv.runtime.state.seats).some((x) => x.bot)).toBe(false);
-    expect(srv.runtime.state.seats.GUNNER_L.pilotId).not.toBeNull();
+      srv.runtime.state.stats.free.ATTACK +
+        srv.runtime.state.stats.free.DEFEND +
+        srv.runtime.state.stats.free.REPAIR,
+    ).toBeGreaterThan(5);
+    await eventually(() => events.some((e) => e.payload.type === 'action'));
+    // People join alongside the bots.
+    await srv.connect('/pilot', await srv.demoGuest());
+    await eventually(() => people() === 1);
+    expect((await cmd({ command: 'SET_DEMO_BOTS', enabled: false })).ok).toBe(true);
+    expect(Object.values(srv.runtime.state.players).some((p) => p.bot)).toBe(false);
+    expect(people()).toBe(1);
+  });
+});
+
+describe('demo bots across matches', () => {
+  it('keep tapping after RESET (their timers restart with the new match clock)', async () => {
+    srv = await new TestServer({ MATCH_PRESET: 'TEST' }).start();
+    const op = await srv.connect('/operator', await srv.operatorCookie());
+    const cmd = (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
+    const taps = () => {
+      const f = srv.runtime.state.stats.free;
+      return f.ATTACK + f.DEFEND + f.REPAIR;
+    };
+    await cmd({ command: 'SET_DEMO_BOTS', enabled: true });
+    srv.advance(200);
+    await cmd({ command: 'START' });
+    await cmd({ command: 'SKIP_DEPLOY' });
+    srv.advance(30_000);
+    expect(taps()).toBeGreaterThan(20);
+    await cmd({ command: 'RESET' });
+    srv.advance(200);
+    await cmd({ command: 'START' });
+    await cmd({ command: 'SKIP_DEPLOY' });
+    srv.advance(5_000);
+    expect(srv.runtime.state.phase).toBe('BATTLE');
+    expect(taps()).toBeGreaterThan(5);
   });
 });
 
@@ -149,12 +95,9 @@ describe('callsigns', () => {
   it('are sanitised, shown only when opted in, and staff can hide them', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
-    const phone = await srv.connect('/pilot', cookie);
-    await emitAck(phone, 'pilot:joinSeat', {
-      matchId: srv.runtime.state.matchId,
-      seatId: 'SHIELD_R',
-      requestId: key(),
-    });
+    await srv.connect('/pilot', cookie);
+    await eventually(() => people() === 1);
+    const me = () => Object.values(srv.runtime.state.players)[0]!;
     expect(
       (await srv.post('/api/pilot/callsign', { callsign: '<script>', showOnScreen: true }, cookie))
         .status,
@@ -168,14 +111,14 @@ describe('callsigns', () => {
         )
       ).status,
     ).toBe(200);
-    expect(srv.runtime.state.seats.SHIELD_R.displayName).toMatch(/^PILOT-/);
+    expect(me().displayName).toMatch(/^PILOT-/);
     expect(
       (await srv.post('/api/pilot/callsign', { callsign: '雷鳴', showOnScreen: true }, cookie))
         .status,
     ).toBe(200);
-    await eventually(() => srv.runtime.state.seats.SHIELD_R.displayName === '雷鳴');
+    await eventually(() => me().displayName === '雷鳴');
     const op = await srv.connect('/operator', await srv.operatorCookie());
     await emitAck(op, 'operator:command', { command: 'SET_HIDE_CALLSIGNS', hidden: true });
-    expect(srv.runtime.state.seats.SHIELD_R.displayName).toMatch(/^PILOT-/);
+    expect(me().displayName).toMatch(/^PILOT-/);
   });
 });

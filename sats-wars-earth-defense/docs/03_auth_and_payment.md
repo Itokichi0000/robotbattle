@@ -1,6 +1,6 @@
 # 03 — Auth and payment / 認証と決済
 
-**現状（2026-10-30）**：LNURL-auth（LUD-04）によるパイロット認証と、共有エネルギーパルス（sandbox の VIRTUAL 決済 +
+**現状（2026-10-30）**：LNURL-auth（LUD-04）によるパイロット認証と、21 sats の大きい行動（sandbox の VIRTUAL 決済 +
 LNbits による実決済アダプター）を実装済み。**実決済はオーナーの明示承認があるまで有効化しない**（LNbits のキーも公開ドメインも
 未設定なので、このリポジトリの既定構成では実際のお金は一切動かない）。実ウォレット・実決済での試験は未実施（後述）。
 
@@ -29,7 +29,7 @@ LNbits による実決済アダプター）を実装済み。**実決済はオ�
 4. スマホは `GET /api/auth/attempt/:id/status` をポーリング（インターバル＋ウォレットから戻った `visibilitychange`/`focus`）。
    `sw_auth` を持つブラウザだけが `AUTHORIZED` を受け取り `sw_pilot` を得る。他人の試行 ID を知っていても横取りできない。
 5. **一つのウォレット＝一台のスマホ**：同じ鍵で別端末からログインすると古いセッションを失効させ、古い端末には
-   `pilot:notice SESSION_REPLACED`。席は同じパイロットのまま新しい端末に引き継がれ、同じ試合での二重席占有は起きない。
+   `pilot:notice SESSION_REPLACED`。参加者は同じパイロットのまま新しい端末に引き継がれ、同じ試合で二重に数えられない。
 6. 拒否（テストで固定）：k1 再利用・期限切れ・署名なし/改ざん・鍵の差し替え・不正形式・未知の k1・別ブラウザからの claim。
 7. 文言：「パイロット認証（無料）」「LNURL-auth・無料・支払いは発生しません」「署名で鍵を持っていることだけを確認します
    （本人確認ではありません）」。秘密鍵・シードフレーズ・本名・メールは一切求めない（入力欄もない）。原因別の再試行
@@ -39,39 +39,31 @@ LNbits による実決済アダプター）を実装済み。**実決済はオ�
 **テスト用ウォレット**：`apps/server/src/testWallet.ts`（LUD-04 と同じ署名をする最小ウォレット。資金を持たず、ログイン署名だけ）。
 リハーサルでは `pnpm --filter @swed/server lnurl-wallet <LNURL...> [合言葉]` で承認できる。E2E と capture スクリプトもこれを使う。
 
-## 共有エネルギーパルス（Lightning 決済）
+## 21 sats の大きい行動（Lightning 決済、D-033）
 
-実装：`apps/server/src/payments/{provider,sandbox,lnbits,service}.ts`、`routes/payments.ts`、`apps/pilot/src/screens/PulseSheet.tsx`、
-運営画面の SHARED ENERGY パネル。一次仕様（参考）：https://github.com/lnurl/luds/blob/luds/06.md
+実装：`apps/server/src/payments/{provider,sandbox,lnbits,service}.ts`、`routes/payments.ts`、`apps/pilot/src/screens/PaySheet.tsx`、
+運営画面の「21 sats の大きい一撃」パネル。一次仕様（参考）：https://github.com/lnurl/luds/blob/luds/06.md
 
-- 意味（D-032）：sats の役割は1つだけ。**炉心停止（ブラックアウト）の間だけ、固定 21 sats で炉心を即時復旧し、雷神ゲージ +20%**
-  （`PULSE_AMOUNT_SATS` と GameConfig `crisis.recoverGauge`）。電力B が回路をつないでも同じ効果なので、払っても強くはならない。
-  **炉心停止中でなければ請求書を作らない**（`NO_CRISIS`）。1人 30 秒に1回・1試合最大3回・1試合合計24回・未払いの請求は1人1件まで。
-  支払いなしでも勝てる（BOT シミュレーションと E2E の 8 席ソーティーは支払いゼロで最後まで進む）。課金額ランキング・賞金・抽選は存在しない。
-- 導線：炉心停止のときに全員のスマホに出る赤い帯の「21 sats で即時復旧」→ シート。請求書を作る前に **金額・受取先・種類（実際の支払い／VIRTUAL）・
-  この作戦の残り回数・返金できない場合があること** を表示 → 明示ボタン → `POST /api/payments/intent` → BOLT11（live）または
-  VIRTUAL 表示（sandbox）。live の支払い QR は琥珀の枠で、無料の認証 QR と見た目を分ける。
+- 意味：スマホの3ボタン（撃つ・守る・直す）のそれぞれの横に **21 sats** ボタンがあり、**同じ行動の大きい版**になる
+  （撃つ=max(60, ボス HP の 5%)・守る=シールド +60・直す=装甲 +50。GameConfig `paid`）。固定額で、多く払っても大きくならない。
+  1人1試合3回・15秒に1回・1試合全体15回・未払いの請求は1人1件まで。戦闘中だけ作れる。
+  支払いなしでも勝てる（バランス試験：無料だけで2人以上 18/20、4人以上 20/20。E2E の1試合通しは支払いゼロ）。
+  1人で無料だけだと勝てず、21 sats を1回使うと 14/20 勝てる＝お金は少人数の後押し。上限があるのでお金だけでは勝てない。
+  課金額ランキング・賞金・抽選は存在しない。**誰が払ったか・金額はどこにも表示しない**。
+- 導線：21 sats ボタン → シート。請求書を作る前に **効果（無料タップの約 N 回分）・金額・受取先・種類（実際の支払い／VIRTUAL）・
+  この作戦の残り回数・払わなくても遊べること（live では返金できない場合があることも）** を表示 → 明示ボタン →
+  `POST /api/payments/intent { matchId, action }` → BOLT11（live）または VIRTUAL 表示（sandbox）。live の支払い QR は琥珀の枠で、
+  無料の認証 QR と見た目を分ける。勝手にウォレットは開かない。
 - 確定：サーバーが **バックエンドへ再照会して settled を確認**（Webhook はきっかけ、3 秒ごとのポーリングでも拾う）→
-  DB の状態遷移（`pending → settled`、`payment_hash` UNIQUE）を条件に1回だけ → エンジンに `SATS_PULSE`（`intentId` で冪等）→
-  `sats_pulse_settled` を全員に配信（大画面：空から炉心へ雷、「LIGHTNING 着金 · 炉心復旧 · 雷神ゲージ +20%」。
-  **誰が払ったか・金額は表示しない**）。同時・重複 Webhook でも1回（テストで固定）。
+  DB の状態遷移（`pending → settled`、`payment_hash` UNIQUE）を条件に1回だけ → エンジンに `PAID_ACTION`（`intentId` で冪等）→
+  `action { paid: true }` を全員に配信（大画面：その行動の大きな演出と「Lightning 着金」、実決済なら「請求から着金まで X.X 秒」。
+  VIRTUAL・DEMO は秒数なしでその旨を表示）。同時・重複 Webhook でも1回（テストで固定）。
 - 試合終了後に settled になった支払い：次ラウンドへ繰り越さず `applied='unapplied'` として記録・監査ログ・運営画面に表示し、
   運営が個別に対応する（仕様 §8.4）。スマホにも「今回は反映されませんでした。運営が対応します」と出す。
 - pending / settled / expired（期限 180 秒）を表示。バックエンド障害は `BACKEND_UNAVAILABLE` で断るだけで、試合は止まらない。
 - 自分の intent しか見られない（`GET /api/payments/intent/:id` はパイロット本人のみ）。preimage・キーはブラウザに渡さない。
-
-### 支払いの見せ場：炉心停止（REACTOR BLACKOUT）（D-025〜D-032）
-
-- WAVE 2 と BOSS の途中で炉心が停止する（全レーンの回復が予備電源の 30% に落ちる、25 秒。D-031）。大画面は暗くなり赤い非常灯が回り、
-  中央に「炉心停止」と残り秒数、**番号付きの2つの直し方**（① 電力B がスマホで回路をつなぐ ② 誰かがスマホから 21 sats を送る）と
-  「どちらでも復旧すると雷神ゲージ +20%」を表示。運営画面の「炉心停止を起こす」で、展示中いつでも起こせる（その幕の予定分の代わり）。
-- スマホには全員に赤い帯が出て、「21 sats で即時復旧（任意 — 払わなくても仲間が直せます）」のボタン。押すと
-  いつもの条件シート（金額・受取先・種類・返金の注意）が開き、確認してから請求書を作る。勝手にウォレットは開かない。
-- 電力B のスマホには炉心回路のパズルが自動で開く。解けば復旧（電力B が空席なら AUTO SUPPORT が 15 秒後に復旧）。
-- 支払いが確定すると、空から胸部炉心に雷が落ち、「LIGHTNING 着金 — 請求から着金まで X.X 秒 · 炉心復旧 · 雷神ゲージ +20%」。
-  VIRTUAL では秒数を出さず VIRTUAL と表示。払った人・金額は出さない。電力B の修復でも同じ雷神ゲージ +20%（AUTO の復旧は加算なし）。
-  支払いの確認中に仲間が先に直した場合も、確定した支払いの分のゲージは加算する（払ったのに何も起きない、を作らない）。
 - sandbox のデモでは、運営画面の「VIRTUAL を自動確定」を ON にすると約1.5秒で確定する（既定 OFF、お金は動かない）。
+  DEMO BOTS はときどき VIRTUAL の大きい行動（DEMO 表示・請求書なし）を見せる。
 
 ### アダプター（仕様 §8.4 `PaymentProvider`）
 
@@ -85,13 +77,13 @@ Webhook：`POST /api/payments/webhook/lnbits?token=<LNBITS_WEBHOOK_SECRET>`（�
 
 ### LIVE 化の手順（オーナーの明示承認が前提）
 
-起動時から LIVE にはならない。サーバーが `APP_MODE=live` で起動しても、パルスは **停止中（LIVE OFF）** から始まる。
+起動時から LIVE にはならない。サーバーが `APP_MODE=live` で起動しても、21 sats は **停止中（LIVE OFF）** から始まる。
 
 1. オーナーが受取先（LNbits ウォレット）・金額・注意書き・返金対応・公開ドメインを承認する。
 2. サーバー環境変数：`APP_MODE=live` `PUBLIC_BASE_URL=https://…` `LNBITS_URL=https://…` `LNBITS_INVOICE_KEY=<invoice/read key>`
    `PAYMENT_RECIPIENT_LABEL=<支払う人に見せる受取先名>`（任意で `PULSE_AMOUNT_SATS` `LNBITS_WEBHOOK_SECRET`）。
    どれかが欠けるとサーバーは起動を拒否する。本番（`NODE_ENV=production`）では LNbits も https 必須。
-3. 運営画面 SHARED ENERGY → **RUN CHECKS**：LNbits に invoice key で到達できるか、公開 Webhook URL が外から答えるかを検査。
+3. 運営画面「21 sats の大きい一撃」→ **RUN CHECKS**：LNbits に invoice key で到達できるか、公開 Webhook URL が外から答えるかを検査。
 4. 両方 PASS（10 分以内）なら、確認欄に `LIVE` と入力 → **LIVE ON**（受取先と金額の確認ダイアログあり）。監査ログに残る。
 5. 停止はいつでも **LIVE OFF** の1クリック。停止中もゲームは DEMO として最後まで遊べる。
 

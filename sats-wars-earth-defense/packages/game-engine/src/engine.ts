@@ -1,116 +1,71 @@
 import {
-  bearingToDirection,
+  ACTION_KINDS,
+  bossHpFor,
   CITY_IDS,
   configHash,
-  ENGINEER_COVERAGE,
-  isCombatPhase,
-  isSeatOpen,
-  MECH_PART_IDS,
-  POWER_LANES,
-  PRESETS,
-  ROLE_IDS,
-  ROLES,
-  roleOf,
-  SEAT_IDS,
-  SHIELD_COVERAGE,
-  shieldSeatFor,
+  DIRECTIONS,
+  mechHitFor,
+  paidAttackFor,
+  strikeNeedFor,
 } from '@swed/shared';
 import type {
+  ActionKind,
   ActionResult,
   CityId,
   DefeatReason,
-  Direction,
-  EnemyKind,
-  EnemyState,
-  EngineerSeatId,
   GameConfig,
-  GunnerSeatId,
-  LinkState,
   MatchEvent,
   MatchEventBody,
-  MatchResult,
   MatchState,
-  MechPartId,
+  MatchStats,
   Phase,
-  PilotActionInput,
-  PowerDistribution,
-  PowerLane,
-  PresetId,
+  PlayerState,
   ReasonCode,
-  RoleId,
-  SeatId,
-  SeatRequestResult,
-  SeatState,
-  ShieldSeatId,
-  SpawnSpec,
   ThreatState,
-  ThreatTarget,
 } from '@swed/shared';
-import { recommendTarget } from './hints';
-import { enemyBearingAt, sectorMargin } from './orbit';
-import { nextRandom, randomBetween, randomPick, weightedPick } from './rng';
-import { generatePuzzle, routeConnects } from './router';
+import { randomBetween, randomPick } from './rng';
 
 /**
- * The SATS WARS rules, as pure functions: reduce(state, command) and advanceTo(state, t).
- * The server is the only caller that owns a live match; tests and tools replay commands.
- * Time is the pause-corrected match clock in ms. Timers run on a fixed 50 ms grid aligned
- * to absolute time, so the same command log always yields the same state.
+ * D-033 crowd raid: deterministic, pure rules. `reduce(state, command)` applies one command;
+ * `advanceTo(state, t)` runs the timers (phases, strikes, claws, shield decay) in fixed
+ * 50 ms steps. Everything random comes from the mulberry32 state inside the match.
+ *
+ *   撃つ ATTACK  damages NULL CORE
+ *   守る DEFEND  fills the shield, which blocks the announced strike on a city
+ *   直す REPAIR  restores RAIJIN's armour after a claw
+ * Free taps are small; a Lightning (21 sats) action is the same action ×20.
  */
 
 export const STEP_MS = 50;
-const ACTION_LOG_LIMIT = 512;
+/** Free taps reach the screens as one aggregated event per action this often. */
+export const FREE_FLUSH_MS = 200;
+const ACTION_LOG_MAX = 600;
 
 export type EngineCommand =
-  | { type: 'ATTRACT'; t: number }
-  | { type: 'OPEN_LOBBY'; t: number }
   | { type: 'START'; t: number }
   | { type: 'SKIP_DEPLOY'; t: number }
   | { type: 'PAUSE'; t: number }
   | { type: 'RESUME'; t: number }
   | { type: 'END'; t: number }
-  | { type: 'SET_AUTO_SUPPORT'; t: number; enabled: boolean }
-  /** Staff start a REACTOR BLACKOUT now (to show the GRID PULSE scene). Replaces this wave's. */
-  | { type: 'TRIGGER_BLACKOUT'; t: number }
+  | { type: 'SET_AUTO_START'; t: number; enabled: boolean }
+  | { type: 'PLAYER_JOIN'; t: number; pilotId: string; displayName: string; bot?: boolean }
+  | { type: 'PLAYER_CONNECTION'; t: number; pilotId: string; connected: boolean }
+  | { type: 'PLAYER_LEAVE'; t: number; pilotId: string }
+  | { type: 'PLAYER_RENAME'; t: number; pilotId: string; displayName: string }
+  | { type: 'ACTION'; t: number; pilotId: string; clientActionId: string; kind: ActionKind }
   | {
-      type: 'SEAT_JOIN';
-      t: number;
-      seatId: SeatId;
-      pilotId: string;
-      displayName: string;
-      /** Operator demo bot: shown as such; a human joining the seat replaces it. */
-      bot?: boolean;
-    }
-  | { type: 'SEAT_LEAVE'; t: number; pilotId: string }
-  | { type: 'SEAT_KICK'; t: number; seatId: SeatId }
-  /** Staff hide or restore a callsign: changes the public name only. */
-  | { type: 'SEAT_RENAME'; t: number; seatId: SeatId; displayName: string }
-  | { type: 'SEAT_READY'; t: number; pilotId: string }
-  | { type: 'SEAT_CONNECTION'; t: number; pilotId: string; connected: boolean }
-  | {
-      type: 'PILOT_ACTION';
-      t: number;
-      pilotId: string;
-      seatId: SeatId;
-      clientActionId: string;
-      action: PilotActionInput;
-    }
-  /** A settled Lightning (or VIRTUAL sandbox) energy pulse. Applied once per intent id. */
-  | {
-      type: 'SATS_PULSE';
+      type: 'PAID_ACTION';
       t: number;
       intentId: string;
-      seatId: SeatId | null;
+      pilotId: string | null;
+      kind: ActionKind;
       virtual: boolean;
-      /** Invoice issued → confirmed (ms), for the big screen. Null for VIRTUAL pulses. */
-      settleMs?: number | null;
+      bot?: boolean;
+      settleMs: number | null;
     };
 
 export type CommandOutcome =
-  | { kind: 'none' }
-  | { kind: 'control'; ok: boolean; reasonCode?: ReasonCode }
-  | { kind: 'seat'; result: SeatRequestResult }
-  | { kind: 'action'; result: ActionResult };
+  { kind: 'control'; ok: boolean } | { kind: 'action'; result: ActionResult };
 
 export interface ReduceResult {
   state: MatchState;
@@ -126,161 +81,71 @@ export interface AdvanceResult {
 export interface CreateMatchInput {
   matchId: string;
   matchNumber?: number;
-  presetId?: PresetId;
-  config?: GameConfig;
+  config: GameConfig;
   seed: number;
-  autoSupport?: boolean;
-  /** Start in ATTRACT (venue idle loop) instead of LOBBY. */
-  attract?: boolean;
+  autoStart?: boolean;
 }
 
-function emptyStats() {
-  return {
-    actions: 0,
-    hits: 0,
-    damage: 0,
-    blocks: 0,
-    perfect: 0,
-    repairs: 0,
-    combos: 0,
-    routes: 0,
-    syncs: 0,
-  };
+function zeroCounts() {
+  return { ATTACK: 0, DEFEND: 0, REPAIR: 0 };
 }
 
-function emptySeat(seatId: SeatId): SeatState {
+function emptyStats(): MatchStats {
   return {
-    seatId,
-    pilotId: null,
-    displayName: null,
-    connected: false,
-    ready: false,
-    disconnectedAt: null,
-    bot: false,
-    stats: emptyStats(),
-  };
-}
-
-function idleOverdrive(): MatchState['overdrive'] {
-  return {
-    status: 'IDLE',
-    readyAt: 0,
-    windowStartedAt: 0,
-    windowEndsAt: 0,
-    confirmed: [],
-    autoRoles: [],
+    free: zeroCounts(),
+    paid: zeroCounts(),
+    lightning: 0,
+    virtual: 0,
+    damageToBoss: 0,
+    strikesBlocked: 0,
+    strikesHit: 0,
+    mechHits: 0,
+    repaired: 0,
+    peakPlayers: 0,
   };
 }
 
 export function createMatch(input: CreateMatchInput): MatchState {
-  const presetId = input.presetId ?? input.config?.presetId ?? 'STANDARD';
-  const config = structuredClone(input.config ?? PRESETS[presetId]);
-  const seats = Object.fromEntries(SEAT_IDS.map((s) => [s, emptySeat(s)])) as Record<
-    SeatId,
-    SeatState
-  >;
+  const c = input.config;
   const cities = Object.fromEntries(
-    CITY_IDS.map((id) => [id, { id, hp: config.cities.hp, lost: false }]),
+    CITY_IDS.map((id) => [id, { id, hp: 100, lost: false }]),
   ) as MatchState['cities'];
-  const parts = Object.fromEntries(MECH_PART_IDS.map((p) => [p, 100])) as Record<
-    MechPartId,
-    number
-  >;
-  const e = config.energy.start;
   return {
     matchId: input.matchId,
     matchNumber: input.matchNumber ?? 1,
-    presetId,
-    config,
-    configHash: configHash(config),
+    presetId: c.presetId,
+    config: c,
+    configHash: configHash(c),
     seed: input.seed >>> 0,
     rng: input.seed >>> 0,
     t: 0,
     simT: 0,
-    version: 1,
+    version: 0,
     eventSeq: 0,
     nextId: 1,
-    phase: input.attract ? 'ATTRACT' : 'LOBBY',
+    phase: 'LOBBY',
     phaseStartedAt: 0,
     phaseEndsAt: null,
     paused: false,
-    autoSupport: input.autoSupport ?? true,
-    seats,
-    coreHp: config.core.max,
+    autoStartAt: null,
+    autoStartEnabled: input.autoStart ?? true,
+    pendingFree: {
+      ATTACK: { n: 0, value: 0 },
+      DEFEND: { n: 0, value: 0 },
+      REPAIR: { n: 0, value: 0 },
+    },
+    lastFlushAt: 0,
+    players: {},
+    playersAtLaunch: 0,
+    mechHp: c.mech.max,
+    shield: 0,
     enemies: [],
     threats: [],
     cities,
-    parts,
-    distribution: { ...config.power.defaultDistribution },
-    distributionVersion: 1,
-    energy: { weapon: e, shield: e, mobility: e, repair: e },
-    gunners: {
-      GUNNER_L: {
-        targetId: null,
-        lockedAt: 0,
-        readyAt: 0,
-        chargedNotified: true,
-        lastFiredAt: -1e9,
-      },
-      GUNNER_R: {
-        targetId: null,
-        lockedAt: 0,
-        readyAt: 0,
-        chargedNotified: true,
-        lastFiredAt: -1e9,
-      },
-    },
-    shields: {
-      SHIELD_L: { dir: null, activeFrom: 0, activeUntil: 0, cooldownUntil: 0 },
-      SHIELD_R: { dir: null, activeFrom: 0, activeUntil: 0, cooldownUntil: 0 },
-    },
-    teamSync: 0,
-    teamCapacitor: 0,
-    lastComboAt: 0,
-    link: null,
-    crisis: null,
-    crisisFired: [],
-    spawn: { scriptedDone: 0, nextSpawnAt: 0 },
-    circuits: Object.fromEntries(
-      POWER_LANES.map((l) => [l, { broken: false, brokenAt: 0, puzzle: null }]),
-    ) as MatchState['circuits'],
-    nextOverloadAt: null,
-    powerSuccessAt: -1e9,
-    engineers: {
-      ENGINEER_LEGS: { job: null, cooldownUntil: 0 },
-      ENGINEER_CORE: { job: null, cooldownUntil: 0 },
-    },
-    overdrive: idleOverdrive(),
-    pulsesApplied: [],
-    autoTimers: {
-      gunner: { GUNNER_L: 0, GUNNER_R: 0 },
-      engineer: 0,
-      shield: { SHIELD_L: 0, SHIELD_R: 0 },
-      power: 0,
-    },
-    crewAtLaunch: 0,
-    stats: {
-      enemiesDestroyed: 0,
-      threatsBlocked: 0,
-      perfectGuards: 0,
-      threatsIntercepted: 0,
-      threatsHit: 0,
-      combos: 0,
-      bestSync: 0,
-      damageToBoss: 0,
-      repairs: 0,
-      routesFixed: 0,
-      overloads: 0,
-      overdrives: 0,
-      overdriveFails: 0,
-      blackouts: 0,
-      blackoutsByPulse: 0,
-      blackoutsByRoute: 0,
-      blackoutsFailed: 0,
-      perfectShots: 0,
-      fullLinks: 0,
-      pulses: 0,
-    },
+    nextStrikeAt: 0,
+    nextClawAt: 0,
+    paidApplied: [],
+    stats: emptyStats(),
     result: null,
     actionLog: {},
     actionLogOrder: [],
@@ -289,7 +154,6 @@ export function createMatch(input: CreateMatchInput): MatchState {
 
 /* ------------------------------------------------------------------ context */
 
-/** Mutable working copy for one reduce/advance call. */
 interface Ctx {
   s: MatchState;
   events: MatchEvent[];
@@ -306,55 +170,46 @@ function newId(s: MatchState, prefix: string): string {
   return id;
 }
 
-export function humansAboard(s: MatchState): number {
-  return SEAT_IDS.filter((id) => s.seats[id].pilotId !== null).length;
+/** People and bots that count right now (a dropped phone counts for a while). */
+export function countedPlayers(s: MatchState, at = s.t): PlayerState[] {
+  const hold = s.config.timings.playerHoldMs;
+  return Object.values(s.players).filter(
+    (p) => p.connected || (p.disconnectedAt !== null && at - p.disconnectedAt < hold),
+  );
 }
 
-function isHuman(s: MatchState, seat: SeatId): boolean {
-  return s.seats[seat].pilotId !== null;
+export function playerCount(s: MatchState, at = s.t): number {
+  return countedPlayers(s, at).length;
 }
 
-function isAuto(s: MatchState, seat: SeatId): boolean {
-  return s.autoSupport && !isHuman(s, seat);
+export function bossOf<E extends { kind: string }>(s: { enemies: readonly E[] }): E | null {
+  return s.enemies.find((e) => e.kind === 'NULL_CORE') ?? null;
 }
 
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
-}
-
-function wear(s: MatchState, part: MechPartId, amount: number): void {
-  s.parts[part] = Math.max(0, Math.round((s.parts[part] - amount) * 10) / 10);
-}
-
-/* ---------------------------------------------------------------- phases */
+/* ------------------------------------------------------------------ phases */
 
 const NEXT_TIMED: Partial<Record<Phase, Phase>> = {
   COUNTDOWN: 'DEPLOYMENT',
-  DEPLOYMENT: 'WAVE_1',
-  WAVE_1: 'WAVE_2',
-  WAVE_2: 'BOSS',
+  DEPLOYMENT: 'BATTLE',
   VICTORY: 'RESULTS',
   DEFEAT: 'RESULTS',
 };
 
 function phaseDuration(c: GameConfig, p: Phase): number | null {
+  const T = c.timings;
   switch (p) {
     case 'COUNTDOWN':
-      return c.timings.countdownMs;
+      return T.countdownMs;
     case 'DEPLOYMENT':
-      return c.timings.deploymentMs;
-    case 'WAVE_1':
-      return c.timings.wave1Ms;
-    case 'WAVE_2':
-      return c.timings.wave2Ms;
-    case 'BOSS':
-      return c.timings.bossMs;
+      return T.deploymentMs;
+    case 'BATTLE':
+      return T.battleMs;
     case 'VICTORY':
-      return c.timings.victoryMs;
+      return T.victoryMs;
     case 'DEFEAT':
-      return c.timings.defeatMs;
+      return T.defeatMs;
     case 'RESULTS':
-      return c.timings.resultsMs;
+      return T.resultsMs;
     default:
       return null;
   }
@@ -363,49 +218,53 @@ function phaseDuration(c: GameConfig, p: Phase): number | null {
 function enterPhase(ctx: Ctx, to: Phase, at: number): void {
   const s = ctx.s;
   const from = s.phase;
+  const dur = phaseDuration(s.config, to);
   s.phase = to;
   s.phaseStartedAt = at;
-  const d = phaseDuration(s.config, to);
-  s.phaseEndsAt = d === null ? null : at + d;
-
-  if (to === 'WAVE_1') {
-    s.crewAtLaunch = humansAboard(s);
-    s.autoTimers.gunner = { GUNNER_L: at + 2_000, GUNNER_R: at + 3_200 };
-    s.autoTimers.engineer = at + s.config.auto.engineerEveryMs;
-  }
-  if (to === 'WAVE_1' || to === 'WAVE_2' || to === 'BOSS') {
-    s.spawn = { scriptedDone: 0, nextSpawnAt: at + s.config.waves[to].spawnEveryMs };
-    const first = s.config.router.firstAtMs[to];
-    s.nextOverloadAt = first === null ? null : at + first;
-    s.autoTimers.power = at + 4_000;
-  }
-  // A blackout belongs to its wave: the next wave (or the result) starts with power.
-  s.crisis = null;
-  if (to === 'VICTORY' || to === 'DEFEAT') {
-    s.threats = [];
-    s.paused = false;
-    s.overdrive = idleOverdrive();
-    s.nextOverloadAt = null;
-  }
+  s.phaseEndsAt = dur === null ? null : at + dur;
+  s.autoStartAt = null;
+  if (to === 'BATTLE') startBattle(ctx, at);
+  if (to !== 'BATTLE') s.threats = [];
   emit(ctx, at, { type: 'phase_changed', from, to, endsAt: s.phaseEndsAt });
 }
 
-function finish(
-  ctx: Ctx,
-  at: number,
-  outcome: 'VICTORY' | 'DEFEAT',
-  reason: MatchResult['reason'],
-): void {
+function startBattle(ctx: Ctx, at: number): void {
+  const s = ctx.s;
+  const c = s.config;
+  s.playersAtLaunch = Math.max(1, playerCount(s, at));
+  s.mechHp = c.mech.max;
+  s.shield = 0;
+  s.threats = [];
+  s.nextStrikeAt = at + c.strikes.firstAtMs;
+  s.nextClawAt = at + c.mech.hitFirstAtMs;
+  const hp = bossHpFor(c, s.playersAtLaunch);
+  const boss = {
+    id: newId(s, 'e'),
+    kind: 'NULL_CORE' as const,
+    hp,
+    maxHp: hp,
+    orbit: {
+      bearing0: 6,
+      driftAmp: 3,
+      driftPeriodMs: Math.round(randomBetween(s, 16_000, 22_000)),
+      phase: randomBetween(s, 0, Math.PI * 2),
+      distance: 120,
+      altitude: 52,
+    },
+    spawnedAt: at,
+    arrivesAt: at + 1_500,
+    weakUntil: 0,
+  };
+  s.enemies = [boss];
+  emit(ctx, at, { type: 'boss_spawned', enemyId: boss.id, hp });
+}
+
+function finish(ctx: Ctx, at: number, outcome: 'VICTORY' | 'DEFEAT', reason: string): void {
   const s = ctx.s;
   if (s.result) return;
-  s.result = { outcome, reason, at };
-  if (outcome === 'VICTORY') {
-    // The swarm breaks when its core falls.
-    for (const e of s.enemies) {
-      emit(ctx, at, { type: 'enemy_destroyed', enemyId: e.id, kind: e.kind, bySeat: null });
-    }
-    s.enemies = [];
-  }
+  flushFree(ctx, at, true);
+  s.result = { outcome, reason: reason as never, at };
+  s.threats = [];
   enterPhase(ctx, outcome, at);
   emit(ctx, at, { type: 'match_result', outcome, result: s.result });
 }
@@ -414,961 +273,229 @@ function defeat(ctx: Ctx, at: number, reason: DefeatReason): void {
   finish(ctx, at, 'DEFEAT', reason);
 }
 
-/* --------------------------------------------------------------- spawning */
-
-function enemyScale(s: MatchState): number {
-  const crew = Math.max(1, s.crewAtLaunch);
-  return Math.min(1, s.config.difficulty.hpBase + s.config.difficulty.hpPerPilot * crew);
-}
-
-/** Small crews face slower attack cadence so two pilots can still hold Japan (§5.7). */
-function attackSlow(s: MatchState): number {
-  const crew = Math.max(1, s.crewAtLaunch);
-  return 1 + s.config.difficulty.slowPerMissing * Math.max(0, 8 - crew);
-}
+/* ------------------------------------------------------------------ battle */
 
 function aliveCities(s: MatchState): CityId[] {
   return CITY_IDS.filter((id) => !s.cities[id].lost);
 }
 
-function spawnEnemy(ctx: Ctx, at: number, spec: SpawnSpec, waveStart: number): EnemyState {
-  const s = ctx.s;
-  const def = s.config.enemies[spec.kind];
-  const maxHp = Math.round(def.hp * enemyScale(s));
-  const isBoss = spec.kind === 'NULL_CORE';
-  const margin = sectorMargin(spec.bearing);
-  const driftAmp = isBoss ? 3 : Math.min(randomBetween(s, 4, 12), Math.max(0, margin - 3));
-  const arrivesAt = at + def.arriveMs;
-  const firstAttack =
-    spec.firstAttackAtMs !== undefined
-      ? Math.max(arrivesAt, waveStart + spec.firstAttackAtMs)
-      : arrivesAt + randomBetween(s, def.attackMinMs * 0.4, def.attackMaxMs * 0.7);
-  const enemy: EnemyState = {
-    id: newId(s, 'e'),
-    kind: spec.kind,
-    hp: maxHp,
-    maxHp,
-    orbit: {
-      bearing0: spec.bearing,
-      driftAmp,
-      driftPeriodMs: Math.round(randomBetween(s, 14_000, 22_000)),
-      phase: randomBetween(s, 0, Math.PI * 2),
-      distance: randomBetween(s, def.distance[0], def.distance[1]),
-      altitude: randomBetween(s, def.altitude[0], def.altitude[1]),
-    },
-    spawnedAt: at,
-    arrivesAt,
-    nextAttackAt: Math.round(firstAttack),
-    nextTargetCity: spec.firstTargetCity ?? null,
-    weakUntil: 0,
-  };
-  s.enemies.push(enemy);
-  emit(ctx, at, { type: 'enemy_spawned', enemyId: enemy.id, kind: enemy.kind });
-  return enemy;
+function lostCities(s: MatchState): number {
+  return CITY_IDS.length - aliveCities(s).length;
 }
 
-function runSpawner(ctx: Ctx, now: number): void {
+function announce(ctx: Ctx, at: number): void {
   const s = ctx.s;
-  if (s.phase !== 'WAVE_1' && s.phase !== 'WAVE_2' && s.phase !== 'BOSS') return;
-  const wave = s.config.waves[s.phase];
-  const start = s.phaseStartedAt;
-  while (s.spawn.scriptedDone < wave.scripted.length) {
-    const next = wave.scripted[s.spawn.scriptedDone]!;
-    if (start + next.atMs > now) break;
-    spawnEnemy(ctx, now, next, start);
-    s.spawn.scriptedDone += 1;
-  }
-  if (now >= s.spawn.nextSpawnAt) {
-    s.spawn.nextSpawnAt = now + wave.spawnEveryMs;
-    const alive = s.enemies.filter((e) => e.kind !== 'NULL_CORE').length;
-    if (alive < wave.maxAlive) {
-      const pick = weightedPick(s, wave.pool);
-      const range = randomPick(s, wave.bearings);
-      spawnEnemy(
-        ctx,
-        now,
-        { kind: pick.kind, bearing: randomBetween(s, range[0], range[1]) },
-        start,
-      );
+  const c = s.config;
+  const boss = bossOf(s);
+  if (!boss) return;
+  const players = playerCount(s, at);
+  if (at >= s.nextStrikeAt) {
+    // One city strike at a time, so the hall always knows which city to save.
+    const pending = s.threats.some((th) => th.target.type === 'CITY');
+    const alive = aliveCities(s);
+    if (!pending && alive.length > 0) {
+      const cityId = randomPick(s, alive);
+      const th: ThreatState = {
+        id: newId(s, 'th'),
+        sourceId: boss.id,
+        kind: 'CORE_LANCE',
+        dir: randomPick(s, DIRECTIONS),
+        target: { type: 'CITY', cityId },
+        warnAt: at,
+        impactAt: at + c.strikes.warnMs,
+        damage: strikeNeedFor(c, players),
+      };
+      s.threats.push(th);
+      emit(ctx, at, {
+        type: 'threat_warning',
+        threatId: th.id,
+        sourceId: boss.id,
+        target: 'CITY',
+        cityId,
+        dir: th.dir,
+        impactAt: th.impactAt,
+        amount: th.damage,
+      });
     }
+    s.nextStrikeAt = at + c.strikes.everyMs;
   }
-}
-
-/* ---------------------------------------------------------------- threats */
-
-const MECH_PARTS_BY_DIR: Record<Direction, MechPartId[]> = {
-  FRONT: ['CORE', 'ARM_L', 'ARM_R'],
-  LEFT: ['SHOULDER_L', 'ARM_L', 'LEG_L'],
-  RIGHT: ['SHOULDER_R', 'ARM_R', 'LEG_R'],
-  REAR: ['LEG_L', 'LEG_R'],
-};
-
-const THREAT_KIND: Record<EnemyKind, ThreatState['kind']> = {
-  DRONE: 'BEAM',
-  STRIKER: 'DIVE',
-  NULL_CORE: 'CORE_LANCE',
-};
-
-function launchAttacks(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  if (!isCombatPhase(s.phase)) return;
-  const wave = s.config.waves[s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS'];
-  for (const e of s.enemies) {
-    if (now < e.arrivesAt || now < e.nextAttackAt) continue;
-    if (s.threats.some((th) => th.sourceId === e.id)) continue;
-    const def = s.config.enemies[e.kind];
-    const dir = bearingToDirection(enemyBearingAt(e.orbit, e.spawnedAt, now));
-    let target: ThreatTarget;
-    const cities = aliveCities(s);
-    const scriptedCity =
-      e.nextTargetCity && !s.cities[e.nextTargetCity].lost ? e.nextTargetCity : null;
-    if (scriptedCity) {
-      target = { type: 'CITY', cityId: scriptedCity };
-    } else if (cities.length === 0 || nextRandom(s) < wave.mechTargetShare) {
-      target = { type: 'MECH', part: randomPick(s, MECH_PARTS_BY_DIR[dir]) };
-    } else {
-      target = { type: 'CITY', cityId: randomPick(s, cities) };
-    }
-    e.nextTargetCity = null;
-    const threat: ThreatState = {
-      id: newId(s, 't'),
-      sourceId: e.id,
-      kind: THREAT_KIND[e.kind],
-      dir,
-      target,
-      warnAt: now,
-      impactAt: now + s.config.timings.threatWarnMs,
-      damage: def.damage,
+  if (at >= s.nextClawAt) {
+    const th: ThreatState = {
+      id: newId(s, 'th'),
+      sourceId: boss.id,
+      kind: 'BEAM',
+      dir: 'FRONT',
+      target: { type: 'MECH', part: 'CORE' },
+      warnAt: at,
+      impactAt: at + c.mech.hitWarnMs,
+      damage: mechHitFor(c, players),
     };
-    s.threats.push(threat);
-    e.nextAttackAt =
-      threat.impactAt +
-      Math.round(randomBetween(s, def.attackMinMs, def.attackMaxMs) * attackSlow(s));
-    emit(ctx, now, {
+    s.threats.push(th);
+    emit(ctx, at, {
       type: 'threat_warning',
-      threatId: threat.id,
-      sourceId: e.id,
-      kind: threat.kind,
-      dir,
-      target,
-      impactAt: threat.impactAt,
+      threatId: th.id,
+      sourceId: boss.id,
+      target: 'MECH',
+      cityId: null,
+      dir: th.dir,
+      impactAt: th.impactAt,
+      amount: th.damage,
     });
+    s.nextClawAt = at + c.mech.hitEveryMs;
   }
 }
 
 function resolveImpacts(ctx: Ctx, now: number): void {
   const s = ctx.s;
-  const due = s.threats
-    .filter((th) => th.impactAt <= now)
-    .sort((a, b) => a.impactAt - b.impactAt || (a.id < b.id ? -1 : 1));
+  const due = s.threats.filter((th) => th.impactAt <= now).sort((a, b) => a.impactAt - b.impactAt);
   if (due.length === 0) return;
   s.threats = s.threats.filter((th) => th.impactAt > now);
   for (const th of due) {
     if (s.result) return;
-    resolveThreat(ctx, th);
-  }
-}
-
-function shoulderOf(seat: ShieldSeatId): MechPartId {
-  return seat === 'SHIELD_L' ? 'SHOULDER_L' : 'SHOULDER_R';
-}
-
-function resolveThreat(ctx: Ctx, th: ThreatState): void {
-  const s = ctx.s;
-  const at = th.impactAt;
-  const seat = shieldSeatFor(th.dir);
-  const sh = s.shields[seat];
-  let remaining = th.damage;
-  if (sh.dir === th.dir && sh.activeFrom <= at && at <= sh.activeUntil) {
-    const ratio = clamp(0.5 + 0.5 * (s.parts[shoulderOf(seat)] / 100), 0, 1);
-    const perfect = at - sh.activeFrom <= s.config.shields.perfectMs;
-    remaining = Math.round(th.damage * (1 - ratio));
-    wear(s, shoulderOf(seat), s.config.mech.wear.perBlock);
-    s.stats.threatsBlocked += 1;
-    const st = s.seats[seat].stats;
-    st.blocks += 1;
-    if (perfect) {
-      st.perfect += 1;
-      s.stats.perfectGuards += 1;
-    }
-    const linkN = linkBonusRoles(s, 'DEFENSE', at);
-    s.teamCapacitor = clamp(
-      s.teamCapacitor +
-        (perfect ? s.config.capacitor.perPerfect : s.config.capacitor.perBlock) +
-        s.config.sync.linkBlockCapacitorPerRole * linkN,
-      0,
-      s.config.capacitor.max,
-    );
-    emit(ctx, at, {
-      type: 'threat_blocked',
-      threatId: th.id,
-      seatId: seat,
-      dir: th.dir,
-      perfect,
-      ratio,
-      auto: false,
-    });
-    recordSuccess(ctx, at, seat, false);
-  } else if (isAuto(s, seat) && at >= s.autoTimers.shield[seat]) {
-    // AUTO SUPPORT reacts late and only half-blocks: a human shield is always better.
-    const ratio = s.config.auto.shieldBlockRatio;
-    remaining = Math.round(th.damage * (1 - ratio));
-    s.autoTimers.shield[seat] = at + s.config.auto.shieldCooldownMs;
-    wear(s, shoulderOf(seat), s.config.mech.wear.perBlock);
-    s.stats.threatsBlocked += 1;
-    emit(ctx, at, {
-      type: 'shield_deployed',
-      seatId: seat,
-      dir: th.dir,
-      until: at + 600,
-      auto: true,
-    });
-    emit(ctx, at, {
-      type: 'threat_blocked',
-      threatId: th.id,
-      seatId: seat,
-      dir: th.dir,
-      perfect: false,
-      ratio,
-      auto: true,
-    });
-    recordSuccess(ctx, at, seat, true);
-  }
-  if (remaining > 0) applyHit(ctx, th, remaining);
-}
-
-function applyHit(ctx: Ctx, th: ThreatState, damage: number): void {
-  const s = ctx.s;
-  const at = th.impactAt;
-  let dmg = damage;
-  if (th.target.type === 'CITY') {
-    const city = s.cities[th.target.cityId];
-    s.coreHp = Math.max(0, Math.round(s.coreHp - dmg * s.config.cities.coreShareOfCityHit));
-    if (!city.lost) {
-      city.hp = Math.max(0, Math.round(city.hp - dmg));
-      if (city.hp <= 0) {
-        city.lost = true;
-        emit(ctx, at, { type: 'city_lost', cityId: city.id });
+    if (th.target.type === 'CITY') {
+      const cityId = th.target.cityId;
+      if (s.shield >= th.damage) {
+        s.shield -= th.damage;
+        s.stats.strikesBlocked += 1;
+        emit(ctx, th.impactAt, {
+          type: 'strike_blocked',
+          threatId: th.id,
+          cityId,
+          dir: th.dir,
+          need: th.damage,
+        });
       } else {
-        emit(ctx, at, { type: 'city_damaged', cityId: city.id, hp: city.hp });
+        s.shield = 0;
+        s.cities[cityId] = { id: cityId, hp: 0, lost: true };
+        s.stats.strikesHit += 1;
+        emit(ctx, th.impactAt, { type: 'strike_hit', threatId: th.id, cityId, dir: th.dir });
+        if (lostCities(s) >= s.config.strikes.lostForDefeat) {
+          defeat(ctx, th.impactAt, 'CITIES_LOST');
+          return;
+        }
+      }
+    } else {
+      s.mechHp = Math.max(0, s.mechHp - th.damage);
+      s.stats.mechHits += 1;
+      emit(ctx, th.impactAt, {
+        type: 'mech_hit',
+        threatId: th.id,
+        damage: th.damage,
+        hp: s.mechHp,
+      });
+      if (s.mechHp <= 0) {
+        defeat(ctx, th.impactAt, 'MECH_DESTROYED');
+        return;
       }
     }
-  } else {
-    const legs = (s.parts.LEG_L + s.parts.LEG_R) / 200;
-    if (s.energy.mobility >= s.config.mech.evadeCost && legs > 0.3) {
-      // Legs and thrusters sidestep part of the blow when the mobility lane can pay;
-      // damaged legs sidestep less (engineers keep RAIJIN nimble).
-      s.energy.mobility -= s.config.mech.evadeCost;
-      wear(s, 'LEG_L', s.config.mech.wear.perEvade);
-      wear(s, 'LEG_R', s.config.mech.wear.perEvade);
-      const ratio = s.config.mech.evadeRatio + (1 - s.config.mech.evadeRatio) * (1 - legs) * 0.8;
-      dmg = Math.round(dmg * ratio);
-    }
-    const part = th.target.part;
-    s.parts[part] = Math.max(0, Math.round(s.parts[part] - dmg * s.config.mech.partDamageRatio));
-    s.coreHp = Math.max(0, Math.round(s.coreHp - dmg * s.config.mech.coreShareOfMechHit));
-    emit(ctx, at, { type: 'part_damaged', part, hp: s.parts[part] });
-  }
-  s.stats.threatsHit += 1;
-  emit(ctx, at, {
-    type: 'incoming_hit',
-    threatId: th.id,
-    dir: th.dir,
-    target: th.target,
-    damage: dmg,
-  });
-  checkDefeat(ctx, at);
-}
-
-function checkDefeat(ctx: Ctx, at: number): void {
-  const s = ctx.s;
-  if (s.result || !isCombatPhase(s.phase)) return;
-  if (s.coreHp <= 0) return defeat(ctx, at, 'CORE_DESTROYED');
-  const lost = CITY_IDS.filter((id) => s.cities[id].lost).length;
-  if (lost >= s.config.cities.lostForDefeat) defeat(ctx, at, 'CITIES_LOST');
-}
-
-/* ------------------------------------------------------------ cooperation */
-
-function activeLink(s: MatchState, at: number): LinkState | null {
-  return s.link && at <= s.link.expiresAt ? s.link : null;
-}
-
-/** Systems already in the active LINK that this role's success would extend (0 = none). */
-function linkBonusRoles(s: MatchState, role: RoleId, at: number): number {
-  const l = activeLink(s, at);
-  return l && !l.roles.includes(role) ? l.roles.length : 0;
-}
-
-/**
- * LINK CHAIN (spec §6.6): one system's success opens a link; a different system succeeding
- * within the window extends it (any order) and pays SYNC, up to FULL LINK with all four.
- * The same system again does not extend it, so the chain needs the whole crew.
- */
-function recordSuccess(ctx: Ctx, at: number, seatId: SeatId, auto: boolean): void {
-  const s = ctx.s;
-  const role = roleOf(seatId);
-  if (!auto) s.teamSync = clamp(s.teamSync + s.config.sync.perAction, 0, 100);
-  const link = activeLink(s, at);
-  if (!link) {
-    s.link = { roles: [role], seats: [seatId], expiresAt: at + s.config.sync.windowMs };
-  } else if (!link.roles.includes(role)) {
-    link.roles.push(role);
-    link.seats.push(seatId);
-    link.expiresAt = at + s.config.sync.windowMs;
-    const n = link.roles.length as 2 | 3 | 4;
-    const humans = link.seats.filter((id) => isHuman(s, id));
-    const humanRoles = new Set(humans.map((id) => roleOf(id))).size;
-    if (humanRoles >= 1) {
-      // AUTO SUPPORT can carry a link, but people linking with people is worth more.
-      const weight = humanRoles >= 2 ? 1 : 0.5;
-      const g = s.config.sync.gainByRoles;
-      const step = n === 2 ? g[2] : g[n] - g[(n - 1) as 2 | 3];
-      const gain = Math.round(step * weight);
-      s.teamSync = clamp(s.teamSync + gain, 0, 100);
-      // Linking stations is the main way to fill the RAIJIN gauge.
-      s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
-      s.stats.combos += 1;
-      if (isHuman(s, seatId)) s.seats[seatId].stats.combos += 1;
-      if (n === 2 && isHuman(s, link.seats[0]!)) s.seats[link.seats[0]!].stats.combos += 1;
-      s.lastComboAt = at;
-      if (n === 4) s.stats.fullLinks += 1;
-      emit(ctx, at, {
-        type: 'team_combo',
-        roles: [...link.roles],
-        gain,
-        sync: s.teamSync,
-        link: n,
-        seatId,
-      });
-    }
-    // FULL LINK: the chain is complete; the next one starts fresh.
-    if (n === 4) s.link = null;
-  }
-  s.stats.bestSync = Math.max(s.stats.bestSync, s.teamSync);
-}
-
-/* ---------------------------------------------------------------- weapons */
-
-function weaponFactor(s: MatchState): number {
-  return 0.75 + (s.distribution.weapon / 100) * 0.75;
-}
-
-function armOf(seat: GunnerSeatId): MechPartId {
-  return seat === 'GUNNER_L' ? 'ARM_L' : 'ARM_R';
-}
-
-function damageEnemy(
-  ctx: Ctx,
-  at: number,
-  enemy: EnemyState,
-  damage: number,
-  bySeat: SeatId | null,
-): boolean {
-  const s = ctx.s;
-  enemy.hp = Math.max(0, enemy.hp - damage);
-  if (enemy.kind === 'NULL_CORE') s.stats.damageToBoss += damage;
-  if (enemy.hp > 0) return false;
-  s.enemies = s.enemies.filter((e) => e.id !== enemy.id);
-  s.stats.enemiesDestroyed += 1;
-  emit(ctx, at, { type: 'enemy_destroyed', enemyId: enemy.id, kind: enemy.kind, bySeat });
-  // Killing an attacker before impact cancels its attack: gunners protect cities too.
-  for (const th of s.threats.filter((x) => x.sourceId === enemy.id)) {
-    s.stats.threatsIntercepted += 1;
-    emit(ctx, at, { type: 'threat_intercepted', threatId: th.id, enemyId: enemy.id });
-  }
-  s.threats = s.threats.filter((x) => x.sourceId !== enemy.id);
-  for (const g of Object.values(s.gunners)) {
-    if (g.targetId === enemy.id) {
-      g.targetId = null;
-      g.chargedNotified = true;
-    }
-  }
-  if (enemy.kind === 'NULL_CORE') finish(ctx, at, 'VICTORY', 'BOSS_DESTROYED');
-  return true;
-}
-
-function fireWeapon(
-  ctx: Ctx,
-  at: number,
-  seat: GunnerSeatId,
-  enemy: EnemyState,
-  auto: boolean,
-  perfect = false,
-): void {
-  const s = ctx.s;
-  const cfg = s.config.weapons;
-  const arm = s.parts[armOf(seat)];
-  const weak = enemy.weakUntil > at;
-  const base = cfg.seats[seat].damage * (auto ? s.config.auto.gunnerDamageRatio : 1);
-  // A shot that extends the LINK lands harder: teamwork is visible in the numbers.
-  const linkN = auto ? 0 : linkBonusRoles(s, 'GUNNER', at);
-  const damage = Math.max(
-    1,
-    Math.round(
-      base *
-        (0.5 + 0.5 * (arm / 100)) *
-        weaponFactor(s) *
-        (weak ? cfg.weakMultiplier : 1) *
-        (perfect ? cfg.perfectMultiplier : 1) *
-        (1 + s.config.sync.linkDamagePerRole * linkN),
-    ),
-  );
-  if (perfect) s.stats.perfectShots += 1;
-  s.energy.weapon -= cfg.energyCost;
-  wear(s, armOf(seat), s.config.mech.wear.perShot);
-  const st = s.seats[seat].stats;
-  if (!auto) {
-    st.hits += 1;
-    st.damage += damage;
-  }
-  s.teamCapacitor = clamp(
-    s.teamCapacitor + (auto ? 0 : s.config.capacitor.perHit),
-    0,
-    s.config.capacitor.max,
-  );
-  // Announce the shot before the kill so the screen draws the beam, then the explosion.
-  emit(ctx, at, {
-    type: 'weapon_fired',
-    seatId: seat,
-    enemyId: enemy.id,
-    damage,
-    weak,
-    auto,
-    killed: enemy.hp - damage <= 0,
-    perfect,
-    link: linkN ? linkN + 1 : 0,
-  });
-  damageEnemy(ctx, at, enemy, damage, auto ? null : seat);
-  if (!s.result) recordSuccess(ctx, at, seat, auto);
-}
-
-function lock(
-  ctx: Ctx,
-  at: number,
-  seat: GunnerSeatId,
-  targetId: string | undefined,
-): ReasonCode | null {
-  const s = ctx.s;
-  const target = targetId
-    ? s.enemies.find((e) => e.id === targetId)
-    : recommendTarget(s.enemies, s.threats, at);
-  if (!target) return targetId ? 'TARGET_LOST' : 'NO_TARGET';
-  if (at < target.arrivesAt) return 'TARGET_ARRIVING';
-  const g = s.gunners[seat];
-  const cfg = s.config.weapons;
-  if (g.targetId !== target.id) {
-    const charge = cfg.seats[seat].chargeMs / weaponFactor(s);
-    g.targetId = target.id;
-    g.lockedAt = at;
-    g.readyAt = Math.round(Math.max(at + charge, g.lastFiredAt + cfg.cooldownMs));
-    g.chargedNotified = false;
-  }
-  const weakPoint = seat === 'GUNNER_R';
-  if (weakPoint) target.weakUntil = at + cfg.weakPointMs;
-  emit(ctx, at, { type: 'target_locked', seatId: seat, enemyId: target.id, weakPoint });
-  return null;
-}
-
-function fire(ctx: Ctx, at: number, seat: GunnerSeatId): ReasonCode | null {
-  const s = ctx.s;
-  const g = s.gunners[seat];
-  const cfg = s.config.weapons;
-  if (!g.targetId) return 'NO_TARGET';
-  const target = s.enemies.find((e) => e.id === g.targetId);
-  if (!target) {
-    g.targetId = null;
-    return 'TARGET_LOST';
-  }
-  if (s.parts[armOf(seat)] <= 0) return 'WEAPON_BROKEN';
-  if (at < g.readyAt) return at < g.lastFiredAt + cfg.cooldownMs ? 'COOLDOWN' : 'CHARGING';
-  if (s.energy.weapon < cfg.energyCost) return 'NO_ENERGY';
-  // PERFECT SHOT: released the moment the charge completed (server clock decides).
-  const perfect = at - g.readyAt <= cfg.perfectMs;
-  g.lastFiredAt = at;
-  g.readyAt = at + cfg.cooldownMs;
-  g.chargedNotified = false;
-  fireWeapon(ctx, at, seat, target, false, perfect);
-  return null;
-}
-
-function deployShield(ctx: Ctx, at: number, seat: ShieldSeatId, dir: Direction): ReasonCode | null {
-  const s = ctx.s;
-  if (!SHIELD_COVERAGE[seat].includes(dir)) return 'BAD_DIRECTION';
-  const sh = s.shields[seat];
-  const cfg = s.config.shields;
-  if (at < sh.cooldownUntil) return 'COOLDOWN';
-  if (s.energy.shield < cfg.energyCost) return 'NO_ENERGY';
-  s.energy.shield -= cfg.energyCost;
-  sh.dir = dir;
-  sh.activeFrom = at;
-  sh.activeUntil = at + cfg.activeMs;
-  sh.cooldownUntil = at + cfg.cooldownMs;
-  emit(ctx, at, { type: 'shield_deployed', seatId: seat, dir, until: sh.activeUntil, auto: false });
-  return null;
-}
-
-/* ------------------------------------------------------------------ power */
-
-function shift(a: PowerDistribution, b: PowerDistribution): number {
-  return (
-    (Math.abs(a.weapon - b.weapon) +
-      Math.abs(a.shield - b.shield) +
-      Math.abs(a.mobility - b.mobility) +
-      Math.abs(a.repair - b.repair)) /
-    2
-  );
-}
-
-function validDistribution(s: MatchState, d: PowerDistribution): boolean {
-  const { laneMin, laneMax } = s.config.power;
-  const v = [d.weapon, d.shield, d.mobility, d.repair];
-  return (
-    v.every((x) => Number.isInteger(x) && x >= laneMin && x <= laneMax) &&
-    v.reduce((a, b) => a + b, 0) === 100
-  );
-}
-
-function applyPower(ctx: Ctx, at: number, seat: SeatId, d: PowerDistribution, auto: boolean): void {
-  const s = ctx.s;
-  const moved = shift(s.distribution, d);
-  s.distribution = { ...d };
-  s.distributionVersion += 1;
-  emit(ctx, at, { type: 'power_routed', seatId: seat, distribution: { ...d }, auto });
-  // A real re-plan is teamwork; nudging a slider back and forth is not.
-  if (moved >= s.config.power.minShift && at - s.powerSuccessAt >= s.config.power.successEveryMs) {
-    s.powerSuccessAt = at;
-    recordSuccess(ctx, at, seat, auto);
   }
 }
 
-function setPower(
-  ctx: Ctx,
-  at: number,
-  d: PowerDistribution,
-  baseVersion: number,
-): ReasonCode | null {
-  const s = ctx.s;
-  if (!validDistribution(s, d)) return 'BAD_DISTRIBUTION';
-  // Two phones on one seat (or a stale screen) must not silently overwrite each other.
-  if (baseVersion !== s.distributionVersion) return 'STALE_VERSION';
-  applyPower(ctx, at, 'POWER_CORE', d, false);
-  s.seats.POWER_CORE.stats.routes += 1;
-  return null;
-}
-
-/* ---------------------------------------------------------------- circuits */
-
-function runOverloads(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  if (s.nextOverloadAt === null || now < s.nextOverloadAt) return;
-  const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
-  const every = s.config.router.everyMs[wave];
-  s.nextOverloadAt = every === null ? null : now + Math.round(every * randomBetween(s, 0.8, 1.2));
-  const intact = POWER_LANES.filter((l) => !s.circuits[l].broken);
-  if (POWER_LANES.length - intact.length >= s.config.router.maxBroken || intact.length === 0)
-    return;
-  // The busiest lane is the likeliest to overload: pushing everything into guns has a cost.
-  const lane = weightedPick(
-    s,
-    intact.map((l) => ({ lane: l, weight: 5 + s.distribution[l] })),
-  ).lane;
-  s.circuits[lane] = { broken: true, brokenAt: now, puzzle: generatePuzzle(s) };
-  wear(s, 'CORE', s.config.mech.wear.perOverload);
-  s.stats.overloads += 1;
-  emit(ctx, now, { type: 'circuit_overload', lane });
-}
-
-function restoreCircuit(ctx: Ctx, at: number, lane: PowerLane, auto: boolean): void {
-  const s = ctx.s;
-  s.circuits[lane] = { broken: false, brokenAt: 0, puzzle: null };
-  s.stats.routesFixed += 1;
-  emit(ctx, at, { type: 'circuit_restored', lane, seatId: 'POWER_ROUTER', auto });
-  recordSuccess(ctx, at, 'POWER_ROUTER', auto);
-}
-
-function routeSubmit(
-  ctx: Ctx,
-  at: number,
-  lane: PowerLane,
-  rotations: number[],
-): ReasonCode | null {
-  const s = ctx.s;
-  const c = s.circuits[lane];
-  if (!c.broken || !c.puzzle) return 'CIRCUIT_OK';
-  if (!routeConnects(c.puzzle, rotations)) return 'ROUTE_INCOMPLETE';
-  restoreCircuit(ctx, at, lane, false);
-  s.seats.POWER_ROUTER.stats.routes += 1;
-  return null;
-}
-
-/* -------------------------------------------------------- reactor blackout */
-
-function crisisAutoAt(s: MatchState, startedAt: number): number | null {
-  // AUTO SUPPORT stands in only when nobody flies POWER B; a person gets the full time.
-  return !isHuman(s, 'POWER_ROUTER') && s.autoSupport
-    ? startedAt + s.config.crisis.autoFixMs
-    : null;
-}
-
-function startCrisis(ctx: Ctx, at: number): void {
-  const s = ctx.s;
-  const autoAt = crisisAutoAt(s, at);
-  s.crisis = {
-    kind: 'BLACKOUT',
-    startedAt: at,
-    endsAt: at + s.config.crisis.durationMs,
-    autoAt,
-    puzzle: generatePuzzle(s),
-  };
-  s.stats.blackouts += 1;
-  emit(ctx, at, { type: 'crisis_started', kind: 'BLACKOUT', endsAt: s.crisis.endsAt, autoAt });
-}
-
-function resolveCrisis(
-  ctx: Ctx,
-  at: number,
-  by: 'PULSE' | 'ROUTE' | 'AUTO',
-  seatId: SeatId | null,
-): void {
-  const s = ctx.s;
-  if (!s.crisis) return;
-  s.crisis = null;
-  // The crew's fix and a GRID PULSE pay the same RAIJIN gauge; AUTO SUPPORT only restores power.
-  const gain = by === 'AUTO' ? 0 : s.config.crisis.recoverGauge;
-  s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
-  if (by === 'PULSE') s.stats.blackoutsByPulse += 1;
-  if (by === 'ROUTE') s.stats.blackoutsByRoute += 1;
-  emit(ctx, at, { type: 'crisis_resolved', kind: 'BLACKOUT', by, seatId, gain });
-}
-
-function runCrisis(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  const c = s.crisis;
-  if (c) {
-    c.autoAt = crisisAutoAt(s, c.startedAt);
-    if (c.autoAt !== null && now >= c.autoAt) {
-      resolveCrisis(ctx, now, 'AUTO', null);
-    } else if (now >= c.endsAt) {
-      const damage = s.config.crisis.failDamage;
-      s.crisis = null;
-      s.coreHp = Math.max(0, s.coreHp - damage);
-      s.energy = { weapon: 0, shield: 0, mobility: 0, repair: 0 };
-      s.stats.blackoutsFailed += 1;
-      emit(ctx, now, { type: 'crisis_failed', kind: 'BLACKOUT', damage });
-      checkDefeat(ctx, now);
-    }
-    return;
-  }
-  const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
-  const offset = s.config.crisis.atMs[wave];
-  if (offset == null || s.crisisFired.includes(wave)) return;
-  // Never on top of the OVERDRIVE call: the blackout waits until the finisher is decided.
-  if (s.overdrive.status !== 'IDLE') return;
-  if (now >= s.phaseStartedAt + offset) {
-    s.crisisFired.push(wave);
-    startCrisis(ctx, now);
-  }
-}
-
-function blackoutRoute(ctx: Ctx, at: number, rotations: number[]): ReasonCode | null {
-  const s = ctx.s;
-  if (!s.crisis) return 'NO_CRISIS';
-  if (!routeConnects(s.crisis.puzzle, rotations)) return 'ROUTE_INCOMPLETE';
-  resolveCrisis(ctx, at, 'ROUTE', 'POWER_ROUTER');
-  s.seats.POWER_ROUTER.stats.routes += 1;
-  recordSuccess(ctx, at, 'POWER_ROUTER', false);
-  return null;
-}
-
-/* ----------------------------------------------------------------- repair */
-
-function repairFactor(s: MatchState): number {
-  return 0.6 + (s.distribution.repair / 100) * 2;
-}
-
-function repairStart(
-  ctx: Ctx,
-  at: number,
-  seat: EngineerSeatId,
-  part: MechPartId,
-): ReasonCode | null {
-  const s = ctx.s;
-  if (!ENGINEER_COVERAGE[seat].includes(part)) return 'NOT_YOUR_PART';
-  if (s.parts[part] >= 100) return 'PART_OK';
-  const eng = s.engineers[seat];
-  if (at < eng.cooldownUntil) return 'COOLDOWN';
-  if (s.energy.repair < s.config.repair.energyCost) return 'NO_ENERGY';
-  const slots = Array.from({ length: s.config.repair.slots }, (_, i) => i);
-  const bolts: number[] = [];
-  for (let i = 0; i < s.config.repair.bolts; i++) {
-    const pick = Math.floor(nextRandom(s) * slots.length);
-    bolts.push(slots.splice(pick, 1)[0]!);
-  }
-  eng.job = { part, bolts, startedAt: at, expiresAt: at + s.config.repair.jobMs };
-  emit(ctx, at, { type: 'repair_started', seatId: seat, part });
-  return null;
-}
-
-function repairFinish(
-  ctx: Ctx,
-  at: number,
-  seat: EngineerSeatId,
-  part: MechPartId,
-  order: number[],
-): ReasonCode | null {
-  const s = ctx.s;
-  const eng = s.engineers[seat];
-  const job = eng.job;
-  if (!job || job.part !== part) return 'NO_JOB';
-  if (at > job.expiresAt) {
-    eng.job = null;
-    return 'JOB_EXPIRED';
-  }
-  if (order.length !== job.bolts.length || order.some((b, i) => b !== job.bolts[i])) {
-    return 'WRONG_ORDER';
-  }
-  if (s.energy.repair < s.config.repair.energyCost) return 'NO_ENERGY';
-  s.energy.repair -= s.config.repair.energyCost;
-  const gain =
-    Math.round(s.config.repair.amount * repairFactor(s)) +
-    s.config.sync.linkRepairPerRole * linkBonusRoles(s, 'ENGINEER', at);
-  s.parts[part] = Math.min(100, s.parts[part] + gain);
-  eng.job = null;
-  eng.cooldownUntil = at + s.config.repair.cooldownMs;
-  s.seats[seat].stats.repairs += 1;
-  s.stats.repairs += 1;
-  emit(ctx, at, { type: 'part_repaired', part, hp: s.parts[part], seatId: seat, auto: false });
-  recordSuccess(ctx, at, seat, false);
-  return null;
-}
-
-/* -------------------------------------------------------------- overdrive */
-
-function roleHasCrew(s: MatchState, role: RoleId): boolean {
-  return ROLES[role].seats.some((id) => isHuman(s, id));
-}
-
-function confirmRole(ctx: Ctx, at: number, role: RoleId, seatId: SeatId | null, auto: boolean) {
-  const od = ctx.s.overdrive;
-  if (od.confirmed.includes(role)) return;
-  od.confirmed.push(role);
-  emit(ctx, at, { type: 'overdrive_sync', role, seatId, auto });
-  if (ROLE_IDS.every((r) => od.confirmed.includes(r))) fireOverdrive(ctx, at);
-}
-
-function fireOverdrive(ctx: Ctx, at: number): void {
-  const s = ctx.s;
-  const od = s.overdrive;
-  const cfg = s.config.overdrive;
-  const autoRoles = [...od.autoRoles];
-  s.overdrive = idleOverdrive();
-  s.teamCapacitor = 0;
-  s.stats.overdrives += 1;
-  emit(ctx, at, { type: 'overdrive_fired', damage: cfg.damage, roles: [...ROLE_IDS], autoRoles });
+/** How big one Lightning action is right now (the same for everyone). */
+export function paidEffect(s: MatchState, kind: ActionKind): number {
+  if (kind !== 'ATTACK') return s.config.paid.effect[kind];
   const boss = bossOf(s);
-  if (boss) damageEnemy(ctx, at, boss, cfg.damage, null);
+  return paidAttackFor(s.config, boss?.maxHp ?? bossHpFor(s.config, playerCount(s)));
 }
 
-function syncNow(ctx: Ctx, at: number, seat: SeatId): ReasonCode | null {
+/** Applies one action's effect; returns the value (HP dealt, shield or armour added). */
+function applyEffect(
+  ctx: Ctx,
+  at: number,
+  kind: ActionKind,
+  amount: number,
+  paid: boolean,
+): number {
   const s = ctx.s;
-  const od = s.overdrive;
-  const role = roleOf(seat);
-  if (od.status === 'READY') {
-    od.status = 'CHARGING';
-    od.windowStartedAt = at;
-    od.windowEndsAt = at + s.config.overdrive.windowMs;
-    od.confirmed = [];
-    // Roles with nobody aboard are confirmed by AUTO SUPPORT, and say so (spec §6.7).
-    od.autoRoles = s.autoSupport ? ROLE_IDS.filter((r) => !roleHasCrew(s, r)) : [];
+  const c = s.config;
+  if (kind === 'ATTACK') {
+    const boss = bossOf(s);
+    if (!boss || boss.hp <= 0) return 0;
+    const dealt = Math.min(boss.hp, amount);
+    boss.hp -= dealt;
+    if (paid) boss.weakUntil = at + 1_500;
+    s.stats.damageToBoss += dealt;
+    return dealt;
+  }
+  if (kind === 'DEFEND') {
+    const before = s.shield;
+    s.shield = Math.min(c.shield.max, s.shield + amount);
+    return Math.round(s.shield - before);
+  }
+  const before = s.mechHp;
+  s.mechHp = Math.min(c.mech.max, s.mechHp + amount);
+  const added = Math.round(s.mechHp - before);
+  s.stats.repaired += added;
+  return added;
+}
+
+function checkVictory(ctx: Ctx, at: number): void {
+  const boss = bossOf(ctx.s);
+  if (boss && boss.hp <= 0 && !ctx.s.result) {
+    emit(ctx, at, { type: 'boss_destroyed', enemyId: boss.id });
+    finish(ctx, at, 'VICTORY', 'BOSS_DESTROYED');
+  }
+}
+
+function flushFree(ctx: Ctx, at: number, force = false): void {
+  const s = ctx.s;
+  if (!force && at - s.lastFlushAt < FREE_FLUSH_MS) return;
+  s.lastFlushAt = at;
+  for (const kind of ACTION_KINDS) {
+    const p = s.pendingFree[kind];
+    if (p.n === 0) continue;
     emit(ctx, at, {
-      type: 'overdrive_window',
-      endsAt: od.windowEndsAt,
-      autoRoles: [...od.autoRoles],
+      type: 'action',
+      kind,
+      paid: false,
+      virtual: false,
+      bot: false,
+      value: Math.round(p.value),
+      count: p.n,
+      settleMs: null,
     });
-  } else if (od.status !== 'CHARGING') {
-    return 'OVERDRIVE_NOT_READY';
-  }
-  s.seats[seat].stats.syncs += 1;
-  confirmRole(ctx, at, role, seat, false);
-  return null;
-}
-
-function runOverdrive(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  const od = s.overdrive;
-  const cfg = s.config.overdrive;
-  if (s.phase !== 'BOSS' || !bossOf(s)) {
-    if (od.status !== 'IDLE') s.overdrive = idleOverdrive();
-    return;
-  }
-  // One gauge (D-032): a full RAIJIN gauge in the boss fight opens the finisher.
-  if (od.status === 'IDLE' && s.teamCapacitor >= cfg.capacitorMin) {
-    od.status = 'READY';
-    od.readyAt = now;
-    emit(ctx, now, { type: 'overdrive_ready' });
-    return;
-  }
-  if (od.status !== 'CHARGING') return;
-  if (now >= od.windowStartedAt + cfg.autoConfirmMs) {
-    for (const r of od.autoRoles) {
-      if (s.overdrive.status !== 'CHARGING') return;
-      confirmRole(ctx, now, r, null, true);
-    }
-  }
-  if (s.overdrive.status === 'CHARGING' && now >= od.windowEndsAt) {
-    const missing = ROLE_IDS.filter((r) => !od.confirmed.includes(r));
-    s.overdrive = idleOverdrive();
-    s.teamCapacitor = Math.round(s.teamCapacitor * cfg.failCapacitorKeep);
-    s.stats.overdriveFails += 1;
-    emit(ctx, now, { type: 'overdrive_failed', missing });
+    s.pendingFree[kind] = { n: 0, value: 0 };
   }
 }
 
-/* ----------------------------------------------------------- auto support */
-
-function runAutoSupport(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  if (!s.autoSupport || !isCombatPhase(s.phase)) return;
-  for (const seat of ['GUNNER_L', 'GUNNER_R'] as const) {
-    if (isHuman(s, seat) || now < s.autoTimers.gunner[seat]) continue;
-    s.autoTimers.gunner[seat] = now + s.config.auto.gunnerEveryMs;
-    const target = recommendTarget(s.enemies, s.threats, now);
-    if (!target || now < target.arrivesAt) continue;
-    if (s.energy.weapon < s.config.weapons.energyCost + 10) continue;
-    fireWeapon(ctx, now, seat, target, true);
-    if (s.result) return;
-  }
-  if (now >= s.autoTimers.engineer) {
-    s.autoTimers.engineer = now + s.config.auto.engineerEveryMs;
-    for (const seat of ['ENGINEER_CORE', 'ENGINEER_LEGS'] as EngineerSeatId[]) {
-      if (isHuman(s, seat)) continue;
-      const parts = ENGINEER_COVERAGE[seat].filter((p) => s.parts[p] < 100);
-      if (parts.length === 0 || s.energy.repair < s.config.repair.energyCost) continue;
-      const worst = parts.reduce((a, b) => (s.parts[b] < s.parts[a] ? b : a));
-      s.energy.repair -= s.config.repair.energyCost;
-      s.parts[worst] = Math.min(100, s.parts[worst] + s.config.auto.engineerAmount);
-      emit(ctx, now, {
-        type: 'part_repaired',
-        part: worst,
-        hp: s.parts[worst],
-        seatId: seat,
-        auto: true,
-      });
-      recordSuccess(ctx, now, seat, true);
-    }
-  }
-  if (!isHuman(s, 'POWER_ROUTER')) {
-    for (const lane of POWER_LANES) {
-      const c = s.circuits[lane];
-      if (c.broken && now >= c.brokenAt + s.config.auto.routerFixMs) {
-        restoreCircuit(ctx, now, lane, true);
-      }
-    }
-  }
-  if (!isHuman(s, 'POWER_CORE') && now >= s.autoTimers.power) {
-    s.autoTimers.power = now + 8_000;
-    const want = autoPlan(s);
-    if (shift(want, s.distribution) >= s.config.power.minShift) {
-      applyPower(ctx, now, 'POWER_CORE', want, true);
-    }
-  }
-}
-
-/** AUTO SUPPORT's power plan: sensible, never clever (a human POWER A should beat it). */
-function autoPlan(s: MatchState): PowerDistribution {
-  const d = { ...s.config.power.defaultDistribution };
-  if (bossOf(s)) {
-    d.weapon += 10;
-    d.mobility -= 5;
-    d.repair -= 5;
-  }
-  const worst = Math.min(...Object.values(s.parts));
-  if (worst < 55 && d.weapon - 10 >= s.config.power.laneMin) {
-    d.weapon -= 10;
-    d.repair += 10;
-  }
-  return d;
-}
-
-/* -------------------------------------------------------------- simulation */
-
-function regenEnergy(s: MatchState, dtSec: number): void {
-  const coreFactor = 0.5 + 0.5 * (s.parts.CORE / 100);
-  // REACTOR BLACKOUT: the reactor runs on reserve. Not fully dark, so a small crew with
-  // nobody on POWER B is pressed, not starved (fully dark cut 2-pilot wins from 15/20 to 6/20).
-  const boost = s.crisis ? s.config.crisis.regenFactor : 1;
-  const total = s.config.energy.regenPerSec * coreFactor * boost * dtSec;
-  const max = s.config.energy.laneMax;
-  const d = s.distribution;
-  // A cut circuit starves its lane until POWER B re-routes it.
-  const f = (lane: PowerLane) => (s.circuits[lane].broken ? s.config.router.brokenRegenFactor : 1);
-  s.energy.weapon = Math.min(max, s.energy.weapon + (total * d.weapon * f('weapon')) / 100);
-  s.energy.shield = Math.min(max, s.energy.shield + (total * d.shield * f('shield')) / 100);
-  s.energy.mobility = Math.min(max, s.energy.mobility + (total * d.mobility * f('mobility')) / 100);
-  s.energy.repair = Math.min(max, s.energy.repair + (total * d.repair * f('repair')) / 100);
-}
-
-function releaseTimedOutSeats(ctx: Ctx, now: number): void {
-  const s = ctx.s;
-  for (const id of SEAT_IDS) {
-    const seat = s.seats[id];
-    if (
-      seat.pilotId &&
-      seat.disconnectedAt !== null &&
-      now - seat.disconnectedAt >= s.config.timings.seatHoldMs
-    ) {
-      releaseSeat(ctx, now, id, 'TIMEOUT');
-    }
-  }
-}
+/* -------------------------------------------------------------------- step */
 
 function step(ctx: Ctx, now: number, dtSec: number): void {
   const s = ctx.s;
-  releaseTimedOutSeats(ctx, now);
+  if (s.phase === 'LOBBY') {
+    const n = playerCount(s, now);
+    if (!s.autoStartEnabled || s.config.timings.lobbyAutoStartMs <= 0 || n === 0) {
+      s.autoStartAt = null;
+    } else if (s.autoStartAt === null) {
+      s.autoStartAt = now + s.config.timings.lobbyAutoStartMs;
+    } else if (now >= s.autoStartAt) {
+      enterPhase(ctx, 'COUNTDOWN', s.autoStartAt);
+    }
+    return;
+  }
   if (s.phaseEndsAt !== null && now >= s.phaseEndsAt) {
     const at = s.phaseEndsAt;
-    if (s.phase === 'BOSS') {
+    if (s.phase === 'BATTLE') {
       defeat(ctx, at, 'TIME_UP');
-    } else {
-      const next = NEXT_TIMED[s.phase];
-      if (next) enterPhase(ctx, next, at);
-      else s.phaseEndsAt = null; // RESULTS: the server rolls the next round.
+      return;
     }
+    const next = NEXT_TIMED[s.phase];
+    if (next) enterPhase(ctx, next, at);
+    else s.phaseEndsAt = null; // RESULTS over: the server opens the next match.
   }
-  if (!isCombatPhase(s.phase)) return;
-  regenEnergy(s, dtSec);
-  runSpawner(ctx, now);
-  launchAttacks(ctx, now);
+  if (s.phase !== 'BATTLE') return;
+  s.shield = Math.max(0, s.shield - s.config.shield.decayPerSec * dtSec);
+  announce(ctx, now);
   resolveImpacts(ctx, now);
-  if (!isCombatPhase(s.phase)) return;
-  for (const seat of ['GUNNER_L', 'GUNNER_R'] as const) {
-    const g = s.gunners[seat];
-    if (g.targetId && !g.chargedNotified && now >= g.readyAt) {
-      g.chargedNotified = true;
-      emit(ctx, now, { type: 'weapon_charged', seatId: seat, enemyId: g.targetId });
-    }
-  }
-  if (!s.crisis) runOverloads(ctx, now);
-  runCrisis(ctx, now);
-  if (!isCombatPhase(s.phase)) return;
-  runAutoSupport(ctx, now);
-  if (!isCombatPhase(s.phase)) return;
-  for (const id of ['ENGINEER_LEGS', 'ENGINEER_CORE'] as const) {
-    const job = s.engineers[id].job;
-    if (job && now > job.expiresAt) s.engineers[id].job = null;
-  }
-  runOverdrive(ctx, now);
-  if (now - s.lastComboAt > s.config.sync.decayAfterMs) {
-    s.teamSync = Math.max(0, s.teamSync - s.config.sync.decayPerSec * dtSec);
-  }
+  if (s.phase !== 'BATTLE') return;
+  s.stats.peakPlayers = Math.max(s.stats.peakPlayers, playerCount(s, now));
+  flushFree(ctx, now);
 }
 
 function advanceCtx(ctx: Ctx, t: number): void {
   const s = ctx.s;
   if (t <= s.t) return;
   if (s.paused) {
-    // The server's clock stops while paused; tolerate a stray tick without simulating.
     s.t = t;
     s.simT = Math.floor(t / STEP_MS) * STEP_MS;
     return;
@@ -1388,331 +515,216 @@ export function advanceTo(state: MatchState, t: number): AdvanceResult {
   return { state: ctx.s, events: ctx.events };
 }
 
-/* ----------------------------------------------------------------- seats */
+/* ----------------------------------------------------------------- players */
 
-function releaseSeat(
-  ctx: Ctx,
-  at: number,
-  seatId: SeatId,
-  reason: 'LEFT' | 'TIMEOUT' | 'KICKED' | 'ROUND_OVER' | 'REPLACED',
-): void {
+function emptyPlayerStats(): PlayerState['stats'] {
+  return { free: zeroCounts(), paid: zeroCounts(), damage: 0 };
+}
+
+function join(ctx: Ctx, at: number, pilotId: string, displayName: string, bot: boolean): void {
   const s = ctx.s;
-  const keep = s.seats[seatId].stats;
-  s.seats[seatId] = { ...emptySeat(seatId), stats: keep };
-  if (seatId === 'GUNNER_L' || seatId === 'GUNNER_R') {
-    s.gunners[seatId].targetId = null;
-    s.gunners[seatId].chargedNotified = true;
+  const existing = s.players[pilotId];
+  if (existing) {
+    existing.connected = true;
+    existing.disconnectedAt = null;
+    existing.displayName = displayName;
+    return;
   }
-  if (seatId === 'ENGINEER_LEGS' || seatId === 'ENGINEER_CORE') s.engineers[seatId].job = null;
-  emit(ctx, at, { type: 'seat_released', seatId, reason });
+  const before = playerCount(s, at);
+  s.players[pilotId] = {
+    pilotId,
+    displayName,
+    bot,
+    connected: true,
+    disconnectedAt: null,
+    joinedAt: at,
+    freeReadyAt: 0,
+    stats: emptyPlayerStats(),
+  };
+  const after = playerCount(s, at);
+  if (s.phase === 'BATTLE') growBoss(s, after, before);
+  emit(ctx, at, { type: 'player_joined', players: after, bot });
 }
 
-function seatOf(s: MatchState, pilotId: string): SeatId | null {
-  return SEAT_IDS.find((id) => s.seats[id].pilotId === pilotId) ?? null;
+/** Latecomers make the boss proportionally tougher; the HP bar keeps its percentage. */
+function growBoss(s: MatchState, players: number, before: number): void {
+  const boss = bossOf(s);
+  if (!boss || players <= before) return;
+  const max = bossHpFor(s.config, Math.max(players, s.playersAtLaunch));
+  if (max <= boss.maxHp) return;
+  boss.hp = Math.round((boss.hp * max) / boss.maxHp);
+  boss.maxHp = max;
 }
-
-const SEAT_CHANGE_PHASES: readonly Phase[] = ['ATTRACT', 'LOBBY'];
-const JOIN_CLOSED_PHASES: readonly Phase[] = ['VICTORY', 'DEFEAT', 'RESULTS'];
-
-function joinSeat(
-  ctx: Ctx,
-  at: number,
-  seatId: SeatId,
-  pilotId: string,
-  displayName: string,
-  bot = false,
-): SeatRequestResult {
-  const s = ctx.s;
-  if (JOIN_CLOSED_PHASES.includes(s.phase)) return { ok: false, reasonCode: 'ROUND_CLOSED' };
-  if (!isSeatOpen(s.config, seatId)) return { ok: false, reasonCode: 'SEAT_NOT_OPEN' };
-  const current = seatOf(s, pilotId);
-  if (current === seatId) {
-    const seat = s.seats[seatId];
-    if (!seat.connected) {
-      seat.connected = true;
-      seat.disconnectedAt = null;
-      emit(ctx, at, { type: 'seat_connection', seatId, connected: true });
-    }
-    return { ok: true, seatId };
-  }
-  const occupant = s.seats[seatId].pilotId;
-  if (occupant && occupant !== pilotId) {
-    // A demo bot steps aside for a human; humans never replace each other.
-    if (!s.seats[seatId].bot || bot) return { ok: false, reasonCode: 'SEAT_TAKEN' };
-    releaseSeat(ctx, at, seatId, 'REPLACED');
-  }
-  if (current) {
-    if (!SEAT_CHANGE_PHASES.includes(s.phase)) return { ok: false, reasonCode: 'SEAT_LOCKED' };
-    releaseSeat(ctx, at, current, 'LEFT');
-  }
-  const seat = s.seats[seatId];
-  seat.pilotId = pilotId;
-  seat.displayName = displayName;
-  seat.connected = true;
-  seat.ready = false;
-  seat.disconnectedAt = null;
-  seat.bot = bot;
-  seat.stats = emptyStats();
-  emit(ctx, at, { type: 'seat_assigned', seatId, displayName });
-  if (s.phase === 'ATTRACT') enterPhase(ctx, 'LOBBY', at);
-  return { ok: true, seatId };
-}
-
-/* ---------------------------------------------------------------- reduce */
 
 function remember(s: MatchState, id: string, accepted: boolean, reason: ReasonCode | null): void {
   s.actionLog[id] = { accepted, reason };
   s.actionLogOrder.push(id);
-  while (s.actionLogOrder.length > ACTION_LOG_LIMIT) {
+  while (s.actionLogOrder.length > ACTION_LOG_MAX) {
     const old = s.actionLogOrder.shift()!;
     delete s.actionLog[old];
   }
 }
 
-function pilotAction(
+function freeAction(
   ctx: Ctx,
-  cmd: Extract<EngineCommand, { type: 'PILOT_ACTION' }>,
   at: number,
+  pilotId: string,
+  clientActionId: string,
+  kind: ActionKind,
 ): ActionResult {
   const s = ctx.s;
-  const seat = s.seats[cmd.seatId];
-  const reject = (reasonCode: ReasonCode): ActionResult => {
-    remember(s, cmd.clientActionId, false, reasonCode);
+  const seen = s.actionLog[clientActionId];
+  if (seen) {
     return {
-      clientActionId: cmd.clientActionId,
-      accepted: false,
-      reasonCode,
-      resultingStateVersion: s.version,
+      clientActionId,
+      accepted: seen.accepted,
+      ...(seen.reason ? { reasonCode: seen.reason as ReasonCode } : {}),
     };
-  };
-  if (seat.pilotId !== cmd.pilotId) return reject('NOT_YOUR_SEAT');
-  if (s.paused) return reject('PAUSED');
-  if (!isCombatPhase(s.phase)) return reject('NOT_IN_COMBAT');
-  const role = roleOf(cmd.seatId);
-  const a = cmd.action;
-  let reason: ReasonCode | null;
-  if (a.actionType === 'LOCK' || a.actionType === 'FIRE') {
-    if (role !== 'GUNNER') return reject('WRONG_ROLE');
-    const g = cmd.seatId as GunnerSeatId;
-    reason = a.actionType === 'LOCK' ? lock(ctx, at, g, a.payload.targetId) : fire(ctx, at, g);
-  } else if (a.actionType === 'DEPLOY_SHIELD') {
-    if (role !== 'DEFENSE') return reject('WRONG_ROLE');
-    reason = deployShield(ctx, at, cmd.seatId as ShieldSeatId, a.payload.dir);
-  } else if (a.actionType === 'SET_POWER') {
-    if (cmd.seatId !== 'POWER_CORE') return reject('WRONG_ROLE');
-    reason = setPower(ctx, at, a.payload.distribution, a.payload.baseVersion);
-  } else if (a.actionType === 'ROUTE_SUBMIT') {
-    if (cmd.seatId !== 'POWER_ROUTER') return reject('WRONG_ROLE');
-    reason = routeSubmit(ctx, at, a.payload.lane, a.payload.rotations);
-  } else if (a.actionType === 'REPAIR_START' || a.actionType === 'REPAIR_FINISH') {
-    if (role !== 'ENGINEER') return reject('WRONG_ROLE');
-    const e = cmd.seatId as EngineerSeatId;
-    reason =
-      a.actionType === 'REPAIR_START'
-        ? repairStart(ctx, at, e, a.payload.part)
-        : repairFinish(ctx, at, e, a.payload.part, a.payload.order);
-  } else if (a.actionType === 'BLACKOUT_ROUTE') {
-    if (cmd.seatId !== 'POWER_ROUTER') return reject('WRONG_ROLE');
-    reason = blackoutRoute(ctx, at, a.payload.rotations);
-  } else if (a.actionType === 'SYNC_NOW') {
-    reason = syncNow(ctx, at, cmd.seatId);
-  } else {
-    return reject('INVALID');
   }
-  if (reason) return reject(reason);
-  seat.stats.actions += 1;
-  remember(s, cmd.clientActionId, true, null);
-  return { clientActionId: cmd.clientActionId, accepted: true, resultingStateVersion: s.version };
+  const refuse = (reasonCode: ReasonCode, readyAt?: number): ActionResult => {
+    // Cooldown refusals are not remembered: the same key may be retried a moment later.
+    if (reasonCode !== 'COOLDOWN') remember(s, clientActionId, false, reasonCode);
+    return { clientActionId, accepted: false, reasonCode, ...(readyAt ? { readyAt } : {}) };
+  };
+  const p = s.players[pilotId];
+  if (!p) return refuse('NOT_JOINED');
+  if (s.phase !== 'BATTLE') return refuse('NOT_IN_COMBAT');
+  if (s.paused) return refuse('PAUSED');
+  if (at < p.freeReadyAt) return refuse('COOLDOWN', p.freeReadyAt);
+  p.freeReadyAt = at + s.config.free.cooldownMs;
+  const value = applyEffect(ctx, at, kind, s.config.free.effect[kind], false);
+  p.stats.free[kind] += 1;
+  if (kind === 'ATTACK') p.stats.damage += value;
+  s.stats.free[kind] += 1;
+  s.pendingFree[kind].n += 1;
+  s.pendingFree[kind].value += value;
+  remember(s, clientActionId, true, null);
+  checkVictory(ctx, at);
+  return { clientActionId, accepted: true, readyAt: p.freeReadyAt };
 }
 
-const PAUSABLE: readonly Phase[] = ['COUNTDOWN', 'DEPLOYMENT', 'WAVE_1', 'WAVE_2', 'BOSS'];
+function paidAction(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'PAID_ACTION' }>): boolean {
+  const s = ctx.s;
+  if (s.phase !== 'BATTLE' || s.paidApplied.includes(cmd.intentId)) return false;
+  // A pause never eats a settled payment: it lands the moment it is confirmed.
+  flushFree(ctx, cmd.t, true);
+  const value = applyEffect(ctx, cmd.t, cmd.kind, paidEffect(s, cmd.kind), true);
+  s.paidApplied.push(cmd.intentId);
+  s.stats.paid[cmd.kind] += 1;
+  s.stats.lightning += 1;
+  if (cmd.virtual) s.stats.virtual += 1;
+  const p = cmd.pilotId ? s.players[cmd.pilotId] : undefined;
+  if (p) {
+    p.stats.paid[cmd.kind] += 1;
+    if (cmd.kind === 'ATTACK') p.stats.damage += value;
+  }
+  emit(ctx, cmd.t, {
+    type: 'action',
+    kind: cmd.kind,
+    paid: true,
+    virtual: cmd.virtual,
+    bot: !!cmd.bot,
+    value,
+    count: 1,
+    settleMs: cmd.virtual ? null : cmd.settleMs,
+  });
+  checkVictory(ctx, cmd.t);
+  return true;
+}
+
+/* ------------------------------------------------------------------ reduce */
 
 export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
-  // Duplicate pilot actions return the remembered answer without touching state.
-  if (cmd.type === 'PILOT_ACTION') {
-    const prior = state.actionLog[cmd.clientActionId];
-    if (prior) {
-      return {
-        state,
-        events: [],
-        outcome: {
-          kind: 'action',
-          result: {
-            clientActionId: cmd.clientActionId,
-            accepted: prior.accepted,
-            ...(prior.reason ? { reasonCode: prior.reason as ReasonCode } : {}),
-            resultingStateVersion: state.version,
-          },
-        },
-      };
-    }
-  }
   const ctx: Ctx = { s: structuredClone(state), events: [] };
-  const at = Math.max(cmd.t, state.t);
-  advanceCtx(ctx, at);
+  advanceCtx(ctx, cmd.t);
   const s = ctx.s;
-  s.version += 1;
-  const control = (ok: boolean, reasonCode?: ReasonCode): CommandOutcome => ({
-    kind: 'control',
-    ok,
-    ...(reasonCode ? { reasonCode } : {}),
-  });
-  let outcome: CommandOutcome = { kind: 'none' };
-
+  const at = Math.max(cmd.t, s.t);
+  let outcome: CommandOutcome = { kind: 'control', ok: false };
+  const control = (ok: boolean) => (outcome = { kind: 'control', ok });
   switch (cmd.type) {
-    case 'ATTRACT':
-      if (s.phase !== 'LOBBY') outcome = control(false);
-      else {
-        enterPhase(ctx, 'ATTRACT', at);
-        outcome = control(true);
-      }
-      break;
-    case 'OPEN_LOBBY':
-      if (s.phase !== 'ATTRACT') outcome = control(s.phase === 'LOBBY');
-      else {
-        enterPhase(ctx, 'LOBBY', at);
-        outcome = control(true);
-      }
-      break;
     case 'START':
-      if (s.phase !== 'LOBBY' && s.phase !== 'ATTRACT') outcome = control(false);
-      else {
+      if (s.phase === 'LOBBY') {
         enterPhase(ctx, 'COUNTDOWN', at);
-        outcome = control(true);
+        control(true);
       }
       break;
     case 'SKIP_DEPLOY':
-      if (s.phase !== 'COUNTDOWN' && s.phase !== 'DEPLOYMENT') outcome = control(false);
-      else {
-        enterPhase(ctx, 'WAVE_1', at);
-        outcome = control(true);
+      if (s.phase === 'COUNTDOWN' || s.phase === 'DEPLOYMENT') {
+        enterPhase(ctx, 'BATTLE', at);
+        control(true);
       }
       break;
     case 'PAUSE':
-      if (s.paused || !PAUSABLE.includes(s.phase)) outcome = control(false);
-      else {
+      if (!s.paused && s.phase !== 'LOBBY' && s.phase !== 'RESULTS') {
         s.paused = true;
         emit(ctx, at, { type: 'match_paused' });
-        outcome = control(true);
+        control(true);
       }
       break;
     case 'RESUME':
-      if (!s.paused) outcome = control(false);
-      else {
+      if (s.paused) {
         s.paused = false;
         emit(ctx, at, { type: 'match_resumed' });
-        outcome = control(true);
+        control(true);
       }
       break;
     case 'END':
-      if (!PAUSABLE.includes(s.phase)) outcome = control(false);
-      else {
+      if (s.phase === 'BATTLE' || s.phase === 'COUNTDOWN' || s.phase === 'DEPLOYMENT') {
         s.paused = false;
         defeat(ctx, at, 'ABORTED');
-        outcome = control(true);
+        control(true);
       }
       break;
-    case 'TRIGGER_BLACKOUT': {
-      const wave = s.phase as 'WAVE_1' | 'WAVE_2' | 'BOSS';
-      if (!['WAVE_1', 'WAVE_2', 'BOSS'].includes(s.phase) || s.paused) {
-        outcome = control(false, 'NOT_IN_COMBAT');
-      } else if (s.crisis || s.overdrive.status !== 'IDLE') {
-        outcome = control(false, 'INVALID');
-      } else {
-        // Counts as this wave's blackout, so the scheduled one does not follow right after.
-        if (!s.crisisFired.includes(wave)) s.crisisFired.push(wave);
-        startCrisis(ctx, at);
-        outcome = control(true);
+    case 'SET_AUTO_START':
+      s.autoStartEnabled = cmd.enabled;
+      if (!cmd.enabled) s.autoStartAt = null;
+      control(true);
+      break;
+    case 'PLAYER_JOIN':
+      join(ctx, at, cmd.pilotId, cmd.displayName.slice(0, 24), !!cmd.bot);
+      control(true);
+      break;
+    case 'PLAYER_CONNECTION': {
+      const p = s.players[cmd.pilotId];
+      if (p) {
+        const before = playerCount(s, at);
+        p.connected = cmd.connected;
+        p.disconnectedAt = cmd.connected ? null : at;
+        if (cmd.connected && s.phase === 'BATTLE') growBoss(s, playerCount(s, at), before);
+        control(true);
       }
       break;
     }
-    case 'SET_AUTO_SUPPORT':
-      if (s.autoSupport !== cmd.enabled) {
-        s.autoSupport = cmd.enabled;
-        emit(ctx, at, { type: 'auto_support_changed', enabled: cmd.enabled });
+    case 'PLAYER_LEAVE':
+      if (s.players[cmd.pilotId]) {
+        delete s.players[cmd.pilotId];
+        emit(ctx, at, { type: 'player_left', players: playerCount(s, at) });
+        control(true);
       }
-      outcome = control(true);
       break;
-    case 'SEAT_JOIN':
+    case 'PLAYER_RENAME': {
+      const p = s.players[cmd.pilotId];
+      if (p) {
+        p.displayName = cmd.displayName.slice(0, 24);
+        control(true);
+      }
+      break;
+    }
+    case 'ACTION':
       outcome = {
-        kind: 'seat',
-        result: joinSeat(ctx, at, cmd.seatId, cmd.pilotId, cmd.displayName, cmd.bot ?? false),
+        kind: 'action',
+        result: freeAction(ctx, at, cmd.pilotId, cmd.clientActionId, cmd.kind),
       };
       break;
-    case 'SEAT_LEAVE': {
-      const seat = seatOf(s, cmd.pilotId);
-      if (seat) releaseSeat(ctx, at, seat, 'LEFT');
-      outcome = { kind: 'seat', result: { ok: true, seatId: null } };
+    case 'PAID_ACTION':
+      control(paidAction(ctx, { ...cmd, t: at }));
       break;
-    }
-    case 'SEAT_KICK':
-      if (s.seats[cmd.seatId].pilotId) {
-        releaseSeat(ctx, at, cmd.seatId, 'KICKED');
-        outcome = control(true);
-      } else outcome = control(false);
-      break;
-    case 'SEAT_RENAME':
-      if (s.seats[cmd.seatId].pilotId) s.seats[cmd.seatId].displayName = cmd.displayName;
-      outcome = control(!!s.seats[cmd.seatId].pilotId);
-      break;
-    case 'SEAT_READY': {
-      const seat = seatOf(s, cmd.pilotId);
-      if (!seat) outcome = { kind: 'seat', result: { ok: false, reasonCode: 'NOT_YOUR_SEAT' } };
-      else {
-        if (!s.seats[seat].ready) {
-          s.seats[seat].ready = true;
-          emit(ctx, at, { type: 'seat_ready', seatId: seat });
-        }
-        outcome = { kind: 'seat', result: { ok: true, seatId: seat } };
-      }
-      break;
-    }
-    case 'SEAT_CONNECTION': {
-      const seat = seatOf(s, cmd.pilotId);
-      if (seat && s.seats[seat].connected !== cmd.connected) {
-        s.seats[seat].connected = cmd.connected;
-        s.seats[seat].disconnectedAt = cmd.connected ? null : at;
-        emit(ctx, at, { type: 'seat_connection', seatId: seat, connected: cmd.connected });
-      }
-      break;
-    }
-    case 'PILOT_ACTION':
-      outcome = { kind: 'action', result: pilotAction(ctx, cmd, at) };
-      break;
-    case 'SATS_PULSE': {
-      // Money already settled; the pulse lands once, only while the fight is on.
-      if (s.pulsesApplied.includes(cmd.intentId)) outcome = control(false, 'INVALID');
-      else if (!isCombatPhase(s.phase)) outcome = control(false, 'NOT_IN_COMBAT');
-      else {
-        // GRID PULSE: ends the blackout and pays the same gauge as the crew's re-route. If the
-        // crew fixed it while the payment was confirming, the paid gauge still lands.
-        const gain = s.config.crisis.recoverGauge;
-        const crisis = !!s.crisis;
-        s.pulsesApplied.push(cmd.intentId);
-        s.stats.pulses += 1;
-        emit(ctx, at, {
-          type: 'sats_pulse_settled',
-          seatId: cmd.seatId,
-          gain,
-          virtual: cmd.virtual,
-          settleMs: cmd.virtual ? null : (cmd.settleMs ?? null),
-          crisis,
-        });
-        if (crisis) resolveCrisis(ctx, at, 'PULSE', cmd.seatId);
-        else s.teamCapacitor = clamp(s.teamCapacitor + gain, 0, s.config.capacitor.max);
-        outcome = control(true);
-      }
-      break;
-    }
   }
-  return { state: s, events: ctx.events, outcome };
+  ctx.s.version += 1;
+  return { state: ctx.s, events: ctx.events, outcome };
 }
 
-/** RESULTS has played out: the server should roll the next round. */
+/** RESULTS has run its course: the server should open the next match. */
 export function isRoundOver(s: MatchState): boolean {
   return s.phase === 'RESULTS' && s.phaseEndsAt === null;
-}
-
-export function bossOf<E extends { kind: EnemyKind }>(s: { enemies: readonly E[] }): E | null {
-  return s.enemies.find((e) => e.kind === 'NULL_CORE') ?? null;
 }

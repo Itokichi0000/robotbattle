@@ -140,66 +140,59 @@ class Sfx {
   onEvent(e: MatchEvent): void {
     if (!this.ready) return;
     switch (e.type) {
-      case 'weapon_fired':
-        if (e.seatId === 'GUNNER_L') {
-          if (!this.gate('fireL', 120)) return;
-          this.tone('sine', 90, 32, e.auto ? 0.3 : 0.7, 0.005, 0.5);
-          this.hiss('lowpass', 1800, 200, e.auto ? 0.15 : 0.35, 0.003, 0.35);
-        } else {
-          if (!this.gate('fireR', 120)) return;
-          this.tone('sawtooth', 2400, 260, e.auto ? 0.08 : 0.18, 0.002, 0.18);
-          this.hiss('bandpass', 5000, 1200, 0.12, 0.002, 0.12);
+      case 'action':
+        if (e.paid) {
+          // Lightning action: crack + rolling thunder, then a bright chime.
+          this.hiss('highpass', 9000, 2500, 0.5, 0.002, 0.25);
+          this.tone('sine', 55, 30, 0.8, 0.02, 1.6, 0.05);
+          this.hiss('lowpass', 900, 80, 0.45, 0.05, 1.8, 0.05);
+          this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
+          [784, 1046.5, 1318.5].forEach((f, i) =>
+            this.tone('sine', f, f, 0.06, 0.01, 0.8, 0.6 + i * 0.09),
+          );
+          if (e.kind === 'ATTACK') this.tone('sine', 70, 22, 0.9, 0.005, 2.2, 0.3);
+          break;
         }
-        if (e.perfect && !e.auto) this.tone('sine', 2093, 2093, 0.06, 0.003, 0.35, 0.04);
+        // Free taps arrive in batches; one gated sound per action keeps a crowd listenable.
+        if (e.kind === 'ATTACK') {
+          if (!this.gate('fire', 140)) return;
+          this.tone('sine', 90, 32, Math.min(0.7, 0.25 + e.count * 0.05), 0.005, 0.5);
+          this.hiss('lowpass', 1800, 200, 0.25, 0.003, 0.35);
+        } else if (e.kind === 'DEFEND') {
+          if (!this.gate('shield', 220)) return;
+          this.tone('triangle', 520, 780, 0.1, 0.02, 0.5);
+          this.tone('triangle', 523, 784, 0.1, 0.02, 0.5);
+        } else {
+          if (this.gate('repair', 300)) this.tone('sine', 880, 1320, 0.07, 0.01, 0.3);
+        }
         break;
-      case 'weapon_charged':
-        if (this.gate(`charge${e.seatId}`, 600)) this.tone('sine', 140, 460, 0.06, 0.25, 0.25);
-        break;
-      case 'target_locked':
-        if (this.gate('lock', 250)) this.tone('square', 1320, 1320, 0.03, 0.005, 0.06);
-        break;
-      case 'shield_deployed':
-        if (!this.gate('shield', 200)) return;
-        this.tone('triangle', 520, 780, e.auto ? 0.05 : 0.12, 0.02, 0.5);
-        this.tone('triangle', 523, 784, e.auto ? 0.05 : 0.12, 0.02, 0.5);
-        break;
-      case 'threat_blocked':
-        if (!this.gate('block', 150)) return;
-        this.tone('square', 1250, 900, 0.07, 0.003, 0.25);
-        this.hiss('highpass', 3000, 6000, 0.12, 0.003, 0.3);
-        if (e.perfect) this.tone('sine', 1760, 1760, 0.06, 0.01, 0.4, 0.08);
-        break;
-      case 'incoming_hit':
-        if (!this.gate('hit', 200)) return;
-        this.tone('sine', 110, 40, 0.6, 0.005, 0.45);
-        this.hiss('lowpass', 2400, 300, 0.4, 0.004, 0.5);
-        break;
-      case 'enemy_destroyed': {
-        const big = e.kind === 'NULL_CORE';
-        if (!this.gate(big ? 'boom-big' : 'boom', big ? 0 : 140)) return;
-        this.tone('sine', big ? 70 : 120, 25, big ? 0.9 : 0.4, 0.01, big ? 2.2 : 0.7);
-        this.hiss('lowpass', big ? 900 : 2600, 80, big ? 0.7 : 0.35, 0.01, big ? 2.6 : 0.8);
-        break;
-      }
       case 'threat_warning':
         if (!this.gate('warn', 1_400)) return;
         this.tone('square', 880, 880, 0.05, 0.005, 0.11);
         this.tone('square', 660, 660, 0.05, 0.005, 0.11, 0.15);
         break;
-      case 'team_combo':
-        if (!this.gate('combo', 400)) return;
-        // One rising step per link; FULL LINK plays the whole run, louder.
-        [523.3, 659.3, 784, 1046.5]
-          .slice(0, Math.max(2, e.link))
-          .forEach((f, i) =>
-            this.tone('sine', f, f, e.link >= 4 ? 0.11 : 0.07, 0.01, 0.6, i * 0.07),
-          );
+      case 'strike_blocked':
+        this.tone('square', 1250, 900, 0.07, 0.003, 0.25);
+        this.hiss('highpass', 3000, 6000, 0.12, 0.003, 0.3);
+        this.tone('sine', 1760, 1760, 0.06, 0.01, 0.4, 0.08);
         break;
-      case 'seat_assigned':
-        this.tone('sine', 660, 990, 0.08, 0.01, 0.2);
+      case 'strike_hit':
+        this.tone('sine', 70, 25, 0.8, 0.01, 1.8);
+        this.hiss('lowpass', 1400, 80, 0.6, 0.01, 2);
+        break;
+      case 'mech_hit':
+        this.tone('sine', 110, 40, 0.6, 0.005, 0.45);
+        this.hiss('lowpass', 2400, 300, 0.4, 0.004, 0.5);
+        break;
+      case 'boss_destroyed':
+        this.tone('sine', 70, 25, 0.9, 0.01, 2.2);
+        this.hiss('lowpass', 900, 80, 0.7, 0.01, 2.6);
+        break;
+      case 'player_joined':
+        if (!e.bot && this.gate('join', 300)) this.tone('sine', 660, 990, 0.08, 0.01, 0.2);
         break;
       case 'phase_changed':
-        if (e.to === 'WAVE_1' || e.to === 'WAVE_2' || e.to === 'BOSS') {
+        if (e.to === 'BATTLE') {
           [110, 164.8, 220].forEach((f) => this.tone('sawtooth', f, f * 0.98, 0.07, 0.05, 1.4));
         }
         if (e.to === 'VICTORY')
@@ -210,86 +203,6 @@ class Sfx {
           [220, 207.7, 196].forEach((f, i) =>
             this.tone('sawtooth', f, f * 0.97, 0.08, 0.04, 1.2, i * 0.25),
           );
-        break;
-      case 'part_repaired':
-        if (this.gate('repair', 400)) this.tone('sine', 880, 1320, e.auto ? 0.03 : 0.07, 0.01, 0.3);
-        break;
-      case 'repair_started':
-        if (this.gate('ratchet', 300))
-          [0, 0.07, 0.14].forEach((at) => this.hiss('bandpass', 3200, 2400, 0.06, 0.002, 0.04, at));
-        break;
-      case 'power_routed':
-        // Distribution relays: a short rising electrical sweep.
-        if (!this.gate('route', 500)) return;
-        this.tone('sawtooth', 180, 720, e.auto ? 0.03 : 0.06, 0.02, 0.3);
-        this.hiss('bandpass', 1200, 4200, 0.05, 0.01, 0.3);
-        break;
-      case 'circuit_overload':
-        if (!this.gate('overload', 600)) return;
-        this.hiss('highpass', 6000, 2000, 0.25, 0.002, 0.4);
-        this.tone('square', 98, 60, 0.12, 0.005, 0.5);
-        break;
-      case 'circuit_restored':
-        if (this.gate('restored', 400)) this.tone('triangle', 440, 880, 0.08, 0.01, 0.35);
-        break;
-      case 'crisis_started':
-        // Reactor power-down: a falling sweep, then a slow two-tone alarm.
-        this.tone('sawtooth', 420, 38, 0.18, 0.02, 1.4);
-        this.hiss('lowpass', 1600, 60, 0.25, 0.01, 1.3);
-        [0, 0.7, 1.4].forEach((at) => {
-          this.tone('square', 620, 620, 0.05, 0.01, 0.28, at + 0.4);
-          this.tone('square', 470, 470, 0.05, 0.01, 0.28, at + 0.72);
-        });
-        break;
-      case 'crisis_resolved':
-        // Power-up: a rising sweep back to the reactor hum.
-        this.tone('sawtooth', 50, 520, e.by === 'AUTO' ? 0.08 : 0.15, 0.6, 0.4);
-        if (e.by === 'ROUTE')
-          [523.3, 784].forEach((f, i) =>
-            this.tone('triangle', f, f, 0.08, 0.01, 0.5, 0.6 + i * 0.1),
-          );
-        break;
-      case 'crisis_failed':
-        this.tone('sine', 60, 22, 0.9, 0.005, 1.6);
-        this.hiss('lowpass', 1800, 70, 0.6, 0.005, 1.4);
-        break;
-      case 'sats_pulse_settled':
-        // Lightning strike first (crack + rolling thunder), then the shared-energy chime.
-        this.hiss('highpass', 9000, 2500, e.crisis ? 0.5 : 0.35, 0.002, 0.25);
-        this.tone('sine', 55, 30, e.crisis ? 0.8 : 0.5, 0.02, 1.6, 0.05);
-        this.hiss('lowpass', 900, 80, e.crisis ? 0.45 : 0.3, 0.05, 1.8, 0.05);
-        // The shared pulse: a bright rising chime on top of a low swell.
-        this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
-        [784, 1046.5, 1318.5].forEach((f, i) =>
-          this.tone('sine', f, f, 0.06, 0.01, 0.8, 0.6 + i * 0.09),
-        );
-        break;
-      case 'overdrive_ready':
-        [392, 587.3, 784].forEach((f, i) => this.tone('sawtooth', f, f, 0.06, 0.03, 0.7, i * 0.18));
-        break;
-      case 'overdrive_sync':
-        if (this.gate(`od${e.role}`, 200))
-          this.tone(
-            'square',
-            660 + ['GUNNER', 'DEFENSE', 'POWER', 'ENGINEER'].indexOf(e.role) * 110,
-            990,
-            0.05,
-            0.005,
-            0.18,
-          );
-        break;
-      case 'overdrive_fired':
-        // Convergence (≈1 s) then the main cannon thunder.
-        this.tone('sawtooth', 80, 640, 0.12, 0.9, 0.2);
-        this.hiss('bandpass', 400, 6000, 0.2, 0.9, 0.2);
-        this.tone('sine', 70, 22, 1, 0.005, 2.6, 1.05);
-        this.hiss('lowpass', 5000, 90, 0.9, 0.005, 2.8, 1.05);
-        this.tone('square', 1800, 200, 0.12, 0.003, 0.5, 1.05);
-        break;
-      case 'overdrive_failed':
-        [330, 247, 185].forEach((f, i) =>
-          this.tone('triangle', f, f * 0.95, 0.06, 0.02, 0.35, i * 0.14),
-        );
         break;
     }
   }

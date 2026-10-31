@@ -1,61 +1,56 @@
-import { CITY_IDS, SEATS } from '@swed/shared';
-import type { PublicMatchState, SeatId } from '@swed/shared';
+import { CITY_IDS } from '@swed/shared';
+import type { PublicMatchState } from '@swed/shared';
 import { useL } from '../ui';
 
-/** After the fight: team result plus this pilot's own contribution. No money, ever. */
-export function Debrief({ s, seat }: { s: PublicMatchState; seat: SeatId }) {
+/** After the fight: the team result. Nobody's payments are listed, ever. */
+export function Debrief({ s }: { s: PublicMatchState }) {
   const { L } = useL();
   const win = s.result?.outcome === 'VICTORY';
-  const me = s.seats[seat].stats;
   const held = CITY_IDS.filter((id) => !s.cities[id].lost).length;
-  const rows: Array<[string, string]> = [
-    [L('命中', 'Hits'), String(me.hits)],
-    [L('与ダメージ', 'Damage'), String(me.damage)],
-    [L('防御', 'Guards'), `${me.blocks}${me.perfect ? ` (PERFECT ${me.perfect})` : ''}`],
-    [L('連携参加', 'Combos joined'), String(me.combos)],
-  ];
+  const taps = s.stats.free.ATTACK + s.stats.free.DEFEND + s.stats.free.REPAIR;
+  const reason =
+    s.result?.reason === 'CITIES_LOST'
+      ? L('都市を守りきれなかった', 'Too many cities fell')
+      : s.result?.reason === 'MECH_DESTROYED'
+        ? L('雷神が倒れた（直すが足りなかった）', 'RAIJIN fell (not enough repairs)')
+        : s.result?.reason === 'TIME_UP'
+          ? L('時間切れ（撃つが足りなかった）', 'Out of time (not enough attacks)')
+          : '';
   return (
     <main className="screen debrief">
       <div className={`verdict ${win ? 'win' : 'lose'}`}>{win ? 'VICTORY' : 'DEFEAT'}</div>
       <p className="sub">
-        {win
-          ? L('撃退成功！日本を守り抜いた', 'Japan holds!')
-          : L('防衛失敗…次こそ守ろう', 'Japan fell… next time')}
+        {win ? L('撃退成功！日本を守り抜いた', 'Japan holds!') : L('防衛失敗…', 'Japan fell…')}
+        {reason ? <small>{reason}</small> : null}
       </p>
       <section className="sw-frame card">
-        <h3>
-          {L('あなたの戦果', 'Your sortie')} — {L(SEATS[seat].labelJa, SEATS[seat].labelEn)}
-        </h3>
-        <dl>
-          {rows.map(([k, v]) => (
-            <div key={k}>
-              <dt>{k}</dt>
-              <dd className="sw-num">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-      <section className="sw-frame card">
-        <h3>{L('チーム', 'Team')}</h3>
+        <h3>{L('みんなの戦果', 'The crowd')}</h3>
         <dl>
           <div>
-            <dt>{L('防衛都市', 'Cities held')}</dt>
+            <dt>{L('守った都市', 'Cities held')}</dt>
             <dd className="sw-num">
               {held} / {CITY_IDS.length}
             </dd>
           </div>
           <div>
-            <dt>{L('チーム連携', 'Team combos')}</dt>
-            <dd className="sw-num">{s.stats.combos}</dd>
+            <dt>{L('参加', 'Players')}</dt>
+            <dd className="sw-num">{s.stats.peakPlayers}</dd>
           </div>
           <div>
-            <dt>{L('撃墜', 'Downed')}</dt>
-            <dd className="sw-num">{s.stats.enemiesDestroyed}</dd>
+            <dt>{L('タップ', 'Taps')}</dt>
+            <dd className="sw-num">{taps}</dd>
+          </div>
+          <div>
+            <dt>{L('Lightning の一撃', 'Lightning actions')}</dt>
+            <dd className="sw-num">{s.stats.lightning}</dd>
           </div>
         </dl>
       </section>
       <p className="note">
-        {L('まもなく次の作戦の搭乗受付が始まります', 'Boarding for the next sortie opens shortly')}
+        {L(
+          'このまま待つと次の作戦に自動で参加します',
+          'Stay here: you join the next round automatically',
+        )}
       </p>
     </main>
   );

@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
   advanceTo,
-  botDecide,
+  botChoose,
+  countedPlayers,
   createMatch,
   isRoundOver,
   reduce,
   toPublicState,
-  type BotMemory,
   type EngineCommand,
   type ReduceResult,
 } from '@swed/game-engine';
-import { isSeatOpen, PRESETS, SEAT_IDS, SEATS } from '@swed/shared';
+import { PRESETS } from '@swed/shared';
 import type {
+  ActionKind,
   ActionResult,
   MatchEvent,
   MatchEventMsg,
@@ -19,25 +20,19 @@ import type {
   MatchState,
   PilotActionReq,
   PresetId,
-  SeatId,
-  SeatRequestResult,
 } from '@swed/shared';
 import type { Db } from './db';
 import { audit, nowIso, tx } from './db';
 import type { PilotRow } from './sessions';
 
 /**
- * Owns the one live match. Simulation ticks at 20 Hz on a pause-corrected clock; public
- * snapshots go out at 10 Hz (sooner right after a command); confirmed events go out
- * immediately. Running several displays never runs several games: they all watch this.
+ * Owns the one live match (D-033 crowd raid). Simulation ticks at 20 Hz on a pause-corrected
+ * clock; public snapshots go out at 10 Hz (sooner right after something happened); confirmed
+ * events go out immediately. Several displays never run several games: they all watch this.
  */
 
 export const TICK_MS = 50;
 const SNAPSHOT_MS = 100;
-/** Demo bots act about three times a second, like attentive people. */
-const BOT_EVERY_MS = 300;
-/** Demo mode starts a sortie when the lobby has been quiet this long. */
-const DEMO_IDLE_START_MS = 12_000;
 
 /** Monotonic match clock that stops while the operator has the match paused. */
 export class MatchClock {
@@ -76,6 +71,8 @@ export interface RuntimeDeps {
   /** Monotonic ms source (performance.now in production, manual in tests). */
   source?: () => number;
   seed?: () => number;
+  /** Randomness for demo bots only (never for rules). */
+  random?: () => number;
   log?: { info: (o: object, msg?: string) => void; warn: (o: object, msg?: string) => void };
 }
 
@@ -85,11 +82,17 @@ type CommandInput = EngineCommand extends infer C
     : never
   : never;
 
+interface BotState {
+  pilotId: string;
+  nextTapAt: number;
+}
+
 export class MatchRuntime {
   state!: MatchState;
   clock!: MatchClock;
   nextPresetId: PresetId;
-  autoSupportDefault = true;
+  autoStart = true;
+  demoBots = false;
   private matchNumber = 0;
   private timer: NodeJS.Timeout | null = null;
   private lastSnapshotAt = -Infinity;
@@ -97,21 +100,29 @@ export class MatchRuntime {
   private recordedResult = false;
   private readonly source: () => number;
   private readonly seed: () => number;
-  private readonly row: ReturnType<Db['prepare']>;
-  demoBots = false;
-  private botMemory = new Map<SeatId, BotMemory>();
-  private lastBotAt = -Infinity;
-  private lobbyQuietSince = 0;
-  private botActionSeq = 0;
+  private readonly random: () => number;
+  private readonly insertMatch: ReturnType<Db['prepare']>;
+  private readonly insertAction: ReturnType<Db['prepare']>;
+  private bots: BotState[] = [];
+  private botSeq = 0;
+  private lastBotTick = 0;
+  /** The match the bot timers belong to: a new match restarts its clock near zero. */
+  private botMatchId = '';
 
   constructor(private readonly deps: RuntimeDeps) {
     this.source = deps.source ?? (() => performance.now());
     this.seed = deps.seed ?? (() => Math.floor(Math.random() * 2 ** 32));
+    this.random = deps.random ?? Math.random;
     this.nextPresetId = deps.presetId;
-    this.row = this.deps.db.prepare(
+    this.insertMatch = deps.db.prepare(
       `INSERT INTO matches (id, match_number, preset_id, config_hash, seed, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    this.openMatch({ attract: true });
+    this.insertAction = deps.db.prepare(
+      `INSERT OR IGNORE INTO action_events
+         (match_id, t, pilot_id, seat_id, client_action_id, action_type, accepted, reason, state_version, created_at)
+       VALUES (?, ?, ?, 'CROWD', ?, ?, ?, ?, ?, ?)`,
+    );
+    this.openMatch();
   }
 
   start(): void {
@@ -128,13 +139,12 @@ export class MatchRuntime {
   /* ---------------------------------------------------------------- core */
 
   snapshotMsg(): MatchSnapshotMsg {
-    const state = toPublicState(this.state);
     return {
       matchId: this.state.matchId,
       phase: this.state.phase,
       version: this.state.version,
       serverTime: this.state.t,
-      state,
+      state: toPublicState(this.state),
     };
   }
 
@@ -142,7 +152,7 @@ export class MatchRuntime {
     const r = advanceTo(this.state, this.clock.now());
     this.commit(r.state, r.events);
     if (isRoundOver(this.state)) {
-      this.replaceMatch('ROUND_OVER', { attract: true });
+      this.replaceMatch('ROUND_OVER');
       return;
     }
     if (this.demoBots) this.runDemoBots();
@@ -163,8 +173,8 @@ export class MatchRuntime {
       if (input.type === 'RESUME') this.clock.resume();
     }
     this.commit(r.state, r.events);
-    // Push at once only when something happened; a refused tap waits for the 10 Hz snapshot,
-    // so a crowd mashing buttons cannot double the screens' snapshot rate.
+    // Push at once only when something happened; a crowd mashing buttons is batched by the
+    // engine and goes out with the 10 Hz snapshot.
     if (r.events.length > 0) this.urgent = true;
     return r;
   }
@@ -186,14 +196,11 @@ export class MatchRuntime {
   }
 
   private persistMilestones(events: MatchEvent[]): void {
-    const db = this.deps.db;
     for (const e of events) {
-      if (e.type === 'phase_changed' && e.to === 'WAVE_1') {
-        db.prepare('UPDATE matches SET started_at = ?, crew = ? WHERE id = ?').run(
-          nowIso(),
-          this.state.crewAtLaunch,
-          this.state.matchId,
-        );
+      if (e.type === 'phase_changed' && e.to === 'BATTLE') {
+        this.deps.db
+          .prepare('UPDATE matches SET started_at = ?, crew = ? WHERE id = ?')
+          .run(nowIso(), this.state.playersAtLaunch, this.state.matchId);
       }
       if (e.type === 'match_result' && !this.recordedResult) {
         this.recordedResult = true;
@@ -209,13 +216,13 @@ export class MatchRuntime {
       db.prepare(
         'UPDATE matches SET ended_at = ?, outcome = ?, reason = ?, stats_json = ? WHERE id = ?',
       ).run(nowIso(), outcome, reason, JSON.stringify(s.stats), s.matchId);
-      for (const id of SEAT_IDS) {
-        const seat = s.seats[id];
-        if (!seat.pilotId) continue;
-        db.prepare(
-          `INSERT OR REPLACE INTO match_seats (match_id, seat_id, pilot_id, display_name, stats_json)
-           VALUES (?, ?, ?, ?, ?)`,
-        ).run(s.matchId, id, seat.pilotId, seat.displayName ?? '', JSON.stringify(seat.stats));
+      const ins = db.prepare(
+        `INSERT OR REPLACE INTO match_players (match_id, pilot_id, display_name, stats_json)
+         VALUES (?, ?, ?, ?)`,
+      );
+      for (const p of Object.values(s.players)) {
+        if (p.bot) continue;
+        ins.run(s.matchId, p.pilotId, p.displayName, JSON.stringify(p.stats));
       }
     });
     this.deps.log?.info({ matchId: s.matchId, outcome, reason, stats: s.stats }, 'match finished');
@@ -223,7 +230,7 @@ export class MatchRuntime {
 
   /* -------------------------------------------------------------- matches */
 
-  private openMatch(opts: { attract: boolean }): void {
+  private openMatch(): void {
     this.matchNumber += 1;
     const seed = this.seed() >>> 0;
     this.state = createMatch({
@@ -231,12 +238,11 @@ export class MatchRuntime {
       matchNumber: this.matchNumber,
       config: PRESETS[this.nextPresetId],
       seed,
-      autoSupport: this.autoSupportDefault,
-      attract: opts.attract,
+      autoStart: this.autoStart,
     });
     this.clock = new MatchClock(this.source);
     this.recordedResult = false;
-    this.row.run(
+    this.insertMatch.run(
       this.state.matchId,
       this.matchNumber,
       this.state.presetId,
@@ -246,33 +252,26 @@ export class MatchRuntime {
     );
   }
 
-  /** Ends the current match (recording an abort if it never finished) and opens the next. */
-  replaceMatch(
-    reason: 'ROUND_OVER' | 'RESET' | 'NEXT_ROUND' | 'PRESET',
-    opts: { attract: boolean; keepSeats?: boolean },
-  ) {
+  /**
+   * Ends the current match (recording an abort if it never finished) and opens the next.
+   * Phones still connected stay in: they play the next round without scanning again.
+   */
+  replaceMatch(reason: 'ROUND_OVER' | 'RESET' | 'NEXT_ROUND' | 'PRESET') {
     const old = this.state;
-    if (!old.result && old.phase !== 'ATTRACT' && old.phase !== 'LOBBY') {
+    if (!old.result && old.phase !== 'LOBBY') {
       this.deps.db
         .prepare("UPDATE matches SET ended_at = ?, outcome = 'ABORTED', reason = ? WHERE id = ?")
         .run(nowIso(), reason, old.matchId);
     }
-    this.openMatch(opts);
-    if (opts.keepSeats) {
-      for (const id of SEAT_IDS) {
-        const seat = old.seats[id];
-        if (!seat.pilotId) continue;
-        this.command({
-          type: 'SEAT_JOIN',
-          seatId: id,
-          pilotId: seat.pilotId,
-          displayName: seat.displayName ?? '',
-          bot: seat.bot,
-        });
-        if (!seat.connected)
-          this.command({ type: 'SEAT_CONNECTION', pilotId: seat.pilotId, connected: false });
-        if (seat.ready) this.command({ type: 'SEAT_READY', pilotId: seat.pilotId });
-      }
+    this.openMatch();
+    for (const p of Object.values(old.players)) {
+      if (!p.connected) continue;
+      this.command({
+        type: 'PLAYER_JOIN',
+        pilotId: p.pilotId,
+        displayName: p.displayName,
+        bot: p.bot,
+      });
     }
     this.deps.log?.info({ reason, matchId: this.state.matchId }, 'match opened');
     const snap = this.snapshotMsg();
@@ -281,113 +280,28 @@ export class MatchRuntime {
     this.deps.hooks.snapshot(snap);
   }
 
-  /* --------------------------------------------------------------- pilots */
+  /* --------------------------------------------------------------- players */
 
-  seatOf(pilotId: string): SeatId | null {
-    return SEAT_IDS.find((id) => this.state.seats[id].pilotId === pilotId) ?? null;
+  isJoined(pilotId: string): boolean {
+    return !!this.state.players[pilotId];
   }
 
-  joinSeat(
-    pilot: PilotRow,
-    matchId: string,
-    seatId: SeatId,
-    displayName: string,
-  ): SeatRequestResult {
-    if (matchId !== this.state.matchId) return { ok: false, reasonCode: 'STALE_MATCH' };
-    const r = this.command({ type: 'SEAT_JOIN', seatId, pilotId: pilot.id, displayName });
-    this.lobbyQuietSince = this.source();
-    return r.outcome.kind === 'seat' ? r.outcome.result : { ok: false, reasonCode: 'INVALID' };
+  /** A phone connected: it is in the crowd for this match (no seats, no limit). */
+  connect(pilot: PilotRow, displayName: string): void {
+    this.command({ type: 'PLAYER_JOIN', pilotId: pilot.id, displayName });
+  }
+
+  disconnect(pilotId: string): void {
+    if (this.isJoined(pilotId))
+      this.command({ type: 'PLAYER_CONNECTION', pilotId, connected: false });
+  }
+
+  leave(pilotId: string): void {
+    this.command({ type: 'PLAYER_LEAVE', pilotId });
   }
 
   rename(pilotId: string, displayName: string): void {
-    const seat = this.seatOf(pilotId);
-    if (seat) this.command({ type: 'SEAT_RENAME', seatId: seat, displayName });
-  }
-
-  /** Applies a settled energy pulse to the live match; false if the engine refused it. */
-  applyPulse(
-    intentId: string,
-    seatId: string | null,
-    virtual: boolean,
-    settleMs: number | null = null,
-  ): boolean {
-    const seat = SEAT_IDS.find((s) => s === seatId) ?? null;
-    const r = this.command({ type: 'SATS_PULSE', intentId, seatId: seat, virtual, settleMs });
-    return r.outcome.kind === 'control' && r.outcome.ok;
-  }
-
-  /* ------------------------------------------------------------ demo bots */
-
-  setDemoBots(enabled: boolean): void {
-    this.demoBots = enabled;
-    this.lobbyQuietSince = this.source();
-    if (!enabled) {
-      for (const id of SEAT_IDS) {
-        if (this.state.seats[id].bot) this.command({ type: 'SEAT_KICK', seatId: id });
-      }
-    }
-  }
-
-  /**
-   * Exhibition loop: labelled bots fill empty seats before a sortie, start it after a quiet
-   * lobby, and play with the same raw intents a phone sends. People can take any bot seat.
-   */
-  private runDemoBots(): void {
-    const s = this.state;
-    const now = this.source();
-    if (s.phase === 'ATTRACT' || s.phase === 'LOBBY') {
-      SEAT_IDS.forEach((id) => {
-        if (!s.seats[id].pilotId && isSeatOpen(s.config, id)) {
-          this.command({
-            type: 'SEAT_JOIN',
-            seatId: id,
-            pilotId: `bot:${id}`,
-            displayName: `DEMO-BOT ${SEATS[id].no}`,
-            bot: true,
-          });
-          this.command({ type: 'SEAT_READY', pilotId: `bot:${id}` });
-          this.botMemory.set(id, {});
-        }
-      });
-      if (now - this.lobbyQuietSince >= DEMO_IDLE_START_MS) {
-        this.command({ type: 'START' });
-        this.lobbyQuietSince = now;
-      }
-      return;
-    }
-    if (now - this.lastBotAt < BOT_EVERY_MS) return;
-    this.lastBotAt = now;
-    const pub = toPublicState(this.state);
-    for (const id of SEAT_IDS) {
-      const seat = this.state.seats[id];
-      if (!seat.bot || !seat.pilotId) continue;
-      const action = botDecide(pub, id, this.state.t, 0.85, this.botMemory.get(id) ?? {});
-      if (!action) continue;
-      this.botActionSeq += 1;
-      this.command({
-        type: 'PILOT_ACTION',
-        pilotId: seat.pilotId,
-        seatId: id,
-        clientActionId: `demo-${this.state.matchId}-${this.botActionSeq}`,
-        action,
-      });
-    }
-  }
-
-  ready(pilot: PilotRow, matchId: string): SeatRequestResult {
-    if (matchId !== this.state.matchId) return { ok: false, reasonCode: 'STALE_MATCH' };
-    const r = this.command({ type: 'SEAT_READY', pilotId: pilot.id });
-    return r.outcome.kind === 'seat' ? r.outcome.result : { ok: false, reasonCode: 'INVALID' };
-  }
-
-  leave(pilot: PilotRow, matchId: string): SeatRequestResult {
-    if (matchId !== this.state.matchId) return { ok: true, seatId: null };
-    this.command({ type: 'SEAT_LEAVE', pilotId: pilot.id });
-    return { ok: true, seatId: null };
-  }
-
-  connection(pilotId: string, connected: boolean): void {
-    if (this.seatOf(pilotId)) this.command({ type: 'SEAT_CONNECTION', pilotId, connected });
+    if (this.isJoined(pilotId)) this.command({ type: 'PLAYER_RENAME', pilotId, displayName });
   }
 
   pilotAction(pilot: PilotRow, req: PilotActionReq): ActionResult {
@@ -397,51 +311,135 @@ export class MatchRuntime {
     // Idempotency keys are namespaced per pilot: nobody can replay another pilot's key.
     const engineKey = `${pilot.id}:${req.clientActionId}`;
     const r = this.command({
-      type: 'PILOT_ACTION',
+      type: 'ACTION',
       pilotId: pilot.id,
-      seatId: req.seatId,
       clientActionId: engineKey,
-      action: req.action,
+      kind: req.action.kind,
     });
     if (r.outcome.kind !== 'action') {
       return { clientActionId: req.clientActionId, accepted: false, reasonCode: 'INVALID' };
     }
     const res = r.outcome.result;
-    this.deps.db
-      .prepare(
-        `INSERT OR IGNORE INTO action_events
-           (match_id, t, pilot_id, seat_id, client_action_id, action_type, accepted, reason, state_version, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+    // Cooldown refusals are the crowd mashing: not worth a row each.
+    if (res.reasonCode !== 'COOLDOWN') {
+      this.insertAction.run(
         this.state.matchId,
         this.state.t,
         pilot.id,
-        req.seatId,
         req.clientActionId,
-        req.action.actionType,
+        req.action.kind,
         res.accepted ? 1 : 0,
         res.reasonCode ?? null,
         this.state.version,
         nowIso(),
       );
+    }
     return { ...res, clientActionId: req.clientActionId };
+  }
+
+  /** Applies a settled Lightning action to the live match; false if the engine refused it. */
+  applyPaid(
+    intentId: string,
+    pilotId: string | null,
+    kind: ActionKind,
+    virtual: boolean,
+    settleMs: number | null = null,
+  ): boolean {
+    const r = this.command({ type: 'PAID_ACTION', intentId, pilotId, kind, virtual, settleMs });
+    return r.outcome.kind === 'control' && r.outcome.ok;
+  }
+
+  /* ------------------------------------------------------------ demo bots */
+
+  setDemoBots(enabled: boolean): void {
+    this.demoBots = enabled;
+    if (!enabled) {
+      for (const b of this.bots) this.command({ type: 'PLAYER_LEAVE', pilotId: b.pilotId });
+      this.bots = [];
+    }
+  }
+
+  /**
+   * Exhibition loop: labelled bots join the crowd and press what the big screen recommends.
+   * Now and then one sends a VIRTUAL Lightning action (labelled DEMO), so the hall sees what
+   * 21 sats does before anyone pays.
+   */
+  private runDemoBots(): void {
+    const s = this.state;
+    const c = s.config.bots;
+    const now = this.state.t;
+    while (this.bots.length < c.count) {
+      const n = this.bots.length + 1;
+      const pilotId = `bot:${n}`;
+      this.bots.push({ pilotId, nextTapAt: 0 });
+    }
+    for (const b of this.bots) {
+      if (!s.players[b.pilotId]) {
+        this.command({
+          type: 'PLAYER_JOIN',
+          pilotId: b.pilotId,
+          displayName: `DEMO-BOT ${b.pilotId.slice(4)}`,
+          bot: true,
+        });
+      }
+    }
+    if (this.botMatchId !== s.matchId) {
+      // Timers from the previous match are in its clock; kept, the bots would sit idle for as
+      // long as that match ran (seen after RESET with bots left on).
+      this.botMatchId = s.matchId;
+      this.lastBotTick = now;
+      for (const b of this.bots) b.nextTapAt = 0;
+    }
+    if (this.state.phase !== 'BATTLE' || this.state.paused) return;
+    const dt = Math.max(0, now - this.lastBotTick) / 1000;
+    this.lastBotTick = now;
+    let pub = null;
+    for (const b of this.bots) {
+      if (b.nextTapAt > now) continue;
+      b.nextTapAt = now + c.tapMinMs + this.random() * (c.tapMaxMs - c.tapMinMs);
+      pub ??= toPublicState(this.state);
+      const kind = botChoose(pub, this.random(), 0.8);
+      this.botSeq += 1;
+      this.command({
+        type: 'ACTION',
+        pilotId: b.pilotId,
+        clientActionId: `demo-${this.state.matchId}-${this.botSeq}`,
+        kind,
+      });
+    }
+    if (dt > 0 && this.random() < c.paidChancePerSec * dt * this.bots.length) {
+      this.botSeq += 1;
+      this.command({
+        type: 'PAID_ACTION',
+        intentId: `demo-${this.state.matchId}-${this.botSeq}`,
+        pilotId: null,
+        kind: botChoose(toPublicState(this.state), 0, 1),
+        virtual: true,
+        bot: true,
+        settleMs: null,
+      });
+    }
   }
 
   /* ------------------------------------------------------------- operator */
 
   setPreset(presetId: Exclude<PresetId, 'TEST'>): string {
     this.nextPresetId = presetId;
-    if (this.state.phase === 'ATTRACT' || this.state.phase === 'LOBBY') {
-      this.replaceMatch('PRESET', { attract: this.state.phase === 'ATTRACT', keepSeats: true });
+    if (this.state.phase === 'LOBBY') {
+      this.replaceMatch('PRESET');
       return `preset ${presetId} applied now`;
     }
     return `preset ${presetId} applies from the next round`;
   }
 
-  setAutoSupport(enabled: boolean): void {
-    this.autoSupportDefault = enabled;
-    this.command({ type: 'SET_AUTO_SUPPORT', enabled });
+  setAutoStart(enabled: boolean): void {
+    this.autoStart = enabled;
+    this.command({ type: 'SET_AUTO_START', enabled });
+  }
+
+  /** People (not bots) counted right now. */
+  humans(): number {
+    return countedPlayers(this.state).filter((p) => !p.bot).length;
   }
 
   audit(actor: string, action: string, detail = ''): void {

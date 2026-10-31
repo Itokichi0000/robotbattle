@@ -59,8 +59,9 @@ export function CameraDirector({
         const now = performance.now();
         if (reducedMotion) return;
         const free = now - lastOverride.current > 5_000;
-        if (e.type === 'weapon_fired' && !e.auto && free) {
-          const left = e.seatId === 'GUNNER_L';
+        // A Lightning attack gets a shoulder shot; free taps keep the wide view.
+        if (e.type === 'action' && e.paid && e.kind === 'ATTACK' && free) {
+          const left = Math.random() < 0.5;
           override.current = {
             shot: {
               pos: new THREE.Vector3(left ? -6.5 : 6.5, 12.8, 9.5),
@@ -71,7 +72,7 @@ export function CameraDirector({
           };
           lastOverride.current = now;
         }
-        if (e.type === 'overdrive_fired') {
+        if (e.type === 'boss_destroyed') {
           const snap = store.getState().snap?.state;
           const boss = snap?.boss ? snap.enemies.find((x) => x.id === snap.boss!.id) : undefined;
           const p = boss
@@ -88,7 +89,7 @@ export function CameraDirector({
           lastOverride.current = now;
           return;
         }
-        if (e.type === 'enemy_spawned' && e.kind === 'NULL_CORE') {
+        if (e.type === 'boss_spawned') {
           override.current = {
             shot: {
               pos: new THREE.Vector3(4, 4, 24),

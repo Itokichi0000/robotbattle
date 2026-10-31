@@ -24,92 +24,75 @@
 ハンドシェイクは `Origin` を検査（同一ホスト・`PUBLIC_BASE_URL`・`ALLOWED_ORIGINS` のみ）。`Origin` のない非ブラウザ接続は Cookie を
 持ち得ないため許可（パイロット/運営は Cookie がなければ `NOT_AUTHENTICATED` で拒否）。
 
-## メッセージ
+## メッセージ（D-033 群衆レイド）
 
 ```ts
 'match:snapshot': { matchId, phase, version, serverTime, state: PublicMatchState }
 'match:event':    { eventId: `${matchId}:${seq}`, matchId, seq, serverTime, type, payload: MatchEvent }
-'seat:changed':   { seatId, pilotDisplayName, connected, isAutoSupport }
-'pilot:action':   { matchId, seatId, clientActionId, action: { actionType, payload } }  → ack ActionResult
-'pilot:actionResult': { clientActionId, accepted, reasonCode?, resultingStateVersion? }
-'pilot:sessionStatus': { authenticated, pilot: { publicName, kind, callsign, showCallsign }, matchId, assignedSeat }
-'pilot:syncFinisher': { matchId, clientActionId }  → ack ActionResult（RAIJIN OVERDRIVE の SYNC NOW）
+'pilot:action':   { matchId, clientActionId, action: { kind: 'ATTACK' | 'DEFEND' | 'REPAIR' } }  → ack ActionResult
+'pilot:actionResult': { clientActionId, accepted, reasonCode?, readyAt? }
+'pilot:sessionStatus': { authenticated, pilot: { publicName, kind, callsign, showCallsign }, matchId, joined }
 'payment:status':     PaymentIntentView           // 支払った本人のソケットにだけ
 'pilot:notice':       { code: 'SESSION_REPLACED' | 'KICKED' }
 ```
 
-### 操作の payload（`action.actionType`）
-
-| actionType       | 席                 | payload                                                                     | 主な拒否理由                                       |
-| ---------------- | ------------------ | --------------------------------------------------------------------------- | -------------------------------------------------- |
-| `LOCK` / `FIRE`  | GUNNER_L/R         | `{ targetId }` / `{}`                                                       | `NO_TARGET` `CHARGING` `NO_ENERGY` `WEAPON_BROKEN` |
-| `DEPLOY_SHIELD`  | SHIELD_L/R         | `{ dir }`（担当方向のみ）                                                   | `BAD_DIRECTION` `COOLDOWN` `NO_ENERGY`             |
-| `SET_POWER`      | POWER_CORE         | `{ distribution: {weapon,shield,mobility,repair}, baseVersion }`（合計100） | `STALE_VERSION` `BAD_DISTRIBUTION`                 |
-| `ROUTE_SUBMIT`   | POWER_ROUTER       | `{ lane, rotations: number[9] }`                                            | `CIRCUIT_OK` `ROUTE_INCOMPLETE`                    |
-| `REPAIR_START`   | ENGINEER_LEGS/CORE | `{ part }`（担当区画のみ）                                                  | `NOT_YOUR_PART` `PART_OK` `COOLDOWN` `NO_ENERGY`   |
-| `REPAIR_FINISH`  | ENGINEER_LEGS/CORE | `{ part, order: number[] }`（ボルトを締めた順）                             | `NO_JOB` `JOB_EXPIRED` `WRONG_ORDER`               |
-| `SYNC_NOW`       | 全席               | `{}`                                                                        | `OVERDRIVE_NOT_READY`                              |
-| `BLACKOUT_ROUTE` | POWER_ROUTER       | `{ rotations: number[9] }`（炉心回路）                                      | `NO_CRISIS` `ROUTE_INCOMPLETE`                     |
-
+- 席はない。パイロット名前空間に接続した認証済みの端末は、そのまま試合の参加者になる（`PLAYER_JOIN`）。切断後 45 秒は人数に数え、
+  その間に戻れば同じ参加者。接続中の参加者は次の試合にもそのまま持ち越す。
+- スマホから送るのは **`pilot:action` の1種類だけ**（無料タップ）。1人 0.7 秒に1回（`free.cooldownMs`）。早すぎると `COOLDOWN` と
+  次に押せる時刻 `readyAt`。21 sats の大きい行動は HTTP の `POST /api/payments/intent { matchId, action }` で作り、着金確認後に
+  サーバーがエンジンへ `PAID_ACTION` を入れる（クライアントからは送れない）。
+- 群衆の連打は、エンジンが行動ごとに 200 ms でまとめて1つの `action` イベント（`count` 付き）にする。スナップショットは 10 Hz。
 - `PublicMatchState` に内部 `pilotId`・乱数状態・冪等ログは含めない（エンジンのテストとサーバー統合テストで検査）。
 - `seq` は試合ごとに単調増加。クライアントの `MatchStore` は同じ `seq` を二度配らない。
 - `clientActionId` は端末で生成（`crypto.getRandomValues`。http の LAN でも動く）。サーバーは `pilotId:clientActionId` で名前空間化して
-  冪等にする（他人のキーを再送しても他人の結果は返らない）。ack が来なければ同じ ID で1回だけ再送。
-- レート制限：パイロット 1 ソケットあたりトークンバケット（容量10・毎秒6）。超過は `RATE_LIMITED`。
+  冪等にする（他人のキーを再送しても他人の結果は返らない）。`COOLDOWN` の拒否は記録しないので、同じ ID で押し直せる。
+- レート制限：パイロット 1 ソケットあたりトークンバケット（容量8・毎秒4）。超過は `RATE_LIMITED`。
 
 ## 理由コード（`reasonCode`）
 
-`NOT_AUTHENTICATED` `INVALID` `RATE_LIMITED` `STALE_MATCH` `UNKNOWN_SEAT` `SEAT_TAKEN` `SEAT_NOT_OPEN` `ALREADY_SEATED`
-`SEAT_LOCKED` `NOT_YOUR_SEAT` `WRONG_ROLE` `NOT_IN_COMBAT` `PAUSED` `NO_TARGET` `TARGET_LOST` `TARGET_ARRIVING` `CHARGING`
-`COOLDOWN` `NO_ENERGY` `WEAPON_BROKEN` `BAD_DIRECTION` `ROUND_CLOSED` `STALE_VERSION` `BAD_DISTRIBUTION` `CIRCUIT_OK`
-`ROUTE_INCOMPLETE` `PART_OK` `NOT_YOUR_PART` `NO_JOB` `JOB_EXPIRED` `WRONG_ORDER` `OVERDRIVE_NOT_READY` `NETWORK`（端末側のみ）。
+`INVALID` `STALE_MATCH` `NOT_JOINED` `NOT_IN_COMBAT` `PAUSED` `COOLDOWN` `RATE_LIMITED` `DUPLICATE` `NETWORK`（端末側のみ）。
 日本語/英語の文言は `REASON_TEXT`（`packages/shared/src/actions.ts`）。
 
 ## 確定イベント（大画面の VFX/音の鍵）
 
-`phase_changed` `match_paused` `match_resumed` `auto_support_changed` `seat_assigned` `seat_released` `seat_ready`
-`seat_connection` `enemy_spawned` `target_locked` `weapon_charged` `weapon_fired` `enemy_destroyed` `threat_warning`
-`shield_deployed` `threat_blocked` `threat_intercepted` `incoming_hit` `city_damaged` `city_lost` `part_damaged`
-`part_repaired` `team_combo` `match_result` `power_routed` `circuit_overload` `circuit_restored` `repair_started`
-`overdrive_ready` `overdrive_window` `overdrive_sync` `overdrive_fired` `overdrive_failed` `sats_pulse_settled`。
-`crisis_started` `crisis_resolved { by: PULSE | ROUTE | AUTO, gain }` `crisis_failed` も配信（`gain` は雷神ゲージの加算。AUTO は 0）。
-`weapon_fired` は `perfect` と `link`、`team_combo` は `link`（2〜4）と `gain`（雷神ゲージに加わる量）を持つ。
-公開状態に `link`（現在の LINK）・`crisis`（炉心パズル含む）。雷神ゲージは `teamCapacitor`（0〜100、D-032）。
-`sats_pulse_settled` は `{ seatId, gain, virtual, settleMs, crisis }`（金額・支払者の情報は載せない。
-`settleMs` は実決済だけの「請求→着金」実測）。
+`phase_changed` `match_paused` `match_resumed` `player_joined { players, bot }` `player_left` `boss_spawned`
+`action { kind, paid, virtual, bot, value, count, settleMs }` `threat_warning { threatId, target: CITY | MECH, cityId, dir, impactAt, amount }`
+`strike_blocked` `strike_hit` `mech_hit { damage, hp }` `boss_destroyed` `match_result`。
+`action` は無料タップのまとまり（`paid=false`、`count` 回分）か、21 sats の大きい行動1回（`paid=true`）。金額・支払者は載せない。
+`settleMs` は実決済だけの「請求→着金」実測（VIRTUAL と BOT は null）。
 
 ## HTTP
 
-| method | path                                  | 用途                                                        |
-| ------ | ------------------------------------- | ----------------------------------------------------------- |
-| GET    | `/health`                             | 稼働確認（mode, matchId, phase, uptime）                    |
-| GET    | `/api/public/match`                   | 公開スナップショット                                        |
-| GET    | `/api/public/join`(.svg)              | 参加 URL と QR（サーバー生成）                              |
-| GET    | `/api/session`                        | 自分のパイロット情報（仮名のみ）                            |
-| POST   | `/api/auth/demo-guest`                | DEMO GUEST（sandbox のみ既定有効、Origin 検査・レート制限） |
-| POST   | `/api/auth/logout`                    | セッション破棄・席を降りる                                  |
-| POST   | `/api/operator/login`                 | 運営ログイン（定数時間比較・10回/分・監査ログ）             |
-| POST   | `/api/operator/logout`                |                                                             |
-| GET    | `/api/operator/session`               |                                                             |
-| POST   | `/api/auth/attempt`                   | LNURL-auth 試行開始（`sw_auth` Cookie、lnurl・QR・期限）    |
-| GET    | `/api/auth/lnurl`                     | LUD-04 ウォレットコールバック（`tag=login&k1&sig&key`）     |
-| GET    | `/api/auth/attempt/:id/status`        | 自分の試行の状態。`AUTHORIZED` で `sw_pilot` を発行         |
-| POST   | `/api/pilot/callsign`                 | コールサインと大画面表示の可否（任意）                      |
-| GET    | `/api/payments/quote`                 | パルスの金額・受取先・種類・残り回数（本人）                |
-| POST   | `/api/payments/intent`                | パルスの請求書作成（409＋理由コードで拒否）                 |
-| GET    | `/api/payments/intent/:id`            | 自分の intent の状態のみ                                    |
-| POST   | `/api/payments/webhook/lnbits?token=` | LNbits Webhook（きっかけのみ。必ず再照会）                  |
+| method | path                                  | 用途                                                           |
+| ------ | ------------------------------------- | -------------------------------------------------------------- |
+| GET    | `/health`                             | 稼働確認（mode, matchId, phase, uptime）                       |
+| GET    | `/api/public/match`                   | 公開スナップショット                                           |
+| GET    | `/api/public/join`(.svg)              | 参加 URL と QR（サーバー生成）                                 |
+| GET    | `/api/session`                        | 自分のパイロット情報（仮名のみ）                               |
+| POST   | `/api/auth/demo-guest`                | DEMO GUEST（sandbox のみ既定有効、Origin 検査・レート制限）    |
+| POST   | `/api/auth/logout`                    | セッション破棄・試合から抜ける                                 |
+| POST   | `/api/operator/login`                 | 運営ログイン（定数時間比較・10回/分・監査ログ）                |
+| POST   | `/api/operator/logout`                |                                                                |
+| GET    | `/api/operator/session`               |                                                                |
+| POST   | `/api/auth/attempt`                   | LNURL-auth 試行開始（`sw_auth` Cookie、lnurl・QR・期限）       |
+| GET    | `/api/auth/lnurl`                     | LUD-04 ウォレットコールバック（`tag=login&k1&sig&key`）        |
+| GET    | `/api/auth/attempt/:id/status`        | 自分の試行の状態。`AUTHORIZED` で `sw_pilot` を発行            |
+| POST   | `/api/pilot/callsign`                 | コールサインと大画面表示の可否（任意）                         |
+| GET    | `/api/payments/quote`                 | 21 sats の金額・受取先・種類・行動ごとの効果・残り回数（本人） |
+| POST   | `/api/payments/intent`                | `{ matchId, action }` の請求書作成（409＋理由コードで拒否）    |
+| GET    | `/api/payments/intent/:id`            | 自分の intent の状態のみ                                       |
+| POST   | `/api/payments/webhook/lnbits?token=` | LNbits Webhook（きっかけのみ。必ず再照会）                     |
 
-運営コマンド（`operator:command`）：`ATTRACT` `OPEN_LOBBY` `START` `SKIP_DEPLOY` `PAUSE` `RESUME` `END` `NEXT_ROUND` `RESET`
-`SET_AUTO_SUPPORT` `SET_PRESET` `KICK_SEAT` `SET_DISPLAY` `SET_DEMO_BOTS` `SET_HIDE_CALLSIGNS` `SANDBOX_SETTLE` `PAYMENTS_CHECK`
-`PAYMENTS_ENABLE_LIVE { confirm: 'LIVE' }` `PAYMENTS_DISABLE` `SET_AUTO_SETTLE_VIRTUAL { enabled }`（sandbox のみ）
-`TRIGGER_BLACKOUT`（戦闘中に炉心停止を今すぐ起こす。その幕の予定分の代わり、D-032）。すべて監査ログに残る。
-パルスの請求書は炉心停止中だけ作る（それ以外は 409 `NO_CRISIS`）。
+運営コマンド（`operator:command`）：`START` `SKIP_DEPLOY` `PAUSE` `RESUME` `END` `NEXT_ROUND` `RESET`
+`SET_AUTO_START { enabled }` `SET_PRESET` `SET_DISPLAY` `SET_DEMO_BOTS` `SET_HIDE_CALLSIGNS` `SANDBOX_SETTLE` `PAYMENTS_CHECK`
+`PAYMENTS_ENABLE_LIVE { confirm: 'LIVE' }` `PAYMENTS_DISABLE` `SET_AUTO_SETTLE_VIRTUAL { enabled }`（sandbox のみ）。すべて監査ログに残る。
+21 sats の請求書は戦闘中だけ作る（それ以外は 409 `NOT_IN_COMBAT`）。ほかの拒否：`PAYMENTS_DISABLED` `STALE_MATCH`
+`PULSE_PENDING`（未払いが1件ある）`PULSE_LIMIT`（1人1試合3回）`PULSE_COOLDOWN`（15秒、`retryAfterMs` 付き）`PULSE_MATCH_LIMIT`（1試合15回）。
 
 認証と決済の詳細は [`03_auth_and_payment.md`](03_auth_and_payment.md)。
 
 ## 再接続
 
-- ソケットが切れても席は `seatHoldMs`（60秒）保持（`SEAT_CONNECTION` が `disconnectedAt` を記録し、エンジンが時間で解放）。
+- ソケットが切れても参加者は `playerHoldMs`（45秒）人数に数える（`PLAYER_CONNECTION` が `disconnectedAt` を記録し、エンジンが時間で外す）。
 - 復帰したソケットには `pilot:sessionStatus` と最新スナップショットを即送信。取りこぼしたイベントには依存しない。
 - スマホは `visibilitychange` でセッションを再確認（ウォレットアプリから戻ったときに認証完了を拾う）。

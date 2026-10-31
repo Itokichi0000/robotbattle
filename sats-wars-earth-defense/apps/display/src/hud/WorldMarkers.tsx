@@ -1,10 +1,10 @@
-import { CITIES, CITY_IDS, DIRECTION_LABEL, SEATS } from '@swed/shared';
+import { CITIES, CITY_IDS, DIRECTION_LABEL } from '@swed/shared';
 import type { CityId, PublicMatchState } from '@swed/shared';
 import { useEffect, useRef } from 'react';
 import { screen } from '../scene/anchors';
 
 /**
- * Labels pinned to world positions (spec §4.4, §9.1): lock brackets on targets, city names
+ * Labels pinned to world positions (spec §4.4, §9.1): city names
  * on the hologram, red countdowns on threatened cities. Positions update every animation
  * frame from the 3D projector; text updates with the 10 Hz HUD tick.
  */
@@ -42,10 +42,6 @@ export function WorldMarkers({ s, mt }: { s: PublicMatchState; mt: number }) {
       threatDir.set(th.target.cityId, DIRECTION_LABEL[th.dir].en);
     }
   }
-  const locks = (['GUNNER_L', 'GUNNER_R'] as const)
-    .map((seat) => ({ seat, g: s.gunners[seat] }))
-    .filter((x) => x.g.targetId && s.enemies.some((e) => e.id === x.g.targetId));
-
   return (
     <>
       {CITY_IDS.map((id) => {
@@ -60,34 +56,6 @@ export function WorldMarkers({ s, mt }: { s: PublicMatchState; mt: number }) {
                 ? ` ${CITIES[id].nameEn} ${Math.max(0, (at - mt) / 1000).toFixed(1)}s ${threatDir.get(id)}`
                 : ''}
             </span>
-          </div>
-        );
-      })}
-      {locks.map(({ seat, g }) => {
-        const e = s.enemies.find((x) => x.id === g.targetId)!;
-        const weak = e.weakUntil > mt;
-        const ready = mt >= g.readyAt;
-        return (
-          <div
-            key={seat}
-            ref={bind(`enemy:${e.id}`)}
-            className={`marker lock${weak ? ' weak' : ''}`}
-          >
-            <svg className="box" viewBox="0 0 92 92" aria-hidden>
-              <path
-                d="M2 24V2h22M68 2h22v22M90 68v22H68M24 90H2V68"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={3}
-              />
-              {ready ? <circle cx={46} cy={46} r={6} fill="currentColor" /> : null}
-            </svg>
-            <div className="tag">
-              {SEATS[seat].labelEn} LOCK{weak ? '  WEAK POINT' : ''}
-              <small>
-                {e.kind} {Math.round((e.hp / e.maxHp) * 100)}% {ready ? 'READY' : 'CHARGING'}
-              </small>
-            </div>
           </div>
         );
       })}

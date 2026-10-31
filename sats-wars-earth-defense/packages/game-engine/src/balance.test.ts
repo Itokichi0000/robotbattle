@@ -1,51 +1,51 @@
-import { PRESETS, SEAT_IDS } from '@swed/shared';
-import type { GameConfig, SeatId } from '@swed/shared';
+import { PRESETS } from '@swed/shared';
+import type { GameConfig } from '@swed/shared';
 import { describe, expect, it } from 'vitest';
 import { playMatch } from './sim';
+import type { SimOptions } from './sim';
 
 /**
- * Full-match balance floors with bot pilots. The numbers are floors, not targets: real
- * tuning happens with people, but a regression that makes the game unwinnable (or winnable
- * with nobody aboard) must fail CI.
+ * Balance floors with simulated players who press what the big screen recommends. They are
+ * floors and ceilings, not targets: real tuning happens with people, but a change that makes
+ * the game unwinnable, or makes money win on its own, must fail CI.
  */
-function run(config: GameConfig, crew: SeatId[], runs: number) {
+function rate(c: GameConfig, players: number, runs: number, opts: SimOptions) {
   let wins = 0;
-  let overdrives = 0;
-  let repairs = 0;
   for (let i = 0; i < runs; i++) {
-    const s = playMatch(config, crew, 1000 + i);
-    if (s.result?.outcome === 'VICTORY') wins += 1;
-    overdrives += s.stats.overdrives;
-    repairs += s.stats.repairs;
+    if (playMatch(c, players, 500 + i, opts).result?.outcome === 'VICTORY') wins += 1;
   }
-  return { rate: wins / runs, overdrives: overdrives / runs, repairs: repairs / runs };
+  return wins / runs;
 }
 
-const FOUR: SeatId[] = ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'];
+describe('balance (simulated crowd)', { timeout: 300_000 }, () => {
+  const c = PRESETS.STANDARD;
 
-describe('balance (STANDARD, bot pilots)', { timeout: 120_000 }, () => {
-  const cfg = PRESETS.STANDARD;
-
-  it('AUTO SUPPORT alone does not win: people are the point', () => {
-    expect(run(cfg, [], 12).rate).toBeLessThanOrEqual(0.1);
+  it('nobody pressing anything loses', () => {
+    expect(rate(c, 1, 4, { skill: 0, tapEveryMs: 1e9 })).toBe(0);
   });
 
-  it('two pilots (one gunner, one shield) with AUTO SUPPORT can win', () => {
-    expect(run(cfg, ['GUNNER_L', 'SHIELD_L'], 12).rate).toBeGreaterThanOrEqual(0.5);
+  it('two people tapping for free can win', () => {
+    expect(rate(c, 2, 10, { skill: 0.85, tapEveryMs: 1_100 })).toBeGreaterThanOrEqual(0.5);
   });
 
-  it('four pilots win comfortably', () => {
-    expect(run(cfg, FOUR, 12).rate).toBeGreaterThanOrEqual(0.75);
+  it('one person alone is hard for free, and one Lightning action helps clearly', () => {
+    const free = rate(c, 1, 10, { skill: 0.9, tapEveryMs: 900 });
+    const paid = rate(c, 1, 10, { skill: 0.9, tapEveryMs: 900, paidPerPlayer: 1 });
+    expect(paid).toBeGreaterThan(free);
+    expect(paid).toBeGreaterThanOrEqual(0.4);
   });
 
-  it('a full crew of eight wins, fires OVERDRIVE and keeps the engineers busy', () => {
-    const r = run(cfg, [...SEAT_IDS], 12);
-    expect(r.rate).toBeGreaterThanOrEqual(0.75);
-    expect(r.overdrives).toBeGreaterThanOrEqual(1);
-    expect(r.repairs).toBeGreaterThanOrEqual(5);
+  it('a crowd of eight wins comfortably', () => {
+    expect(rate(c, 8, 8, { skill: 0.8, tapEveryMs: 1_200 })).toBeGreaterThanOrEqual(0.75);
   });
 
-  it('SHORT preset stays winnable for a full crew', () => {
-    expect(run(PRESETS.SHORT, [...SEAT_IDS], 8).rate).toBeGreaterThanOrEqual(0.6);
+  it('a big, sloppy crowd still wins (the game must not stall at a conference)', () => {
+    expect(rate(c, 30, 4, { skill: 0.7, tapEveryMs: 1_500 })).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it('SHORT stays winnable for a small group', () => {
+    expect(rate(PRESETS.SHORT, 3, 8, { skill: 0.85, tapEveryMs: 1_100 })).toBeGreaterThanOrEqual(
+      0.6,
+    );
   });
 });

@@ -109,6 +109,16 @@ const MIGRATIONS: string[] = [
    )`,
   `CREATE INDEX idx_payment_intents_match ON payment_intents(match_id, pilot_id)`,
   `CREATE INDEX idx_payment_intents_status ON payment_intents(status)`,
+  // D-033 crowd raid: no seats. A payment powers one of the three actions; every player who
+  // took part in a match gets a row (seat rows stay for older matches).
+  `ALTER TABLE payment_intents ADD COLUMN action TEXT`,
+  `CREATE TABLE match_players (
+     match_id TEXT NOT NULL REFERENCES matches(id),
+     pilot_id TEXT NOT NULL,
+     display_name TEXT NOT NULL,
+     stats_json TEXT NOT NULL,
+     PRIMARY KEY (match_id, pilot_id)
+   )`,
 ];
 
 export type Db = DatabaseSync;

@@ -1,42 +1,37 @@
-import { formatClock, ROLES, SEAT_IDS, SEATS, CITY_IDS } from '@swed/shared';
-import type { MatchResult, PublicMatchState, RoleId, SeatId, SeatStats } from '@swed/shared';
-import { joinInfo } from '../net';
+import { CITY_IDS, formatClock } from '@swed/shared';
+import type { MatchResult, PublicMatchState } from '@swed/shared';
 import { useSyncExternalStore } from 'react';
+import { joinInfo } from '../net';
 
 export const REASON_LABEL: Record<MatchResult['reason'], { ja: string; en: string }> = {
   BOSS_DESTROYED: { ja: 'NULL CORE 撃破', en: 'NULL CORE destroyed' },
-  CORE_DESTROYED: { ja: 'RAIJIN コア損壊', en: 'RAIJIN core lost' },
-  CITIES_LOST: { ja: '防衛都市が陥落', en: 'Too many cities fell' },
-  TIME_UP: { ja: '時間切れ', en: 'Time ran out' },
+  MECH_DESTROYED: { ja: '雷神が倒れた（直すが足りなかった）', en: 'RAIJIN fell' },
+  CITIES_LOST: { ja: '都市を守りきれなかった', en: 'Too many cities fell' },
+  TIME_UP: { ja: '時間切れ（撃つが足りなかった）', en: 'Time ran out' },
   ABORTED: { ja: '作戦中止（運営）', en: 'Stopped by operator' },
 };
 
-/** What each role's work is counted in (each role is celebrated for its own job). */
-const WORK_LABEL: Record<RoleId, string> = {
-  GUNNER: 'HITS',
-  DEFENSE: 'GUARDS',
-  POWER: 'ROUTES',
-  ENGINEER: 'REPAIRS',
-};
-function work(id: SeatId, st: SeatStats): number {
-  const role = SEATS[id].role;
-  return role === 'GUNNER'
-    ? st.hits
-    : role === 'DEFENSE'
-      ? st.blocks
-      : role === 'POWER'
-        ? st.routes
-        : st.repairs;
-}
-
-/** Debrief: celebrates teamwork (cities held, combos, guards). No money is ever shown. */
+/** Debrief: what the crowd did together. Never who paid, never how much. */
 export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
   const join = useSyncExternalStore(joinInfo.subscribe, joinInfo.get, joinInfo.get);
   const r = s.result;
   const win = r?.outcome === 'VICTORY';
   const defended = CITY_IDS.filter((id) => !s.cities[id].lost).length;
-  const crew = SEAT_IDS.filter((id) => s.seats[id].occupied);
   const left = s.phaseEndsAt !== null ? s.phaseEndsAt - mt : 0;
+  const f = s.stats.free;
+  const p = s.stats.paid;
+  const stats: Array<[string, string, string?]> = [
+    ['守った都市 CITIES HELD', `${defended} / ${CITY_IDS.length}`],
+    ['参加 PLAYERS', String(s.stats.peakPlayers)],
+    ['撃つ ATTACK', String(f.ATTACK + p.ATTACK), `ダメージ ${s.stats.damageToBoss}`],
+    ['守る DEFEND', String(f.DEFEND + p.DEFEND), `防いだ攻撃 ${s.stats.strikesBlocked}`],
+    ['直す REPAIR', String(f.REPAIR + p.REPAIR), `回復 ${s.stats.repaired}`],
+    [
+      'Lightning の一撃',
+      String(s.stats.lightning),
+      s.stats.virtual > 0 ? `うち VIRTUAL ${s.stats.virtual}` : undefined,
+    ],
+  ];
   return (
     <div className="results">
       <div>
@@ -46,25 +41,7 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
           {r ? `${REASON_LABEL[r.reason].ja}  ${REASON_LABEL[r.reason].en}` : ''}
         </div>
         <div className="stats">
-          {[
-            ['防衛都市 CITIES HELD', `${defended} / ${CITY_IDS.length}`],
-            ['連携 TEAM COMBOS', String(s.stats.combos)],
-            ['防御 GUARDS', String(s.stats.threatsBlocked), `PERFECT ${s.stats.perfectGuards}`],
-            [
-              '撃墜 DOWNED',
-              String(s.stats.enemiesDestroyed),
-              `INTERCEPT ${s.stats.threatsIntercepted}`,
-            ],
-            ['修理 REPAIRS', String(s.stats.repairs)],
-            ['回路復旧 RE-ROUTES', String(s.stats.routesFixed), `OVERLOAD ${s.stats.overloads}`],
-            ['必殺技 OVERDRIVE', String(s.stats.overdrives)],
-            // Counts only, never who paid (spec §8.2): how the crew got through the blackouts.
-            [
-              '炉心停止の復旧 BLACKOUTS',
-              `${s.stats.blackouts - s.stats.blackoutsFailed} / ${s.stats.blackouts}`,
-              `仲間 ${s.stats.blackoutsByRoute} · sats ${s.stats.blackoutsByPulse}`,
-            ],
-          ].map(([k, v, sub]) => (
+          {stats.map(([k, v, sub]) => (
             <div key={k} className="stat sw-frame">
               <div className="k">{k}</div>
               <div className="v sw-num">
@@ -74,62 +51,24 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
             </div>
           ))}
         </div>
-        <div className="next">NEXT SORTIE {formatClock(left)} 次の作戦のパイロット募集中</div>
+        <div className="next">
+          NEXT ROUND {formatClock(left)} 次の作戦まで — このまま参加できます
+        </div>
       </div>
       <div className="crew sw-frame">
-        <h3>CREW 搭乗パイロット</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>SEAT</th>
-              <th>PILOT</th>
-              <th>ROLE</th>
-              <th style={{ textAlign: 'right' }}>WORK</th>
-              <th style={{ textAlign: 'right' }}>COMBOS</th>
-              <th style={{ textAlign: 'right' }}>SYNC NOW</th>
-            </tr>
-          </thead>
-          <tbody>
-            {crew.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ color: 'var(--sw-muted)' }}>
-                  AUTO SUPPORT のみ / AUTO SUPPORT only
-                </td>
-              </tr>
-            ) : (
-              crew.map((id) => {
-                const seat = s.seats[id];
-                return (
-                  <tr key={id}>
-                    <td className="sw-num">{String(SEATS[id].no).padStart(2, '0')}</td>
-                    <td>
-                      {seat.displayName}
-                      {seat.bot ? <small style={{ color: 'var(--sw-muted)' }}> BOT</small> : null}
-                    </td>
-                    <td>
-                      {SEATS[id].labelJa}{' '}
-                      <small style={{ color: 'var(--sw-muted)' }}>
-                        {ROLES[SEATS[id].role].labelEn}
-                      </small>
-                    </td>
-                    <td className="num sw-num">
-                      {work(id, seat.stats)} <small>{WORK_LABEL[SEATS[id].role]}</small>
-                    </td>
-                    <td className="num sw-num">{seat.stats.combos}</td>
-                    <td className="num sw-num">{seat.stats.syncs}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+        <h3>次はあなたも / JOIN THE NEXT ROUND</h3>
+        <p className="join-lead">
+          スマホでQRを読むだけ。ボタンは「撃つ・守る・直す」の3つ。
+          <br />
+          タップは無料。21 sats を送ると同じ行動の大きい版になります（任意）。
+        </p>
         {join ? (
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 20 }}>
-            <img src="/api/public/join.svg" width={120} height={120} alt="Join QR" />
-            <div style={{ fontSize: 18 }}>
-              SCAN TO BECOME A PILOT
-              <div style={{ color: 'var(--sw-muted)', fontSize: 14, marginTop: 4 }}>
-                {join.joinUrl}
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', marginTop: 16 }}>
+            <img src="/api/public/join.svg" width={180} height={180} alt="Join QR" />
+            <div style={{ fontSize: 20 }}>
+              SCAN TO JOIN
+              <div style={{ color: 'var(--sw-muted)', fontSize: 15, marginTop: 4 }}>
+                {join.joinUrl.replace(/^https?:\/\//, '')}
               </div>
             </div>
           </div>

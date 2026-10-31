@@ -1,419 +1,339 @@
-import { PRESETS } from '@swed/shared';
-import type { GameConfig, PilotActionInput } from '@swed/shared';
+import { bossHpFor, PRESETS } from '@swed/shared';
+import type { GameConfig, MatchState } from '@swed/shared';
 import { describe, expect, it } from 'vitest';
-import { isRoundOver } from './engine';
-import { recommendTarget } from './hints';
+import { advanceTo, createMatch, isRoundOver, playerCount, reduce } from './engine';
+import type { EngineCommand } from './engine';
+import { recommendAction } from './hints';
 import { toPublicState } from './public';
-import { Sim } from './testkit';
 
-/** Cities and core that cannot fall, for tests about the clock rather than the fight. */
-function sturdy(): GameConfig {
-  const c = structuredClone(PRESETS.TEST);
-  c.cities.lostForDefeat = 99;
-  c.core.max = 1_000_000;
+const T = PRESETS.TEST;
+
+function cfg(patch: (c: GameConfig) => void = () => {}): GameConfig {
+  const c = structuredClone(T);
+  patch(c);
   return c;
 }
 
-const CITY_HP = PRESETS.TEST.cities.hp;
-const LOCK: PilotActionInput = { actionType: 'LOCK', payload: {} };
-const FIRE: PilotActionInput = { actionType: 'FIRE', payload: {} };
-const shield = (dir: 'FRONT' | 'LEFT' | 'RIGHT' | 'REAR'): PilotActionInput => ({
-  actionType: 'DEPLOY_SHIELD',
-  payload: { dir },
-});
+function run(s: MatchState, cmd: EngineCommand) {
+  return reduce(s, cmd);
+}
 
-/* --------------------------------------------------------------- tests */
+/** A match in BATTLE with `n` players (p0..p{n-1}) at t = 0 of the battle. */
+function battle(n = 1, c = cfg()) {
+  let s = createMatch({ matchId: 'm', seed: 7, config: c, autoStart: false });
+  for (let i = 0; i < n; i++)
+    s = run(s, { type: 'PLAYER_JOIN', t: 0, pilotId: `p${i}`, displayName: `P${i}` }).state;
+  s = run(s, { type: 'START', t: 0 }).state;
+  s = run(s, { type: 'SKIP_DEPLOY', t: 0 }).state;
+  return s;
+}
 
-describe('match setup', () => {
-  it('starts in LOBBY with eight empty seats and full integrity', () => {
-    const s = new Sim().state;
+let key = 0;
+function tap(s: MatchState, t: number, kind: 'ATTACK' | 'DEFEND' | 'REPAIR', pilotId = 'p0') {
+  return run(s, { type: 'ACTION', t, pilotId, clientActionId: `k${key++}`, kind });
+}
+
+describe('lobby', () => {
+  it('starts by itself after the first player joins', () => {
+    const c = cfg((x) => (x.timings.lobbyAutoStartMs = 10_000));
+    let s = createMatch({ matchId: 'm', seed: 1, config: c });
+    s = advanceTo(s, 30_000).state;
     expect(s.phase).toBe('LOBBY');
-    expect(Object.values(s.seats).every((x) => x.pilotId === null)).toBe(true);
-    expect(s.coreHp).toBe(1000);
-    expect(Object.values(s.parts).every((hp) => hp === 100)).toBe(true);
+    expect(s.autoStartAt).toBeNull();
+    s = run(s, { type: 'PLAYER_JOIN', t: 30_000, pilotId: 'a', displayName: 'A' }).state;
+    s = advanceTo(s, 30_100).state;
+    expect(s.autoStartAt).toBe(40_050);
+    s = advanceTo(s, 40_200).state;
+    expect(s.phase).toBe('COUNTDOWN');
   });
 
-  it('moves from ATTRACT to LOBBY when the first pilot boards', () => {
-    const sim = new Sim({ attract: true });
-    expect(sim.state.phase).toBe('ATTRACT');
-    sim.join('GUNNER_L');
-    expect(sim.state.phase).toBe('LOBBY');
-    expect(sim.of('seat_assigned')).toHaveLength(1);
-  });
-});
-
-describe('seats', () => {
-  it('rejects seats that are not open yet, taken seats, and seat swaps in combat', () => {
-    // Venues can close stations (e.g. a broken phone stand); all eight are open by default.
-    const config = structuredClone(PRESETS.TEST);
-    config.openSeats = ['GUNNER_L', 'GUNNER_R', 'SHIELD_L', 'SHIELD_R'];
-    const sim = new Sim({ config });
-    const closed = sim.join('POWER_CORE');
-    expect(closed.outcome).toEqual({
-      kind: 'seat',
-      result: { ok: false, reasonCode: 'SEAT_NOT_OPEN' },
-    });
-    sim.join('GUNNER_L', 'alice');
-    const taken = sim.join('GUNNER_L', 'bob');
-    expect(taken.outcome).toEqual({
-      kind: 'seat',
-      result: { ok: false, reasonCode: 'SEAT_TAKEN' },
-    });
-    // Lobby: a pilot may move.
-    const moved = sim.join('SHIELD_L', 'alice');
-    expect(moved.outcome).toEqual({ kind: 'seat', result: { ok: true, seatId: 'SHIELD_L' } });
-    expect(sim.state.seats.GUNNER_L.pilotId).toBeNull();
-    sim.launch();
-    const swap = sim.join('GUNNER_R', 'alice');
-    expect(swap.outcome).toEqual({
-      kind: 'seat',
-      result: { ok: false, reasonCode: 'SEAT_LOCKED' },
-    });
-    // ...but an empty seat may be taken mid-match by a newcomer (late join).
-    const late = sim.join('GUNNER_R', 'carol');
-    expect(late.outcome).toEqual({ kind: 'seat', result: { ok: true, seatId: 'GUNNER_R' } });
+  it('auto start can be switched off by staff', () => {
+    const c = cfg((x) => (x.timings.lobbyAutoStartMs = 1_000));
+    let s = createMatch({ matchId: 'm', seed: 1, config: c });
+    s = run(s, { type: 'SET_AUTO_START', t: 0, enabled: false }).state;
+    s = run(s, { type: 'PLAYER_JOIN', t: 0, pilotId: 'a', displayName: 'A' }).state;
+    s = advanceTo(s, 10_000).state;
+    expect(s.phase).toBe('LOBBY');
   });
 
-  it('holds a disconnected seat for seatHoldMs, then releases it', () => {
-    const sim = new Sim();
-    sim.join('SHIELD_R', 'dana');
-    sim.launch();
-    sim.cmd({ type: 'SEAT_CONNECTION', t: sim.t, pilotId: 'dana', connected: false });
-    sim.wait(30_000);
-    expect(sim.state.seats.SHIELD_R.pilotId).toBe('dana');
-    // Reconnect before the hold ends keeps the seat.
-    sim.join('SHIELD_R', 'dana');
-    expect(sim.state.seats.SHIELD_R.connected).toBe(true);
-    sim.cmd({ type: 'SEAT_CONNECTION', t: sim.t, pilotId: 'dana', connected: false });
-    sim.wait(60_100);
-    expect(sim.state.seats.SHIELD_R.pilotId).toBeNull();
-    expect(sim.of('seat_released').at(-1)?.reason).toBe('TIMEOUT');
+  it('runs countdown → deployment → battle on the clock', () => {
+    let s = createMatch({ matchId: 'm', seed: 1, config: T, autoStart: false });
+    s = run(s, { type: 'START', t: 100 }).state;
+    expect(s.phase).toBe('COUNTDOWN');
+    s = advanceTo(s, 100 + T.timings.countdownMs + T.timings.deploymentMs + 50).state;
+    expect(s.phase).toBe('BATTLE');
+    expect(s.enemies).toHaveLength(1);
+    expect(s.enemies[0]!.kind).toBe('NULL_CORE');
   });
 });
 
-describe('phase flow', () => {
-  it('runs COUNTDOWN → DEPLOYMENT → WAVE_1 → WAVE_2 → BOSS on the server clock', () => {
-    const sim = new Sim({ config: sturdy() });
-    sim.join('GUNNER_L');
-    sim.cmd({ type: 'START', t: 0 });
-    const T = PRESETS.TEST.timings;
-    sim.to(T.countdownMs);
-    expect(sim.state.phase).toBe('DEPLOYMENT');
-    sim.to(T.countdownMs + T.deploymentMs);
-    expect(sim.state.phase).toBe('WAVE_1');
-    sim.to(T.countdownMs + T.deploymentMs + T.wave1Ms);
-    expect(sim.state.phase).toBe('WAVE_2');
-    sim.to(T.countdownMs + T.deploymentMs + T.wave1Ms + T.wave2Ms + 1_500);
-    expect(sim.state.phase).toBe('BOSS');
-    expect(sim.state.enemies.some((e) => e.kind === 'NULL_CORE')).toBe(true);
+describe('players', () => {
+  it('counts everyone who scanned, no seats, no limit', () => {
+    let s = createMatch({ matchId: 'm', seed: 1, config: T });
+    for (let i = 0; i < 120; i++)
+      s = run(s, { type: 'PLAYER_JOIN', t: 0, pilotId: `p${i}`, displayName: 'x' }).state;
+    expect(playerCount(s)).toBe(120);
+    expect(toPublicState(s).players).toBe(120);
   });
 
-  it('refuses pilot actions outside combat (deploy cinematic) and while paused', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.cmd({ type: 'START', t: 0 });
-    expect(sim.act('GUNNER_L', LOCK).reasonCode).toBe('NOT_IN_COMBAT');
-    sim.cmd({ type: 'SKIP_DEPLOY', t: sim.t });
-    sim.cmd({ type: 'PAUSE', t: sim.t });
-    expect(sim.act('GUNNER_L', LOCK).reasonCode).toBe('PAUSED');
-    sim.cmd({ type: 'RESUME', t: sim.t });
-    sim.wait(3_000);
-    expect(sim.act('GUNNER_L', LOCK).accepted).toBe(true);
+  it('keeps a dropped phone counted for a while, then not', () => {
+    let s = battle(2);
+    const t0 = s.t;
+    s = run(s, { type: 'PLAYER_CONNECTION', t: t0, pilotId: 'p1', connected: false }).state;
+    expect(playerCount(s)).toBe(2);
+    s = advanceTo(s, t0 + T.timings.playerHoldMs + 100).state;
+    expect(playerCount(s)).toBe(1);
   });
 
-  it('ends in DEFEAT/TIME_UP when nobody fights, then plays RESULTS and signals round over', () => {
-    const sim = new Sim();
-    sim.launch();
-    const T = PRESETS.TEST.timings;
-    sim.wait(T.wave1Ms + T.wave2Ms + T.bossMs + 100);
-    expect(sim.state.phase === 'DEFEAT' || sim.state.phase === 'RESULTS').toBe(true);
-    expect(sim.state.result?.outcome).toBe('DEFEAT');
-    sim.wait(T.defeatMs + T.resultsMs + 100);
-    expect(isRoundOver(sim.state)).toBe(true);
+  it('sizes the boss by the crowd at launch, and grows it for latecomers', () => {
+    let s = battle(3);
+    const boss = s.enemies[0]!;
+    expect(boss.maxHp).toBe(bossHpFor(T, 3));
+    s = run(s, { type: 'PLAYER_JOIN', t: s.t, pilotId: 'late', displayName: 'L' }).state;
+    expect(s.enemies[0]!.maxHp).toBe(bossHpFor(T, 4));
+    expect(s.enemies[0]!.hp).toBe(s.enemies[0]!.maxHp);
+  });
+
+  it('never shows pilot ids to clients', () => {
+    const s = battle(2);
+    expect(JSON.stringify(toPublicState(s))).not.toContain('p1');
   });
 });
 
-describe('gunner', () => {
-  it('LOCK → CHARGE → FIRE lowers the enemy HP on the server, then cools down', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.launch();
-    sim.wait(2_600); // first drones have arrived
-    expect(sim.act('GUNNER_L', LOCK).accepted).toBe(true);
-    const targetId = sim.state.gunners.GUNNER_L.targetId!;
-    const before = sim.state.enemies.find((e) => e.id === targetId)!.hp;
-    expect(sim.act('GUNNER_L', FIRE).reasonCode).toBe('CHARGING');
-    sim.wait(1_500);
-    expect(sim.of('weapon_charged')).toHaveLength(1);
-    expect(sim.act('GUNNER_L', FIRE).accepted).toBe(true);
-    const fired = sim.of('weapon_fired')[0]!;
-    expect(fired.damage).toBeGreaterThan(0);
-    const after = sim.state.enemies.find((e) => e.id === targetId)?.hp ?? 0;
-    expect(after).toBe(Math.max(0, before - fired.damage));
-    // Whatever is locked next, the cannon must cool down first.
-    if (!sim.state.gunners.GUNNER_L.targetId) sim.act('GUNNER_L', LOCK);
-    expect(sim.act('GUNNER_L', FIRE).reasonCode).toBe('COOLDOWN');
+describe('free actions', () => {
+  it('ATTACK damages the boss, DEFEND fills the shield, REPAIR fixes armour', () => {
+    let s = battle(1);
+    const hp = s.enemies[0]!.hp;
+    s = tap(s, s.t, 'ATTACK').state;
+    expect(s.enemies[0]!.hp).toBe(hp - T.free.effect.ATTACK);
+    s = tap(s, s.t + T.free.cooldownMs, 'DEFEND').state;
+    expect(s.shield).toBe(T.free.effect.DEFEND);
+    s.mechHp = 50;
+    s = tap(s, s.t + T.free.cooldownMs, 'REPAIR').state;
+    expect(s.mechHp).toBe(50 + T.free.effect.REPAIR);
   });
 
-  it("GUNNER_R's lock exposes a weak point that boosts every gun", () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.join('GUNNER_R');
-    sim.launch();
-    sim.wait(2_600);
-    const target = recommendTarget(sim.state.enemies, sim.state.threats, sim.t)!;
-    // Give the target armour so it survives both shots.
-    sim.state = {
-      ...sim.state,
-      enemies: sim.state.enemies.map((e) =>
-        e.id === target.id ? { ...e, hp: 900, maxHp: 900 } : e,
-      ),
+  it('has a per-person cooldown, so mashing does not multiply', () => {
+    let s = battle(1);
+    let r = tap(s, s.t, 'ATTACK');
+    s = r.state;
+    r = tap(s, s.t + 100, 'ATTACK');
+    expect(r.outcome).toMatchObject({
+      kind: 'action',
+      result: { accepted: false, reasonCode: 'COOLDOWN' },
+    });
+    r = tap(r.state, s.t + T.free.cooldownMs, 'ATTACK');
+    expect(r.outcome).toMatchObject({ kind: 'action', result: { accepted: true } });
+  });
+
+  it('is idempotent per clientActionId', () => {
+    let s = battle(1);
+    const cmd = {
+      type: 'ACTION' as const,
+      t: s.t,
+      pilotId: 'p0',
+      clientActionId: 'same-key',
+      kind: 'ATTACK' as const,
     };
-    sim.act('GUNNER_L', { actionType: 'LOCK', payload: { targetId: target.id } });
-    sim.wait(1_500);
-    sim.act('GUNNER_L', FIRE);
-    const plain = sim.of('weapon_fired')[0]!;
-    expect(plain.weak).toBe(false);
-    sim.act('GUNNER_R', { actionType: 'LOCK', payload: { targetId: target.id } });
-    expect(sim.of('target_locked').at(-1)?.weakPoint).toBe(true);
-    sim.wait(3_100);
-    expect(sim.act('GUNNER_L', FIRE).accepted).toBe(true);
-    const boosted = sim.of('weapon_fired').at(-1)!;
-    expect(boosted.weak).toBe(true);
-    expect(boosted.damage).toBeGreaterThan(plain.damage);
+    s = run(s, cmd).state;
+    const hp = s.enemies[0]!.hp;
+    const again = run(s, { ...cmd, t: s.t + 5_000 });
+    expect(again.state.enemies[0]!.hp).toBe(hp);
+    expect(again.outcome).toMatchObject({ kind: 'action', result: { accepted: true } });
   });
 
-  it('is idempotent per clientActionId and only obeys the seat owner', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L', 'alice');
-    sim.join('SHIELD_L', 'bob');
-    sim.launch();
-    sim.wait(2_600);
-    sim.act('GUNNER_L', LOCK, 'alice');
-    sim.wait(1_500);
-    const first = sim.act('GUNNER_L', FIRE, 'alice', 'retry-key-0001');
-    const shots = sim.of('weapon_fired').length;
-    const again = sim.act('GUNNER_L', FIRE, 'alice', 'retry-key-0001');
-    expect(first.accepted).toBe(true);
-    expect(again.accepted).toBe(true);
-    expect(sim.of('weapon_fired').length).toBe(shots); // no second shot
-    expect(sim.act('GUNNER_L', FIRE, 'bob').reasonCode).toBe('NOT_YOUR_SEAT');
-    expect(sim.act('SHIELD_L', FIRE, 'bob').reasonCode).toBe('WRONG_ROLE');
-  });
-
-  it('refuses to fire without weapon energy', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.launch();
-    sim.wait(2_600);
-    sim.act('GUNNER_L', LOCK);
-    sim.wait(1_500);
-    sim.state = { ...sim.state, energy: { ...sim.state.energy, weapon: 3 } };
-    expect(sim.act('GUNNER_L', FIRE).reasonCode).toBe('NO_ENERGY');
-  });
-});
-
-describe('shields', () => {
-  /** WAVE_1 scripts a FRONT attack on TOKYO (SHIELD_L) and a RIGHT attack on OSAKA (SHIELD_R). */
-  function firstThreat(sim: Sim) {
-    for (let i = 0; i < 200 && sim.state.threats.length === 0; i++) sim.wait(100);
-    const th = sim.state.threats[0];
-    if (!th) throw new Error('no threat');
-    return th;
-  }
-
-  it('telegraphs at least 4 s ahead; a timely shield blocks it and spares the city', () => {
-    const sim = new Sim();
-    sim.join('SHIELD_L');
-    sim.launch();
-    const th = firstThreat(sim);
-    expect(th.dir).toBe('FRONT');
-    expect(th.target).toEqual({ type: 'CITY', cityId: 'TOKYO' });
-    expect(th.impactAt - th.warnAt).toBeGreaterThanOrEqual(4_000);
-    sim.to(th.impactAt - 800);
-    expect(sim.act('SHIELD_L', shield('FRONT')).accepted).toBe(true);
-    sim.to(th.impactAt + 100);
-    const blocked = sim.of('threat_blocked')[0]!;
-    expect(blocked).toMatchObject({
-      threatId: th.id,
-      seatId: 'SHIELD_L',
-      perfect: true,
-      auto: false,
+  it('refuses outside the battle, while paused, and for strangers', () => {
+    let s = createMatch({ matchId: 'm', seed: 1, config: T, autoStart: false });
+    s = run(s, { type: 'PLAYER_JOIN', t: 0, pilotId: 'p0', displayName: 'x' }).state;
+    expect(tap(s, 0, 'ATTACK').outcome).toMatchObject({ result: { reasonCode: 'NOT_IN_COMBAT' } });
+    s = battle(1);
+    expect(tap(s, s.t, 'ATTACK', 'nobody').outcome).toMatchObject({
+      result: { reasonCode: 'NOT_JOINED' },
     });
-    expect(sim.state.cities.TOKYO.hp).toBe(CITY_HP);
-    expect(sim.of('incoming_hit')).toHaveLength(0);
+    s = run(s, { type: 'PAUSE', t: s.t }).state;
+    expect(tap(s, s.t, 'ATTACK').outcome).toMatchObject({ result: { reasonCode: 'PAUSED' } });
   });
 
-  it('an unguarded strike damages the city and core', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.launch();
-    const th = firstThreat(sim);
-    sim.to(th.impactAt + 100);
-    expect(sim.of('incoming_hit')).toHaveLength(1);
-    expect(sim.state.cities.TOKYO.hp).toBeLessThan(CITY_HP);
-    expect(sim.state.coreHp).toBeLessThan(1000);
-  });
-
-  it('a shield aimed the wrong way, or outside the seat sector, does not help', () => {
-    const sim = new Sim();
-    sim.join('SHIELD_L');
-    sim.launch();
-    const th = firstThreat(sim);
-    expect(sim.act('SHIELD_L', shield('RIGHT')).reasonCode).toBe('BAD_DIRECTION');
-    sim.to(th.impactAt - 800);
-    sim.act('SHIELD_L', shield('LEFT'));
-    expect(sim.act('SHIELD_L', shield('FRONT')).reasonCode).toBe('COOLDOWN');
-    sim.to(th.impactAt + 100);
-    expect(sim.of('threat_blocked')).toHaveLength(0);
-    expect(sim.of('incoming_hit')).toHaveLength(1);
-  });
-
-  it('killing the attacker before impact intercepts the strike', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.launch();
-    const th = firstThreat(sim);
-    const src = sim.state.enemies.find((e) => e.id === th.sourceId)!;
-    sim.act('GUNNER_L', { actionType: 'LOCK', payload: { targetId: src.id } });
-    for (let i = 0; i < 6 && sim.state.enemies.some((e) => e.id === src.id); i++) {
-      sim.wait(3_050);
-      sim.act('GUNNER_L', FIRE);
+  it('reaches screens as a few aggregated events, not one per tap', () => {
+    let s = battle(30);
+    const events = [];
+    for (let i = 0; i < 30; i++) {
+      const r = tap(s, s.t + 10, 'ATTACK', `p${i}`);
+      s = r.state;
+      events.push(...r.events);
     }
-    expect(sim.t).toBeLessThan(th.impactAt);
-    expect(sim.of('threat_intercepted').map((x) => x.threatId)).toContain(th.id);
-    sim.to(th.impactAt + 100);
-    expect(sim.state.cities.TOKYO.hp).toBe(CITY_HP);
-  });
-
-  it('AUTO SUPPORT half-blocks for an empty shield seat, and says so', () => {
-    const sim = new Sim({ autoSupport: true });
-    sim.join('GUNNER_L');
-    sim.launch();
-    const th = firstThreat(sim);
-    sim.to(th.impactAt + 100);
-    const blocked = sim.of('threat_blocked')[0]!;
-    expect(blocked.auto).toBe(true);
-    expect(blocked.ratio).toBe(0.5);
-    expect(sim.state.cities.TOKYO.hp).toBe(CITY_HP - Math.round(th.damage * 0.5));
+    const r = advanceTo(s, s.t + 400);
+    events.push(...r.events);
+    const actions = events.filter((e) => e.type === 'action');
+    expect(actions.length).toBeLessThanOrEqual(2);
+    expect(actions.reduce((a, e) => a + (e.type === 'action' ? e.count : 0), 0)).toBe(30);
   });
 });
 
-describe('cooperation', () => {
-  it('a gun hit and a shield block within the window form a LINK combo', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L');
-    sim.join('SHIELD_L');
-    sim.launch();
-    let th = sim.state.threats[0];
-    while (!th) {
-      sim.wait(100);
-      th = sim.state.threats[0];
-    }
-    sim.to(th.impactAt - 2_500);
-    const other = sim.state.enemies.find((e) => e.id !== th!.sourceId && e.arrivesAt <= sim.t)!;
-    sim.act('GUNNER_L', { actionType: 'LOCK', payload: { targetId: other.id } });
-    sim.wait(1_450);
-    expect(sim.act('GUNNER_L', FIRE).accepted).toBe(true);
-    sim.to(th.impactAt - 600);
-    sim.act('SHIELD_L', shield('FRONT'));
-    sim.to(th.impactAt + 50);
-    const combo = sim.of('team_combo')[0];
-    expect(combo?.roles.sort()).toEqual(['DEFENSE', 'GUNNER']);
-    expect(sim.state.teamSync).toBeGreaterThan(0);
-    expect(sim.state.teamCapacitor).toBeGreaterThan(0);
-  });
-});
-
-describe('victory', () => {
-  it('destroying NULL CORE wins, clears the swarm and rolls to RESULTS', () => {
-    const sim = new Sim({ config: sturdy() });
-    sim.join('GUNNER_L');
-    sim.launch();
-    const T = PRESETS.TEST.timings;
-    sim.wait(T.wave1Ms + T.wave2Ms + 6_000);
-    const boss = sim.state.enemies.find((e) => e.kind === 'NULL_CORE')!;
-    expect(boss).toBeTruthy();
-    sim.state = {
-      ...sim.state,
-      enemies: sim.state.enemies.map((e) => (e.id === boss.id ? { ...e, hp: 5 } : e)),
-      energy: { ...sim.state.energy, weapon: 100 },
+describe('Lightning actions', () => {
+  it('apply once per payment intent, with the big effect', () => {
+    let s = battle(1);
+    const hp = s.enemies[0]!.hp;
+    const pay = {
+      type: 'PAID_ACTION' as const,
+      t: s.t,
+      intentId: 'pi_1',
+      pilotId: 'p0',
+      kind: 'ATTACK' as const,
+      virtual: true,
+      settleMs: null,
     };
-    sim.act('GUNNER_L', { actionType: 'LOCK', payload: { targetId: boss.id } });
-    sim.wait(3_100);
-    expect(sim.act('GUNNER_L', FIRE).accepted).toBe(true);
-    expect(sim.state.result).toMatchObject({ outcome: 'VICTORY', reason: 'BOSS_DESTROYED' });
-    expect(sim.state.phase).toBe('VICTORY');
-    expect(sim.state.enemies).toHaveLength(0);
-    sim.wait(T.victoryMs + 10);
-    expect(sim.state.phase).toBe('RESULTS');
+    let r = run(s, pay);
+    expect(r.outcome).toEqual({ kind: 'control', ok: true });
+    const big = hp - r.state.enemies[0]!.hp;
+    expect(big).toBeGreaterThanOrEqual(T.paid.effect.ATTACK);
+    expect(big).toBeGreaterThan(T.free.effect.ATTACK * 5);
+    r = run(r.state, { ...pay, t: r.state.t + 1 });
+    expect(r.outcome).toEqual({ kind: 'control', ok: false });
+    expect(r.state.stats.lightning).toBe(1);
+    s = r.state;
+    const ev = run(s, { ...pay, intentId: 'pi_2', kind: 'DEFEND', t: s.t }).events.find(
+      (e) => e.type === 'action',
+    );
+    expect(ev).toMatchObject({ paid: true, virtual: true, count: 1, value: T.paid.effect.DEFEND });
+  });
+
+  it('are refused once the battle is over (the server records them unapplied)', () => {
+    const s = createMatch({ matchId: 'm', seed: 1, config: T, autoStart: false });
+    const r = run(s, {
+      type: 'PAID_ACTION',
+      t: 0,
+      intentId: 'pi_x',
+      pilotId: null,
+      kind: 'ATTACK',
+      virtual: true,
+      settleMs: null,
+    });
+    expect(r.outcome).toEqual({ kind: 'control', ok: false });
+  });
+
+  it('a 21 sats attack is a visible share of the boss in any crowd', () => {
+    for (const n of [1, 10, 60]) {
+      const s = battle(n);
+      const hp = s.enemies[0]!.hp;
+      const r = run(s, {
+        type: 'PAID_ACTION',
+        t: s.t,
+        intentId: `pi${n}`,
+        pilotId: 'p0',
+        kind: 'ATTACK',
+        virtual: true,
+        settleMs: null,
+      });
+      expect((hp - r.state.enemies[0]!.hp) / s.enemies[0]!.maxHp).toBeGreaterThanOrEqual(0.049);
+    }
+  });
+
+  it('the match cap means money alone can never finish the boss', () => {
+    const s = battle(40, cfg());
+    const share = Math.max(T.paid.attackBossShare, T.paid.effect.ATTACK / s.enemies[0]!.maxHp);
+    expect(share * T.paid.maxPerMatch).toBeLessThan(1);
   });
 });
 
-describe('determinism', () => {
-  function script(seed: number) {
-    const sim = new Sim({ seed, autoSupport: true });
-    sim.join('GUNNER_L');
-    sim.join('SHIELD_L');
-    sim.launch();
-    for (let i = 0; i < 60; i++) {
-      sim.wait(997);
-      sim.act('GUNNER_L', i % 3 === 0 ? LOCK : FIRE);
-      if (i % 5 === 0) sim.act('SHIELD_L', shield(i % 10 === 0 ? 'FRONT' : 'LEFT'));
-    }
-    return sim;
-  }
-
-  it('replays the same command log to the same state and events', () => {
-    const a = script(7);
-    const b = script(7);
-    expect(JSON.stringify(a.state)).toBe(JSON.stringify(b.state));
-    expect(JSON.stringify(a.events)).toBe(JSON.stringify(b.events));
-    const c = script(8);
-    expect(JSON.stringify(c.state)).not.toBe(JSON.stringify(a.state));
+describe('strikes and claws', () => {
+  it('announces a city strike ahead and blocks it with enough shield', () => {
+    let s = battle(1);
+    const t0 = s.t;
+    s = advanceTo(s, t0 + T.strikes.firstAtMs + 50).state;
+    const th = s.threats.find((x) => x.target.type === 'CITY')!;
+    expect(th.impactAt - th.warnAt).toBe(T.strikes.warnMs);
+    s.shield = 100;
+    const r = advanceTo(s, th.impactAt + 50);
+    expect(r.events.some((e) => e.type === 'strike_blocked')).toBe(true);
+    expect(Object.values(r.state.cities).every((c) => !c.lost)).toBe(true);
   });
 
-  it('gives the same result whether the server ticks every 50 ms or irregularly', () => {
-    const steady = new Sim();
-    const jitter = new Sim();
-    for (const sim of [steady, jitter]) sim.launch();
-    for (let t = 50; t <= 30_000; t += 50) steady.to(t);
-    let t = 0;
-    let k = 0;
-    while (t < 30_000) {
-      t = Math.min(30_000, t + 13 + ((k++ * 37) % 140));
-      jitter.to(t);
-    }
-    expect(JSON.stringify(jitter.state.enemies)).toBe(JSON.stringify(steady.state.enemies));
-    expect(jitter.state.coreHp).toBe(steady.state.coreHp);
-    expect(jitter.events.map((e) => e.type)).toEqual(steady.events.map((e) => e.type));
+  it('loses the city without shield, and the match after enough cities', () => {
+    let s = battle(
+      1,
+      cfg((c) => {
+        c.strikes.everyMs = c.strikes.warnMs + 100;
+        c.mech.hitFirstAtMs = 999_999;
+      }),
+    );
+    s = advanceTo(s, s.t + 200_000).state;
+    expect(s.result).toMatchObject({ outcome: 'DEFEAT', reason: 'CITIES_LOST' });
+    expect(Object.values(s.cities).filter((c) => c.lost)).toHaveLength(T.strikes.lostForDefeat);
   });
 
-  it('keeps event seq strictly increasing', () => {
-    const sim = script(3);
-    const seqs = sim.events.map((e) => e.seq);
-    for (let i = 1; i < seqs.length; i++) expect(seqs[i]).toBe(seqs[i - 1]! + 1);
+  it('claws hurt RAIJIN; no repairs → MECH_DESTROYED', () => {
+    let s = battle(
+      1,
+      cfg((c) => {
+        c.strikes.firstAtMs = 999_999;
+        c.mech.hitEveryMs = 3_500;
+        c.timings.battleMs = 999_999;
+      }),
+    );
+    s = advanceTo(s, s.t + 200_000).state;
+    expect(s.result).toMatchObject({ outcome: 'DEFEAT', reason: 'MECH_DESTROYED' });
+  });
+
+  it('runs out of time without enough attacks', () => {
+    let s = battle(
+      1,
+      cfg((c) => {
+        c.strikes.firstAtMs = 999_999;
+        c.mech.hitFirstAtMs = 999_999;
+      }),
+    );
+    s = advanceTo(s, s.t + T.timings.battleMs + 100).state;
+    expect(s.result).toMatchObject({ outcome: 'DEFEAT', reason: 'TIME_UP' });
   });
 });
 
-describe('public state', () => {
-  it('never exposes pilot ids or the RNG', () => {
-    const sim = new Sim();
-    sim.join('GUNNER_L', 'secret-pilot-uuid');
-    const pub = toPublicState(sim.state);
-    const json = JSON.stringify(pub);
-    expect(json).not.toContain('secret-pilot-uuid');
-    expect(json).not.toContain('"rng"');
-    expect(json).not.toContain('actionLog');
-    expect(pub.seats.GUNNER_L).toMatchObject({ occupied: true, auto: false, open: true });
-    expect(pub.seats.POWER_CORE).toMatchObject({ occupied: false, open: true, bot: false });
+describe('victory and round flow', () => {
+  it('destroying the boss wins, then results, then the round is over', () => {
+    let s = battle(1);
+    s.enemies[0]!.hp = 3;
+    const r = tap(s, s.t, 'ATTACK');
+    expect(r.state.result).toMatchObject({ outcome: 'VICTORY', reason: 'BOSS_DESTROYED' });
+    expect(r.events.map((e) => e.type)).toContain('boss_destroyed');
+    s = advanceTo(r.state, r.state.t + T.timings.victoryMs + T.timings.resultsMs + 200).state;
+    expect(isRoundOver(s)).toBe(true);
   });
 
-  it('reports the total combat clock across waves', () => {
-    const sim = new Sim();
-    sim.launch();
-    const pub = toPublicState(sim.state);
-    const T = PRESETS.TEST.timings;
-    expect(pub.combatEndsAt).toBe(sim.t + T.wave1Ms + T.wave2Ms + T.bossMs);
+  it('pause stops the clock and the attacks', () => {
+    let s = battle(1);
+    s = run(s, { type: 'PAUSE', t: s.t }).state;
+    const ends = s.phaseEndsAt;
+    s = advanceTo(s, s.t + 60_000).state;
+    expect(s.threats).toHaveLength(0);
+    expect(s.phaseEndsAt).toBe(ends);
+  });
+
+  it('is deterministic for a seed', () => {
+    const play = () => {
+      let s = battle(3);
+      const t0 = s.t;
+      for (let t = t0; t < t0 + 30_000; t += 500) {
+        s = advanceTo(s, t).state;
+        s = tap(s, t, recommendAction(toPublicState(s)), `p${((t - t0) / 500) % 3}`).state;
+      }
+      return JSON.stringify({ e: s.enemies, th: s.threats, c: s.cities, m: s.mechHp });
+    };
+    key = 0;
+    const a = play();
+    key = 0;
+    expect(play()).toBe(a);
+  });
+});
+
+describe('recommendation', () => {
+  it('says DEFEND when a strike is coming and the shield is short, else ATTACK', () => {
+    let s = battle(1);
+    expect(recommendAction(toPublicState(s))).toBe('ATTACK');
+    s = advanceTo(s, s.t + T.strikes.firstAtMs + 50).state;
+    expect(recommendAction(toPublicState(s))).toBe('DEFEND');
+    s.shield = 100;
+    expect(recommendAction(toPublicState(s))).toBe('ATTACK');
+    s.mechHp = 40;
+    expect(recommendAction(toPublicState(s))).toBe('REPAIR');
   });
 });
