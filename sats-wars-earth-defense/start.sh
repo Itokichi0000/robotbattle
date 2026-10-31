@@ -88,7 +88,7 @@ if port_busy; then
   # Only our own server answers /health with its sandbox/live mode; anything else is left alone.
   if node -e "fetch('http://127.0.0.1:$PORT/health').then(r=>r.json()).then(j=>process.exit(j&&j.mode?0:1),()=>process.exit(1))" 2>/dev/null &&
     command -v lsof >/dev/null 2>&1; then
-    say "前に起動したゲームがまだ動いていたので止めます（ポート $PORT）"
+    say "前に起動したゲームがまだ動いていたので止めます（ポート ${PORT}）"
     for pid in $(lsof -ti "tcp:$PORT" -sTCP:LISTEN); do kill "$pid" 2>/dev/null || true; done
     for _ in $(seq 1 20); do
       port_busy || break
@@ -136,7 +136,7 @@ cat <<EOF
 
   ================================================================
    SATS WARS: EARTH DEFENSE を起動しました（SANDBOX・お金は動きません）
-   バージョン  $VERSION（$VERSION_DATE）
+   バージョン  ${VERSION}（${VERSION_DATE}）
 
    大画面     http://localhost:$PORT/display/
    運営       http://localhost:$PORT/operator/
