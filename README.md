@@ -1,5 +1,9 @@
 # SATS WARS: EARTH DEFENSE（地球防衛作戦）
 
+> **新しいゲーム（ONE MECH. EIGHT PILOTS.）の起動はこれだけ：** リポジトリ直下で `./start.sh`
+> （Node.js 22 があれば、依存の導入・ビルド・起動・ブラウザを開くまで自動）。詳細は
+> [`sats-wars-earth-defense/README.md`](sats-wars-earth-defense/README.md)。以下はルート直下の旧実装の説明です。
+
 > **君も地球防衛軍のパイロットになろう。仲間と巨大機神を操縦して地球を守れ！**
 
 日本のビットコインカンファレンス会場の大画面に投影し、通りがかった人がスマホで参加する **8分間の協力レイド**。

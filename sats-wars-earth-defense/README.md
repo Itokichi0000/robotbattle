@@ -13,6 +13,37 @@
 
 ## すぐに動かす（鍵・外部サービス不要の sandbox）
 
+**コマンドは1つだけ**（Mac / Linux。リポジトリ直下でも、このフォルダでも同じ）：
+
+```bash
+./start.sh
+```
+
+これで次をすべて自動で行い、大画面と運営画面をブラウザで開きます。止めるときはそのターミナルで Ctrl+C。
+
+1. Node.js 22.13 以上を確認（なければ Mac は Homebrew で入れるか聞きます）
+2. pnpm がなくても Node 付属の corepack で動かす（グローバルに何も入れない）
+3. 依存パッケージを導入（初回だけ。ロックファイルが変わったときも）
+4. 運営パスワードを作って `.env` に保存（初回だけ。以後は同じパスワード）
+5. ビルド（コードが変わったときだけ。変わっていなければ数秒で起動）
+6. サーバーを起動して、URL と運営パスワードを表示
+
+最初にリポジトリを取ってくるところから：
+
+```bash
+git clone https://github.com/Itokichi0000/robotbattle.git
+```
+
+```bash
+cd robotbattle && git checkout claude/new-session-ik9unw && ./start.sh
+```
+
+すぐ遊ぶには：運営画面にログイン → 「DEMO BOTS」をオン → 「START 出撃」。スマホは PC と同じ Wi-Fi で大画面の QR を読み取ります。
+ポートを変えるときは `PORT=4500 ./start.sh`、ブラウザを開かないときは `./start.sh --no-open`。
+常に sandbox（VIRTUAL パルスのみ・お金は動かない）で起動します。
+
+### 手動で起動する場合（開発用）
+
 ```bash
 pnpm install
 ```
