@@ -19,17 +19,16 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
   const defended = SQUAD_IDS.filter((id) => !s.squads[id].lost).length;
   const left = s.phaseEndsAt !== null ? s.phaseEndsAt - mt : 0;
   const f = s.stats.free;
-  const p = s.stats.paid;
   const stats: Array<[string, string, string?]> = [
     ['残った部隊 SQUADS', `${defended} / ${SQUAD_IDS.length}`],
-    ['参加 PLAYERS', String(s.stats.peakPlayers)],
-    ['撃つ ATTACK', String(f.ATTACK + p.ATTACK), `ダメージ ${s.stats.damageToBoss}`],
-    ['守る DEFEND', String(f.DEFEND + p.DEFEND), `防いだ攻撃 ${s.stats.strikesBlocked}`],
-    ['直す REPAIR', String(f.REPAIR + p.REPAIR), `回復 ${s.stats.repaired}`],
+    ['参加 PLAYERS', String(s.stats.peakPlayers), `発進スワイプ ${s.stats.launched}人`],
+    ['砲撃班 GUNNERS', String(f.ATTACK), `ダメージ ${s.stats.damageToBoss}`],
+    ['防衛班 GUARDS', String(f.DEFEND), `防いだ攻撃 ${s.stats.strikesBlocked}`],
+    ['整備班 ENGINEERS', String(f.REPAIR), `回復 ${s.stats.repaired}`],
     [
-      'Lightning の一撃',
+      '雷を呼んだ回数',
       String(s.stats.lightning),
-      s.stats.virtual > 0 ? `うち VIRTUAL ${s.stats.virtual}` : undefined,
+      `弱点に直撃 ${s.stats.boltHits}/${s.stats.bolts}${s.stats.virtual > 0 ? `・うち VIRTUAL ${s.stats.virtual}` : ''}`,
     ],
   ];
   return (

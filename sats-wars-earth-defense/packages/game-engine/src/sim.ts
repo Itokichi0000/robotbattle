@@ -1,6 +1,7 @@
+import { boltTargetAt } from '@swed/shared';
 import type { GameConfig, MatchState } from '@swed/shared';
 import { botChoose } from './bots';
-import { advanceTo, createMatch, reduce } from './engine';
+import { advanceTo, createMatch, jobsOf, reduce } from './engine';
 import { toPublicState } from './public';
 import { nextRandom } from './rng';
 
@@ -9,8 +10,10 @@ export interface SimOptions {
   skill?: number;
   /** Mean time between one player's taps (ms); people tap slower than the cooldown allows. */
   tapEveryMs?: number;
-  /** Lightning actions each player sends during the fight (0 = free play only). */
+  /** Lightning payments each player sends during the fight (0 = free play only). */
   paidPerPlayer?: number;
+  /** Swipe up for the group launch (D-035). */
+  launch?: boolean;
 }
 
 /**
@@ -33,6 +36,8 @@ export function playMatch(
     s = reduce(s, { type: 'PLAYER_JOIN', t: 0, pilotId: id, displayName: id }).state;
   }
   s = reduce(s, { type: 'START', t: 0 }).state;
+  if (opts.launch ?? true)
+    for (const id of ids) s = reduce(s, { type: 'LAUNCH_PUSH', t: 0, pilotId: id }).state;
   s = reduce(s, { type: 'SKIP_DEPLOY', t: 0 }).state;
   const start = s.t;
   const nextTap = new Map(ids.map((id) => [id, start + nextRandom(rng) * tapEvery]));
@@ -49,19 +54,32 @@ export function playMatch(
     for (const id of ids) {
       if ((nextTap.get(id) ?? 0) > t) continue;
       nextTap.set(id, t + tapEvery * (0.6 + nextRandom(rng) * 0.8));
-      const kind = botChoose(pub, nextRandom(rng), skill);
+      const kind = botChoose(pub, nextRandom(rng), skill, jobsOf(s, id, t));
       s = reduce(s, { type: 'ACTION', t, pilotId: id, clientActionId: `a${n++}`, kind }).state;
     }
     for (const p of paidAt) {
       if (p.at > t || p.at <= t - 100) continue;
       s = reduce(s, {
-        type: 'PAID_ACTION',
+        type: 'LIGHTNING',
         t,
         intentId: `pi-${p.id}-${p.at}`,
         pilotId: p.id,
-        kind: botChoose(toPublicState(s), 0, 1),
         virtual: true,
         settleMs: null,
+      }).state;
+    }
+    // Payers throw their bolt about 1.5 s later; a skilled one hits the weak point.
+    for (const b of s.bolts) {
+      if (!b.pilotId || t < b.startedAt + 1_500) continue;
+      const aim = nextRandom(rng) < skill ? boltTargetAt(b.id, t - b.startedAt) : { x: 0, y: 0 };
+      s = reduce(s, {
+        type: 'BOLT_THROW',
+        t,
+        pilotId: b.pilotId,
+        boltId: b.id,
+        x: aim.x,
+        y: aim.y,
+        at: t,
       }).state;
     }
   }

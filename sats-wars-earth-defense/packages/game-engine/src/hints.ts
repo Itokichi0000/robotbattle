@@ -42,6 +42,26 @@ export function recommendAction(s: HintState, mt = s.t): ActionKind {
   return 'ATTACK';
 }
 
+/**
+ * Which screen a phone shows right now (D-035), given the jobs it may do (its team first,
+ * then any team nobody is in). An urgent job it can do comes first; a guard keeps the shield
+ * up while a strike is announced, an engineer keeps RAIJIN topped up; a shared job is picked
+ * up before it turns urgent; otherwise everyone shoots at the mothership.
+ */
+export function phoneJob(s: HintState, mt: number, jobs: readonly ActionKind[]): ActionKind {
+  const rec = recommendAction(s, mt);
+  if (rec !== 'ATTACK' && jobs.includes(rec)) return rec;
+  const own = jobs[0];
+  const strike = squadStrike(s);
+  const guardWork = !!strike && s.shield < strike.damage + 10;
+  if (own === 'DEFEND' && guardWork) return 'DEFEND';
+  if (own === 'REPAIR' && s.mechHp < s.mechMax) return 'REPAIR';
+  // A team nobody is in: whoever shares it picks it up before it turns urgent.
+  if (jobs.includes('DEFEND') && guardWork) return 'DEFEND';
+  if (jobs.includes('REPAIR') && s.mechHp < s.mechMax * 0.65) return 'REPAIR';
+  return 'ATTACK';
+}
+
 export interface NowLine {
   action: ActionKind;
   /** Short reason, Japanese first. */
@@ -58,21 +78,21 @@ export function nowLine(s: HintState, mt: number): NowLine {
     const secs = Math.max(0, (strike.impactAt - mt) / 1000).toFixed(0);
     return {
       action,
-      ja: `${squad.nameJa}に攻撃まで ${secs}秒 → 「守る」でシールドを ${strike.damage} まで`,
-      en: `${squad.nameEn} hit in ${secs}s → DEFEND: shield to ${strike.damage}`,
+      ja: `防衛班！ ${squad.nameJa}にミサイル ${secs}秒 → シールドを ${strike.damage} まで`,
+      en: `GUARDS! Missiles at ${squad.nameEn} in ${secs}s → shield to ${strike.damage}`,
     };
   }
   if (action === 'REPAIR') {
     return {
       action,
-      ja: '雷神の装甲が危ない → 「直す」',
-      en: 'RAIJIN armour low → REPAIR',
+      ja: '整備班！ 雷神の装甲が危ない → 火花を直せ',
+      en: 'ENGINEERS! RAIJIN armour low → fix the sparks',
     };
   }
   return {
     action,
-    ja: '母艦を「撃つ」！ 地球に着く前に倒せ',
-    en: 'ATTACK the mothership before it reaches Earth',
+    ja: '砲撃班！ 母艦を撃て — 地球に着く前に倒せ',
+    en: 'GUNNERS! Shoot the mothership before it reaches Earth',
   };
 }
 

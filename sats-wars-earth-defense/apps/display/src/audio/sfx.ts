@@ -140,19 +140,30 @@ class Sfx {
   onEvent(e: MatchEvent): void {
     if (!this.ready) return;
     switch (e.type) {
-      case 'action':
-        if (e.paid) {
-          // Lightning action: crack + rolling thunder, then a bright chime.
-          this.hiss('highpass', 9000, 2500, 0.5, 0.002, 0.25);
-          this.tone('sine', 55, 30, 0.8, 0.02, 1.6, 0.05);
-          this.hiss('lowpass', 900, 80, 0.45, 0.05, 1.8, 0.05);
-          this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
-          [784, 1046.5, 1318.5].forEach((f, i) =>
-            this.tone('sine', f, f, 0.06, 0.01, 0.8, 0.6 + i * 0.09),
+      case 'lightning':
+        // Lightning: crack + rolling thunder, then a bright chime (THUNDER MODE begins).
+        this.hiss('highpass', 9000, 2500, 0.5, 0.002, 0.25);
+        this.tone('sine', 55, 30, 0.8, 0.02, 1.6, 0.05);
+        this.hiss('lowpass', 900, 80, 0.45, 0.05, 1.8, 0.05);
+        this.tone('sine', 220, 440, 0.12, 0.25, 0.9);
+        [784, 1046.5, 1318.5].forEach((f, i) =>
+          this.tone('sine', f, f, 0.06, 0.01, 0.8, 0.6 + i * 0.09),
+        );
+        break;
+      case 'bolt_thrown':
+        // The payer's bolt lands on the mothership; a weak-point hit rings out longer.
+        this.hiss('highpass', 7000, 1800, 0.45, 0.002, 0.3);
+        this.tone('sine', 70, 22, e.hit ? 1 : 0.7, 0.005, e.hit ? 2.6 : 1.6);
+        if (e.hit)
+          [523.3, 784, 1046.5].forEach((f, i) =>
+            this.tone('sine', f, f, 0.07, 0.01, 0.7, 0.2 + i * 0.08),
           );
-          if (e.kind === 'ATTACK') this.tone('sine', 70, 22, 0.9, 0.005, 2.2, 0.3);
-          break;
-        }
+        break;
+      case 'launch_push':
+        if (!this.gate('launch', 120)) return;
+        this.tone('sine', 140 + Math.min(40, e.launched * 4), 260, 0.12, 0.005, 0.25);
+        break;
+      case 'action':
         // Free taps arrive in batches; one gated sound per action keeps a crowd listenable.
         if (e.kind === 'ATTACK') {
           if (!this.gate('fire', 140)) return;

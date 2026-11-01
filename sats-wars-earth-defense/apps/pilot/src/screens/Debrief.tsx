@@ -44,8 +44,14 @@ export function Debrief({ s }: { s: PublicMatchState }) {
             <dd className="sw-num">{taps}</dd>
           </div>
           <div>
-            <dt>{L('Lightning の一撃', 'Lightning actions')}</dt>
+            <dt>{L('雷を呼んだ回数', 'Thunder called')}</dt>
             <dd className="sw-num">{s.stats.lightning}</dd>
+          </div>
+          <div>
+            <dt>{L('弱点に直撃', 'Weak-point hits')}</dt>
+            <dd className="sw-num">
+              {s.stats.boltHits} / {s.stats.bolts}
+            </dd>
           </div>
         </dl>
       </section>

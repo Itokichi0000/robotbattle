@@ -5,6 +5,7 @@ import {
   countedPlayers,
   createMatch,
   isRoundOver,
+  jobsOf,
   reduce,
   toPublicState,
   type EngineCommand,
@@ -19,6 +20,8 @@ import type {
   MatchSnapshotMsg,
   MatchState,
   PilotActionReq,
+  PilotBoltReq,
+  PilotLaunchReq,
   PresetId,
 } from '@swed/shared';
 import type { Db } from './db';
@@ -337,15 +340,51 @@ export class MatchRuntime {
     return { ...res, clientActionId: req.clientActionId };
   }
 
-  /** Applies a settled Lightning action to the live match; false if the engine refused it. */
+  /** The pilot's team and the jobs their phone may do now (D-035). */
+  jobsFor(pilotId: string): { team: ActionKind | null; jobs: ActionKind[] } {
+    const p = this.state.players[pilotId];
+    return { team: p?.role ?? null, jobs: jobsOf(this.state, pilotId) };
+  }
+
+  /** Group launch: the phone swiped up during the countdown / launch. */
+  pilotLaunch(pilot: PilotRow, req: PilotLaunchReq): ActionResult {
+    if (req.matchId !== this.state.matchId)
+      return { clientActionId: 'launch', accepted: false, reasonCode: 'STALE_MATCH' };
+    const r = this.command({ type: 'LAUNCH_PUSH', pilotId: pilot.id });
+    return r.outcome.kind === 'action'
+      ? r.outcome.result
+      : { clientActionId: 'launch', accepted: false, reasonCode: 'INVALID' };
+  }
+
+  /** The payer throws their bolt; the engine judges the raw tap (position + time). */
+  pilotBolt(pilot: PilotRow, req: PilotBoltReq): ActionResult {
+    const b = req.bolt;
+    if (req.matchId !== this.state.matchId)
+      return { clientActionId: b.boltId, accepted: false, reasonCode: 'STALE_MATCH' };
+    const r = this.command({
+      type: 'BOLT_THROW',
+      pilotId: pilot.id,
+      boltId: b.boltId,
+      x: b.x,
+      y: b.y,
+      at: b.at,
+    });
+    return r.outcome.kind === 'action'
+      ? r.outcome.result
+      : { clientActionId: b.boltId, accepted: false, reasonCode: 'INVALID' };
+  }
+
+  /**
+   * Applies a settled Lightning payment to the live match (THUNDER MODE + the payer's bolt);
+   * false if the engine refused it (round over: recorded unapplied).
+   */
   applyPaid(
     intentId: string,
     pilotId: string | null,
-    kind: ActionKind,
     virtual: boolean,
     settleMs: number | null = null,
   ): boolean {
-    const r = this.command({ type: 'PAID_ACTION', intentId, pilotId, kind, virtual, settleMs });
+    const r = this.command({ type: 'LIGHTNING', intentId, pilotId, virtual, settleMs });
     return r.outcome.kind === 'control' && r.outcome.ok;
   }
 
@@ -360,9 +399,9 @@ export class MatchRuntime {
   }
 
   /**
-   * Exhibition loop: labelled bots join the crowd and press what the big screen recommends.
-   * Now and then one sends a VIRTUAL Lightning action (labelled DEMO), so the hall sees what
-   * 21 sats does before anyone pays.
+   * Exhibition loop: labelled bots join the crowd, swipe up for the launch and play their
+   * team's job. Now and then one calls VIRTUAL Lightning (labelled DEMO), so the hall sees
+   * what 21 sats does before anyone pays.
    */
   private runDemoBots(): void {
     const s = this.state;
@@ -390,15 +429,25 @@ export class MatchRuntime {
       this.lastBotTick = now;
       for (const b of this.bots) b.nextTapAt = 0;
     }
-    if (this.state.phase !== 'BATTLE' || this.state.paused) return;
+    if ((s.phase === 'COUNTDOWN' || s.phase === 'DEPLOYMENT') && !s.paused) {
+      // Bots swipe up one by one during the launch, like people noticing the call.
+      for (const b of this.bots) {
+        if (!this.state.launched.includes(b.pilotId) && this.random() < 0.08)
+          this.command({ type: 'LAUNCH_PUSH', pilotId: b.pilotId });
+      }
+    }
+    // Time since the last tick, taken on every tick: counted only from BATTLE ticks, the
+    // whole launch piled up into one chance and a bot called Lightning the moment the
+    // fight began, every round.
     const dt = Math.max(0, now - this.lastBotTick) / 1000;
     this.lastBotTick = now;
+    if (this.state.phase !== 'BATTLE' || this.state.paused) return;
     let pub = null;
     for (const b of this.bots) {
       if (b.nextTapAt > now) continue;
       b.nextTapAt = now + c.tapMinMs + this.random() * (c.tapMaxMs - c.tapMinMs);
       pub ??= toPublicState(this.state);
-      const kind = botChoose(pub, this.random(), 0.8);
+      const kind = botChoose(pub, this.random(), 0.8, jobsOf(this.state, b.pilotId));
       this.botSeq += 1;
       this.command({
         type: 'ACTION',
@@ -410,10 +459,9 @@ export class MatchRuntime {
     if (dt > 0 && this.random() < c.paidChancePerSec * dt * this.bots.length) {
       this.botSeq += 1;
       this.command({
-        type: 'PAID_ACTION',
+        type: 'LIGHTNING',
         intentId: `demo-${this.state.matchId}-${this.botSeq}`,
         pilotId: null,
-        kind: botChoose(toPublicState(this.state), 0, 1),
         virtual: true,
         bot: true,
         settleMs: null,

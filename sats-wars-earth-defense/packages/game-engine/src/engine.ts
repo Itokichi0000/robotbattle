@@ -7,13 +7,15 @@ import {
   zoneAt,
   configHash,
   DIRECTIONS,
+  boltDamageFor,
+  boltTargetAt,
   mechHitFor,
-  paidAttackFor,
   strikeNeedFor,
 } from '@swed/shared';
 import type {
   ActionKind,
   ActionResult,
+  BoltState,
   SquadId,
   DefeatReason,
   GameConfig,
@@ -33,16 +35,22 @@ import { randomBetween, randomPick } from './rng';
  * `advanceTo(state, t)` runs the timers (phases, strikes, claws, shield decay) in fixed
  * 50 ms steps. Everything random comes from the mulberry32 state inside the match.
  *
- *   撃つ ATTACK  damages NULL CORE
- *   守る DEFEND  fills the shield, which blocks the announced strike on a squad
- *   直す REPAIR  restores RAIJIN's armour after a claw
- * Free taps are small; a Lightning (21 sats) action is the same action ×20.
+ *   撃つ ATTACK  damages NULL CORE                       (砲撃班; anyone may shoot)
+ *   守る DEFEND  fills the shield that blocks the announced strike on a squad (防衛班)
+ *   直す REPAIR  restores RAIJIN's armour after a claw     (整備班)
+ * Every player belongs to a team (D-035); a team nobody is in is shared by everyone, so one
+ * or two people can still play. A Lightning payment starts THUNDER MODE for the whole hall
+ * and grants the payer one bolt, judged here from the raw tap (position and time).
  */
 
 export const STEP_MS = 50;
 /** Free taps reach the screens as one aggregated event per action this often. */
 export const FREE_FLUSH_MS = 200;
 const ACTION_LOG_MAX = 600;
+/** A throw's claimed time may differ this much from the server's (network, clock drift). */
+export const BOLT_CLOCK_SLACK_MS = 1_500;
+/** Demo-bot bolts are thrown this long after they are granted. */
+const BOT_BOLT_DELAY_MS = 1_500;
 
 export type EngineCommand =
   | { type: 'START'; t: number }
@@ -56,15 +64,25 @@ export type EngineCommand =
   | { type: 'PLAYER_LEAVE'; t: number; pilotId: string }
   | { type: 'PLAYER_RENAME'; t: number; pilotId: string; displayName: string }
   | { type: 'ACTION'; t: number; pilotId: string; clientActionId: string; kind: ActionKind }
+  | { type: 'LAUNCH_PUSH'; t: number; pilotId: string }
   | {
-      type: 'PAID_ACTION';
+      type: 'LIGHTNING';
       t: number;
       intentId: string;
       pilotId: string | null;
-      kind: ActionKind;
       virtual: boolean;
       bot?: boolean;
       settleMs: number | null;
+    }
+  | {
+      type: 'BOLT_THROW';
+      t: number;
+      pilotId: string;
+      boltId: string;
+      x: number;
+      y: number;
+      /** The pilot's match time when they tapped (trusted only within BOLT_CLOCK_SLACK_MS). */
+      at: number;
     };
 
 export type CommandOutcome =
@@ -96,9 +114,12 @@ function zeroCounts() {
 function emptyStats(): MatchStats {
   return {
     free: zeroCounts(),
-    paid: zeroCounts(),
     lightning: 0,
     virtual: 0,
+    bolts: 0,
+    boltHits: 0,
+    feverActions: 0,
+    launched: 0,
     damageToBoss: 0,
     strikesBlocked: 0,
     strikesHit: 0,
@@ -133,9 +154,9 @@ export function createMatch(input: CreateMatchInput): MatchState {
     autoStartAt: null,
     autoStartEnabled: input.autoStart ?? true,
     pendingFree: {
-      ATTACK: { n: 0, value: 0 },
-      DEFEND: { n: 0, value: 0 },
-      REPAIR: { n: 0, value: 0 },
+      ATTACK: { n: 0, value: 0, fever: 0 },
+      DEFEND: { n: 0, value: 0, fever: 0 },
+      REPAIR: { n: 0, value: 0, fever: 0 },
     },
     lastFlushAt: 0,
     players: {},
@@ -147,6 +168,9 @@ export function createMatch(input: CreateMatchInput): MatchState {
     squads,
     nextStrikeAt: 0,
     nextClawAt: 0,
+    launched: [],
+    feverUntil: 0,
+    bolts: [],
     paidApplied: [],
     stats: emptyStats(),
     result: null,
@@ -183,6 +207,49 @@ export function countedPlayers(s: MatchState, at = s.t): PlayerState[] {
 
 export function playerCount(s: MatchState, at = s.t): number {
   return countedPlayers(s, at).length;
+}
+
+/** People per team among the players counted right now. */
+export function teamCounts(s: MatchState, at = s.t): Record<ActionKind, number> {
+  const out = zeroCounts();
+  for (const p of countedPlayers(s, at)) out[p.role] += 1;
+  return out;
+}
+
+/**
+ * What a player's phone may do: their own team's job, plus the job of any team nobody is in
+ * (one player does everything; two share the third job). Shooting is always allowed: it is
+ * what guards and engineers do while their own job is done.
+ */
+export function jobsOf(s: MatchState, pilotId: string, at = s.t): ActionKind[] {
+  const p = s.players[pilotId];
+  if (!p) return [];
+  const counts = teamCounts(s, at);
+  const jobs: ActionKind[] = [p.role];
+  for (const k of ACTION_KINDS) if (counts[k] === 0 && !jobs.includes(k)) jobs.push(k);
+  return jobs;
+}
+
+/**
+ * A short-handed team's taps count for more (fair share, never less than ×1, at most ×2):
+ * with four people there is one guard and one engineer, and the strike need grows with the
+ * whole crowd. Shooting is everyone's, so it is never scaled. A team nobody is in is shared
+ * by everyone and is not scaled either.
+ */
+export function teamScale(s: MatchState, kind: ActionKind, at = s.t): number {
+  if (kind === 'ATTACK') return 1;
+  const counts = teamCounts(s, at);
+  const n = countedPlayers(s, at).length;
+  const doers = counts[kind] > 0 ? counts[kind] : n;
+  return Math.min(2, Math.max(1, n / (3 * Math.max(1, doers))));
+}
+
+/** The team a newcomer joins: the smallest one (ties go 撃つ → 守る → 直す). */
+function teamForNewcomer(s: MatchState, at: number): ActionKind {
+  const counts = teamCounts(s, at);
+  let best: ActionKind = 'ATTACK';
+  for (const k of ACTION_KINDS) if (counts[k] < counts[best]) best = k;
+  return best;
 }
 
 export function bossOf<E extends { kind: string }>(s: { enemies: readonly E[] }): E | null {
@@ -236,7 +303,13 @@ function startBattle(ctx: Ctx, at: number): void {
   const c = s.config;
   s.playersAtLaunch = Math.max(1, playerCount(s, at));
   s.mechHp = c.mech.max;
-  s.shield = 0;
+  // The group launch: everyone who swiped up adds to the starting shield.
+  const counted = new Set(countedPlayers(s, at).map((p) => p.pilotId));
+  const launched = s.launched.filter((id) => counted.has(id)).length;
+  s.stats.launched = launched;
+  s.shield = Math.round((c.launch.shieldAtFull * launched) / s.playersAtLaunch);
+  s.feverUntil = 0;
+  s.bolts = [];
   s.threats = [];
   s.nextStrikeAt = at + c.strikes.firstAtMs;
   s.nextClawAt = at + c.mech.hitFirstAtMs;
@@ -268,6 +341,7 @@ function finish(ctx: Ctx, at: number, outcome: 'VICTORY' | 'DEFEAT', reason: str
   flushFree(ctx, at, true);
   s.result = { outcome, reason: reason as never, at };
   s.threats = [];
+  s.bolts = [];
   enterPhase(ctx, outcome, at);
   emit(ctx, at, { type: 'match_result', outcome, result: s.result });
 }
@@ -398,21 +472,18 @@ function resolveImpacts(ctx: Ctx, now: number): void {
   }
 }
 
-/** How big one Lightning action is right now (the same for everyone). */
-export function paidEffect(s: MatchState, kind: ActionKind): number {
-  if (kind !== 'ATTACK') return s.config.paid.effect[kind];
+/** How big a Lightning bolt is right now, before the weak-point bonus (same for everyone). */
+export function boltDamage(s: MatchState): number {
   const boss = bossOf(s);
-  return paidAttackFor(s.config, boss?.maxHp ?? bossHpFor(s.config, playerCount(s)));
+  return boltDamageFor(s.config, boss?.maxHp ?? bossHpFor(s.config, playerCount(s)));
+}
+
+export function feverOn(s: { feverUntil: number }, at: number): boolean {
+  return at < s.feverUntil;
 }
 
 /** Applies one action's effect; returns the value (HP dealt, shield or armour added). */
-function applyEffect(
-  ctx: Ctx,
-  at: number,
-  kind: ActionKind,
-  amount: number,
-  paid: boolean,
-): number {
+function applyEffect(ctx: Ctx, at: number, kind: ActionKind, amount: number, big: boolean): number {
   const s = ctx.s;
   const c = s.config;
   if (kind === 'ATTACK') {
@@ -420,7 +491,7 @@ function applyEffect(
     if (!boss || boss.hp <= 0) return 0;
     const dealt = Math.min(boss.hp, amount);
     boss.hp -= dealt;
-    if (paid) boss.weakUntil = at + 1_500;
+    if (big) boss.weakUntil = at + 1_500;
     s.stats.damageToBoss += dealt;
     return dealt;
   }
@@ -454,14 +525,11 @@ function flushFree(ctx: Ctx, at: number, force = false): void {
     emit(ctx, at, {
       type: 'action',
       kind,
-      paid: false,
-      virtual: false,
-      bot: false,
       value: Math.round(p.value),
       count: p.n,
-      settleMs: null,
+      fever: p.fever > 0,
     });
-    s.pendingFree[kind] = { n: 0, value: 0 };
+    s.pendingFree[kind] = { n: 0, value: 0, fever: 0 };
   }
 }
 
@@ -495,6 +563,8 @@ function step(ctx: Ctx, now: number, dtSec: number): void {
   announce(ctx, now);
   resolveImpacts(ctx, now);
   if (s.phase !== 'BATTLE') return;
+  resolveBolts(ctx, now);
+  if (s.phase !== 'BATTLE') return;
   s.stats.peakPlayers = Math.max(s.stats.peakPlayers, playerCount(s, now));
   flushFree(ctx, now);
 }
@@ -525,7 +595,7 @@ export function advanceTo(state: MatchState, t: number): AdvanceResult {
 /* ----------------------------------------------------------------- players */
 
 function emptyPlayerStats(): PlayerState['stats'] {
-  return { free: zeroCounts(), paid: zeroCounts(), damage: 0 };
+  return { free: zeroCounts(), lightning: 0, damage: 0 };
 }
 
 function join(ctx: Ctx, at: number, pilotId: string, displayName: string, bot: boolean): void {
@@ -538,6 +608,7 @@ function join(ctx: Ctx, at: number, pilotId: string, displayName: string, bot: b
     return;
   }
   const before = playerCount(s, at);
+  const role = teamForNewcomer(s, at);
   s.players[pilotId] = {
     pilotId,
     displayName,
@@ -545,6 +616,7 @@ function join(ctx: Ctx, at: number, pilotId: string, displayName: string, bot: b
     connected: true,
     disconnectedAt: null,
     joinedAt: at,
+    role,
     freeReadyAt: 0,
     stats: emptyPlayerStats(),
   };
@@ -597,46 +669,147 @@ function freeAction(
   if (!p) return refuse('NOT_JOINED');
   if (s.phase !== 'BATTLE') return refuse('NOT_IN_COMBAT');
   if (s.paused) return refuse('PAUSED');
+  if (kind !== 'ATTACK' && !jobsOf(s, pilotId, at).includes(kind)) return refuse('WRONG_TEAM');
   if (at < p.freeReadyAt) return refuse('COOLDOWN', p.freeReadyAt);
   p.freeReadyAt = at + s.config.free.cooldownMs;
-  const value = applyEffect(ctx, at, kind, s.config.free.effect[kind], false);
+  const fever = feverOn(s, at);
+  const amount =
+    s.config.free.effect[kind] *
+    teamScale(s, kind, at) *
+    (fever ? s.config.paid.feverMultiplier : 1);
+  const value = applyEffect(ctx, at, kind, amount, false);
   p.stats.free[kind] += 1;
   if (kind === 'ATTACK') p.stats.damage += value;
   s.stats.free[kind] += 1;
+  if (fever) s.stats.feverActions += 1;
   s.pendingFree[kind].n += 1;
   s.pendingFree[kind].value += value;
+  if (fever) s.pendingFree[kind].fever += 1;
   remember(s, clientActionId, true, null);
   checkVictory(ctx, at);
   return { clientActionId, accepted: true, readyAt: p.freeReadyAt };
 }
 
-function paidAction(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'PAID_ACTION' }>): boolean {
+/**
+ * A confirmed Lightning payment: THUNDER MODE for everyone (reset to its full length, never
+ * stacked) and one bolt for the payer to throw.
+ */
+function lightning(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'LIGHTNING' }>): boolean {
   const s = ctx.s;
+  const c = s.config;
   if (s.phase !== 'BATTLE' || s.paidApplied.includes(cmd.intentId)) return false;
   // A pause never eats a settled payment: it lands the moment it is confirmed.
   flushFree(ctx, cmd.t, true);
-  const value = applyEffect(ctx, cmd.t, cmd.kind, paidEffect(s, cmd.kind), true);
   s.paidApplied.push(cmd.intentId);
-  s.stats.paid[cmd.kind] += 1;
+  s.feverUntil = cmd.t + c.paid.feverMs;
+  const bolt: BoltState = {
+    id: cmd.intentId,
+    pilotId: cmd.pilotId,
+    startedAt: cmd.t,
+    expiresAt: cmd.t + c.paid.boltWindowMs,
+    virtual: cmd.virtual,
+    bot: !!cmd.bot,
+  };
+  s.bolts.push(bolt);
   s.stats.lightning += 1;
   if (cmd.virtual) s.stats.virtual += 1;
   const p = cmd.pilotId ? s.players[cmd.pilotId] : undefined;
-  if (p) {
-    p.stats.paid[cmd.kind] += 1;
-    if (cmd.kind === 'ATTACK') p.stats.damage += value;
-  }
+  if (p) p.stats.lightning += 1;
   emit(ctx, cmd.t, {
-    type: 'action',
-    kind: cmd.kind,
-    paid: true,
+    type: 'lightning',
+    boltId: bolt.id,
     virtual: cmd.virtual,
     bot: !!cmd.bot,
-    value,
-    count: 1,
     settleMs: cmd.virtual ? null : cmd.settleMs,
+    feverUntil: s.feverUntil,
   });
-  checkVictory(ctx, cmd.t);
   return true;
+}
+
+/** Throws a bolt: a hit on the weak point is worth `boltHitMultiplier` ×. */
+function throwBolt(ctx: Ctx, at: number, bolt: BoltState, hit: boolean, auto: boolean): void {
+  const s = ctx.s;
+  s.bolts = s.bolts.filter((b) => b.id !== bolt.id);
+  const base = boltDamage(s);
+  const dealt = applyEffect(
+    ctx,
+    at,
+    'ATTACK',
+    base * (hit ? s.config.paid.boltHitMultiplier : 1),
+    true,
+  );
+  s.stats.bolts += 1;
+  if (hit) s.stats.boltHits += 1;
+  const p = bolt.pilotId ? s.players[bolt.pilotId] : undefined;
+  if (p) p.stats.damage += dealt;
+  emit(ctx, at, { type: 'bolt_thrown', boltId: bolt.id, hit, damage: dealt, auto });
+  checkVictory(ctx, at);
+}
+
+/** Judges a payer's tap against where the weak point was at that moment. */
+export function boltHits(
+  c: GameConfig,
+  bolt: { id: string; startedAt: number; expiresAt: number },
+  x: number,
+  y: number,
+  claimedAt: number,
+  serverAt: number,
+): boolean {
+  const at =
+    Math.abs(claimedAt - serverAt) <= BOLT_CLOCK_SLACK_MS
+      ? Math.min(bolt.expiresAt, Math.max(bolt.startedAt, claimedAt))
+      : serverAt;
+  const target = boltTargetAt(bolt.id, at - bolt.startedAt);
+  return Math.hypot(target.x - x, target.y - y) <= c.paid.boltRadius;
+}
+
+function boltThrow(ctx: Ctx, cmd: Extract<EngineCommand, { type: 'BOLT_THROW' }>): ActionResult {
+  const s = ctx.s;
+  const res = (accepted: boolean, reasonCode?: ReasonCode): ActionResult => ({
+    clientActionId: cmd.boltId,
+    accepted,
+    ...(reasonCode ? { reasonCode } : {}),
+  });
+  if (s.phase !== 'BATTLE') return res(false, 'NOT_IN_COMBAT');
+  const bolt = s.bolts.find((b) => b.id === cmd.boltId && b.pilotId === cmd.pilotId);
+  if (!bolt) return res(false, 'NO_BOLT');
+  const hit = boltHits(s.config, bolt, cmd.x, cmd.y, cmd.at, cmd.t);
+  throwBolt(ctx, cmd.t, bolt, hit, false);
+  return res(true);
+}
+
+/** Bolts nobody threw in time are thrown for the payer; demo bots throw theirs. */
+function resolveBolts(ctx: Ctx, now: number): void {
+  const s = ctx.s;
+  for (const bolt of [...s.bolts]) {
+    if (s.result) return;
+    if (bolt.pilotId === null && now >= bolt.startedAt + BOT_BOLT_DELAY_MS) {
+      throwBolt(ctx, now, bolt, randomBetween(s, 0, 1) < 0.5, true);
+    } else if (now >= bolt.expiresAt) {
+      throwBolt(ctx, now, bolt, false, true);
+    }
+  }
+}
+
+/** The group launch: one swipe per player during the countdown and the launch. */
+function launchPush(ctx: Ctx, at: number, pilotId: string): ActionResult {
+  const s = ctx.s;
+  const res = (accepted: boolean, reasonCode?: ReasonCode): ActionResult => ({
+    clientActionId: `launch:${pilotId}`,
+    accepted,
+    ...(reasonCode ? { reasonCode } : {}),
+  });
+  if (!s.players[pilotId]) return res(false, 'NOT_JOINED');
+  if (s.phase !== 'COUNTDOWN' && s.phase !== 'DEPLOYMENT') return res(false, 'NOT_LAUNCHING');
+  if (!s.launched.includes(pilotId)) {
+    s.launched.push(pilotId);
+    emit(ctx, at, {
+      type: 'launch_push',
+      launched: s.launched.filter((id) => s.players[id]).length,
+      players: playerCount(s, at),
+    });
+  }
+  return res(true);
 }
 
 /* ------------------------------------------------------------------ reduce */
@@ -723,8 +896,14 @@ export function reduce(state: MatchState, cmd: EngineCommand): ReduceResult {
         result: freeAction(ctx, at, cmd.pilotId, cmd.clientActionId, cmd.kind),
       };
       break;
-    case 'PAID_ACTION':
-      control(paidAction(ctx, { ...cmd, t: at }));
+    case 'LIGHTNING':
+      control(lightning(ctx, { ...cmd, t: at }));
+      break;
+    case 'BOLT_THROW':
+      outcome = { kind: 'action', result: boltThrow(ctx, { ...cmd, t: at }) };
+      break;
+    case 'LAUNCH_PUSH':
+      outcome = { kind: 'action', result: launchPush(ctx, at, cmd.pilotId) };
       break;
   }
   ctx.s.version += 1;

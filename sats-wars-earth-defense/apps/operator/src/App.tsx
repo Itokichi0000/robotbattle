@@ -1,7 +1,7 @@
 import { useStore, useTicker } from '@swed/client';
 import { percent } from '@swed/game-engine';
 import {
-  ACTION_LABEL,
+  TEAM_LABEL,
   formatClock,
   PHASE_LABEL,
   routeProgress,
@@ -97,7 +97,7 @@ function Toggle({
 const FLOW: Array<{ key: string; label: string; phases: string[] }> = [
   { key: 'lobby', label: '参加受付', phases: ['LOBBY'] },
   { key: 'deploy', label: '出撃', phases: ['COUNTDOWN', 'DEPLOYMENT'] },
-  { key: 'battle', label: '戦闘（撃つ・守る・直す）', phases: ['BATTLE'] },
+  { key: 'battle', label: '戦闘（3つの班）', phases: ['BATTLE'] },
   { key: 'done', label: '結果', phases: ['VICTORY', 'DEFEAT', 'RESULTS'] },
 ];
 
@@ -150,14 +150,26 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
   }
   if (p === 'COUNTDOWN' || p === 'DEPLOYMENT')
     return {
-      title: '出撃中 — 演出が終わると戦闘',
-      detail: '雷神が格納庫から出撃しています。スマホには3つのボタンが表示されています',
+      title: s.paused ? '出撃中 — 一時停止中' : '出撃中 — みんなで発進スワイプ',
+      detail: `スマホには「上にスワイプして発進」。発進スワイプ ${s.launched} / ${s.players} 人（多いほど雷神は分厚いシールドで出撃）。演出が終わると戦闘です`,
       acts: [
+        s.paused
+          ? {
+              label: '再開する RESUME',
+              note: '出撃演出を続けます',
+              cmd: { command: 'RESUME' },
+              tone: 'primary',
+            }
+          : {
+              label: '演出をスキップ SKIP',
+              note: 'すぐに戦闘を始めます',
+              cmd: { command: 'SKIP_DEPLOY' },
+              tone: 'primary',
+            },
         {
-          label: '演出をスキップ SKIP',
-          note: 'すぐに戦闘を始めます',
-          cmd: { command: 'SKIP_DEPLOY' },
-          tone: 'primary',
+          label: '一時停止 PAUSE',
+          note: '発進の説明をしたいとき',
+          cmd: { command: 'PAUSE' },
         },
       ],
     };
@@ -408,33 +420,38 @@ function Crowd({ s }: { s: PublicMatchState }) {
         {s.bots ? ` ・ BOT ${s.bots}` : ''}
       </h2>
       <p className="explain">
-        QR を読んだ人は全員参加（席・人数の上限なし）。スマホを閉じても約45秒は人数に数えます。
+        QR を読んだ人は全員参加（席・人数の上限なし）。参加した順に3つの班へ自動で振り分け、
+        人のいない班の仕事は全員で分担します。スマホを閉じても約45秒は人数に数えます。
         母艦の強さは出撃時の人数で決まり、途中参加があると少し強くなります。
       </p>
       <table>
         <thead>
           <tr>
-            <th>ボタン</th>
-            <th style={{ textAlign: 'right' }}>タップ（無料）</th>
-            <th style={{ textAlign: 'right' }}>21 sats</th>
+            <th>班</th>
+            <th style={{ textAlign: 'right' }}>人数</th>
+            <th style={{ textAlign: 'right' }}>命中（無料）</th>
           </tr>
         </thead>
         <tbody>
           {kinds.map((k) => (
             <tr key={k}>
               <td>
-                {ACTION_LABEL[k].ja} <small>{ACTION_LABEL[k].en}</small>
+                {TEAM_LABEL[k].ja} <small>{TEAM_LABEL[k].en}</small>
+              </td>
+              <td className="sw-num" style={{ textAlign: 'right' }}>
+                {s.teams[k]}
               </td>
               <td className="sw-num" style={{ textAlign: 'right' }}>
                 {s.stats.free[k]}
-              </td>
-              <td className="sw-num" style={{ textAlign: 'right' }}>
-                {s.stats.paid[k]}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <p className="explain">
+        発進スワイプ {s.launched} / {s.players} 人 ・ 雷を呼んだ回数 {s.stats.lightning} ・
+        弱点に直撃 {s.stats.boltHits}/{s.stats.bolts}
+      </p>
     </section>
   );
 }
@@ -567,7 +584,7 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
   return (
     <section className="panel sw-frame payments">
       <h2>
-        21 sats の大きい一撃{' '}
+        21 sats の雷（Lightning）{' '}
         <b className={live ? (p.liveEnabled ? 'danger' : 'muted') : 'ally'}>
           {live
             ? p.liveEnabled
@@ -577,10 +594,11 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         </b>
       </h2>
       <p className="explain">
-        戦闘中、スマホの各ボタンの横にある「{p.amountSats}{' '}
-        sats」を押して支払うと、同じ行動の大きい版になります （撃つ {p.effect.ATTACK} ダメージ ・
-        守る +{p.effect.DEFEND} ・ 直す +{p.effect.REPAIR}）。
-        全員同じ大きさで、上限があるのでお金だけでは勝てません。払わなくても無料タップで遊べます。
+        戦闘中、スマホの「雷を呼ぶ {p.amountSats} sats」で支払うと、会場全員が{' '}
+        {Math.round(p.effect.feverMs / 1000)}秒間 {p.effect.feverMultiplier}倍の雷モードになり、
+        払った人は母艦の弱点を狙って雷を落とせます（{p.effect.bolt} ダメージ、命中で{' '}
+        {p.effect.boltHitMultiplier}倍）。金額は固定・上限ありなので、お金だけでは勝てません。
+        払わなくても無料で遊べます。
       </p>
       <div className="kv">
         <div>
@@ -594,8 +612,8 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         <div>
           <span>1回</span>
           <b className="sw-num">
-            {p.amountSats} sats → 撃つ {p.effect.ATTACK} / 守る +{p.effect.DEFEND} / 直す +
-            {p.effect.REPAIR}
+            {p.amountSats} sats → 雷モード ×{p.effect.feverMultiplier}（
+            {Math.round(p.effect.feverMs / 1000)}秒）＋雷 {p.effect.bolt}
           </b>
         </div>
         <div>
@@ -674,7 +692,6 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         <thead>
           <tr>
             <th>時刻</th>
-            <th>行動</th>
             <th>支払い</th>
             <th>ゲーム反映</th>
             <th />
@@ -683,7 +700,7 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
         <tbody>
           {p.recent.length === 0 ? (
             <tr>
-              <td colSpan={5}>
+              <td colSpan={4}>
                 <em>まだありません（戦闘中にスマホから 21 sats を送ると、ここに出ます）</em>
               </td>
             </tr>
@@ -691,7 +708,6 @@ function Payments({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
             p.recent.map((r) => (
               <tr key={r.intentId}>
                 <td className="sw-num">{r.createdAt.slice(11, 19)}</td>
-                <td>{ACTION_LABEL[r.action].ja}</td>
                 <td className={r.status === 'settled' ? 'ally' : undefined}>
                   {r.status} {r.mode === 'sandbox' ? <em>VIRTUAL</em> : null}
                 </td>

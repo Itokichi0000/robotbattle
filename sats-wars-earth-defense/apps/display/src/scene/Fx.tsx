@@ -448,28 +448,22 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           if (e.kind === 'ATTACK') {
             if (!bossPos(tmpB)) break;
             const b = tmpB.clone();
-            if (e.paid) {
-              // Lightning attack: both arms fire a white-hot beam and the sky strikes the boss.
-              for (const left of [true, false]) {
-                if (!muzzle(left, tmpA)) continue;
-                const a = tmpA.clone();
-                beam(a, b, '#ffffff', 0.5, 0.9);
-                beam(a, b, COLORS.action, 1.6, 0.8);
-                flashLevel.current[left ? 'L' : 'R'] = 1;
-              }
-              skyStrike(b, 1.2);
-              later(0.1, () => blast(b.clone(), 9, '#ffd08a'));
-              break;
-            }
-            // Free taps arrive batched: one or two beams, sparks sized by the crowd.
+            // Free shots arrive batched: one or two beams, sparks sized by the crowd. In
+            // THUNDER MODE the beams run white-hot and thicker.
             const shots = Math.min(2, e.count);
             for (let i = 0; i < shots; i++) {
               const left = Math.random() < 0.5;
               if (!muzzle(left, tmpA)) continue;
               const a = tmpA.clone();
-              beam(a, b, left ? '#ffcf7a' : '#bff6ff', 0.28, 0.25);
-              beam(a, b, left ? COLORS.action : COLORS.ally, 0.6, 0.16);
-              flashLevel.current[left ? 'L' : 'R'] = 0.7;
+              beam(
+                a,
+                b,
+                e.fever ? '#ffffff' : left ? '#ffcf7a' : '#bff6ff',
+                e.fever ? 0.45 : 0.28,
+                0.25,
+              );
+              beam(a, b, left ? COLORS.action : COLORS.ally, e.fever ? 1.1 : 0.6, 0.16);
+              flashLevel.current[left ? 'L' : 'R'] = e.fever ? 1 : 0.7;
             }
             sparks.spawn(b, Math.min(80, 12 + e.count * 6), COLORS.action, 14, 0.7);
             break;
@@ -477,20 +471,37 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
           if (e.kind === 'DEFEND') {
             for (const seat of ['SHIELD_L', 'SHIELD_R'] as const) {
               const sh = pools.shields[seat];
-              sh.ripple = Math.max(sh.ripple, e.paid ? 1 : 0.35);
+              sh.ripple = Math.max(sh.ripple, e.fever ? 0.7 : 0.35);
             }
-            if (e.paid) skyStrike(station('core', tmpA).clone(), 1);
             break;
           }
-          // REPAIR: welding sparks over the frame; Lightning floods it with light.
+          // REPAIR: welding sparks over the frame (more of them in THUNDER MODE).
           for (const part of ['CORE', 'LEG_L', 'LEG_R', 'ARM_L', 'ARM_R'] as const) {
-            if (!e.paid && Math.random() > 0.4) continue;
-            sparks.spawn(PART_POS[part], e.paid ? 50 : 14, COLORS.repair, 6, 0.6);
+            if (!e.fever && Math.random() > 0.4) continue;
+            sparks.spawn(PART_POS[part], e.fever ? 30 : 14, COLORS.repair, 6, 0.6);
           }
-          if (e.paid) {
-            skyStrike(station('core', tmpA).clone(), 1);
-            blast(PART_POS.CORE.clone(), 2.4, COLORS.repair);
+          break;
+        }
+        case 'lightning': {
+          // Someone called the thunder: it strikes RAIJIN's reactor and charges the machine.
+          skyStrike(station('core', tmpA).clone(), 1);
+          blast(PART_POS.CORE.clone(), 3, '#bff6ff');
+          cameraKick(0.5);
+          break;
+        }
+        case 'bolt_thrown': {
+          // The payer's bolt: both arms fire and the sky strikes the mothership.
+          if (!bossPos(tmpB)) break;
+          const b = tmpB.clone();
+          for (const left of [true, false]) {
+            if (!muzzle(left, tmpA)) continue;
+            const a = tmpA.clone();
+            beam(a, b, '#ffffff', 0.5, 0.9);
+            beam(a, b, COLORS.action, 1.6, 0.8);
+            flashLevel.current[left ? 'L' : 'R'] = 1;
           }
+          skyStrike(b, e.hit ? 1.5 : 1.1);
+          later(0.1, () => blast(b.clone(), e.hit ? 14 : 8, '#ffd08a'));
           break;
         }
         case 'strike_blocked': {

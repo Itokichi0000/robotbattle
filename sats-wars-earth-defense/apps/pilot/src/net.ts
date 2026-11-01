@@ -159,6 +159,34 @@ export async function sendAction(kind: ActionKind): Promise<ActionResult> {
   return { clientActionId, accepted: false, reasonCode: 'NETWORK' };
 }
 
+/** Group launch: one swipe up during the countdown / launch (D-035). */
+export async function sendLaunch(): Promise<ActionResult> {
+  try {
+    return await socket.timeout(3_000).emitWithAck('pilot:launch', { matchId: matchId() });
+  } catch {
+    return { clientActionId: 'launch', accepted: false, reasonCode: 'NETWORK' };
+  }
+}
+
+/**
+ * Throws this phone's Lightning bolt: the raw tap (where on the square field, and the match
+ * time it happened). The server judges whether it hit the weak point.
+ */
+export async function throwBolt(
+  boltId: string,
+  x: number,
+  y: number,
+  at: number,
+): Promise<ActionResult> {
+  try {
+    return await socket
+      .timeout(3_000)
+      .emitWithAck('pilot:bolt', { matchId: matchId(), bolt: { boltId, x, y, at } });
+  } catch {
+    return { clientActionId: boltId, accepted: false, reasonCode: 'NETWORK' };
+  }
+}
+
 export function haptic(ms = 12): void {
   try {
     navigator.vibrate?.(ms);
@@ -225,19 +253,22 @@ export async function saveCallsign(
   }
 }
 
-/* ------------------------------------------------------ Lightning actions */
+/* -------------------------------------------------------------- Lightning */
 
 export interface PaymentsState {
-  /** The action the open pay sheet is for (null = closed). */
-  action: ActionKind | null;
+  /** The Lightning confirm sheet is open. */
+  open: boolean;
   quote: PaymentsStatus | null;
   intent: PaymentIntentView | null;
   error: string | null;
   retryAfterMs: number | null;
+  /** Intents this phone created: their bolts are this phone's to throw. */
+  mine: string[];
 }
 
 let payments: PaymentsState = {
-  action: null,
+  open: false,
+  mine: [],
   quote: null,
   intent: null,
   error: null,
@@ -265,23 +296,22 @@ export async function loadQuote(): Promise<void> {
   }
 }
 
-/** Opens the pay sheet for one action; nothing is billed until the pilot confirms. */
-export function openPay(action: ActionKind): void {
-  setPayments({ action, intent: null, error: null, retryAfterMs: null });
+/** Opens the Lightning sheet; nothing is billed until the pilot confirms. */
+export function openPay(): void {
+  setPayments({ open: true, intent: null, error: null, retryAfterMs: null });
   void loadQuote();
 }
 
 /** Creates the invoice only after the pilot confirmed amount and receiver on screen. */
 export async function requestPaid(): Promise<void> {
-  const action = payments.action;
-  if (!action) return;
+  if (!payments.open) return;
   setPayments({ error: null, retryAfterMs: null });
   try {
     const res = await fetch('/api/payments/intent', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ matchId: matchId(), action }),
+      body: JSON.stringify({ matchId: matchId() }),
     });
     const body = (await res.json()) as PaymentIntentView & {
       error?: string;
@@ -292,7 +322,7 @@ export async function requestPaid(): Promise<void> {
         error: body.error ?? 'BACKEND_UNAVAILABLE',
         retryAfterMs: body.retryAfterMs ?? null,
       });
-    else setPayments({ intent: body });
+    else setPayments({ intent: body, mine: [...payments.mine.slice(-5), body.intentId] });
   } catch {
     setPayments({ error: 'BACKEND_UNAVAILABLE' });
   }
@@ -313,7 +343,7 @@ export async function refreshIntent(): Promise<void> {
 }
 
 export function closePay(): void {
-  setPayments({ action: null, intent: null, error: null, retryAfterMs: null });
+  setPayments({ open: false, intent: null, error: null, retryAfterMs: null });
   // "N left" under the buttons counts this payment from now on.
   void loadQuote();
 }

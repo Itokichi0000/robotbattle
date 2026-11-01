@@ -1,4 +1,9 @@
-import type { ActionResult, MatchEventMsg, OperatorCommandResult } from '@swed/shared';
+import type {
+  ActionResult,
+  MatchEventMsg,
+  OperatorCommandResult,
+  SessionStatusMsg,
+} from '@swed/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collect, emitAck, eventually, key, TestServer } from './testHarness';
 
@@ -32,6 +37,44 @@ describe('a crowd over sockets', () => {
     );
     expect(results.every((r) => r.accepted)).toBe(true);
     expect(srv.runtime.state.stats.free).toEqual({ ATTACK: 4, DEFEND: 4, REPAIR: 4 });
+  });
+});
+
+describe('teams and the group launch (D-035)', () => {
+  it('tells each phone its own team, shares empty teams, and counts launch swipes', async () => {
+    srv = await new TestServer({ MATCH_PRESET: 'TEST' }).start();
+    const phones = [];
+    const statuses: SessionStatusMsg[][] = [];
+    for (let i = 0; i < 3; i++) {
+      const p = await srv.connect('/pilot', await srv.demoGuest());
+      statuses.push(collect<SessionStatusMsg>(p, 'pilot:sessionStatus'));
+      phones.push(p);
+      await eventually(() => people() === i + 1);
+    }
+    srv.advance(300);
+    const last = (i: number) => statuses[i]!.at(-1);
+    await eventually(() => last(2)?.team === 'REPAIR');
+    expect(last(0)).toMatchObject({ team: 'ATTACK', jobs: ['ATTACK'] });
+    expect(last(1)).toMatchObject({ team: 'DEFEND', jobs: ['DEFEND'] });
+    const matchId = srv.runtime.state.matchId;
+    expect(await emitAck<ActionResult>(phones[0]!, 'pilot:launch', { matchId })).toMatchObject({
+      accepted: false,
+      reasonCode: 'NOT_LAUNCHING',
+    });
+    const op = await srv.connect('/operator', await srv.operatorCookie());
+    await emitAck(op, 'operator:command', { command: 'START' });
+    for (const p of phones.slice(0, 2))
+      expect(await emitAck<ActionResult>(p, 'pilot:launch', { matchId })).toMatchObject({
+        accepted: true,
+      });
+    expect(srv.runtime.snapshotMsg().state.launched).toBe(2);
+    // The engineer leaves: the other two phones now share the repair job.
+    phones[2]!.disconnect();
+    // Wait until the server has seen the phone go, then let its 45 s hold run out.
+    await eventually(() => people() === 2);
+    srv.advance(srv.runtime.state.config.timings.playerHoldMs + 500);
+    await eventually(() => last(0)?.jobs.includes('REPAIR'));
+    expect(last(1)?.jobs).toEqual(['DEFEND', 'REPAIR']);
   });
 });
 
@@ -88,6 +131,27 @@ describe('demo bots across matches', () => {
     srv.advance(5_000);
     expect(srv.runtime.state.phase).toBe('BATTLE');
     expect(taps()).toBeGreaterThan(5);
+  });
+});
+
+describe('demo bots and the launch', () => {
+  it('do not pile the countdown into an instant Lightning when the battle starts', async () => {
+    srv = await new TestServer({ MATCH_PRESET: 'STANDARD' }).start();
+    const op = await srv.connect('/operator', await srv.operatorCookie());
+    const cmd = (c: object) => emitAck<OperatorCommandResult>(op, 'operator:command', c);
+    await cmd({ command: 'SET_DEMO_BOTS', enabled: true });
+    srv.advance(200);
+    await cmd({ command: 'START' });
+    // A long launch (staff paused it to explain): the bots swipe up but call no thunder.
+    srv.advance(5_000);
+    await cmd({ command: 'PAUSE' });
+    srv.advance(60_000);
+    await cmd({ command: 'RESUME' });
+    srv.advance(9_000);
+    expect(srv.runtime.state.phase).toBe('BATTLE');
+    expect(srv.runtime.state.launched.length).toBeGreaterThan(0);
+    srv.advance(200);
+    expect(srv.runtime.state.stats.lightning).toBe(0);
   });
 });
 

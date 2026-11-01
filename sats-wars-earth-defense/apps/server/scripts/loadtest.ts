@@ -11,7 +11,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { botChoose } from '@swed/game-engine';
-import type { MatchSnapshotMsg, PublicMatchState } from '@swed/shared';
+import type { ActionKind, MatchSnapshotMsg, PublicMatchState } from '@swed/shared';
 import { io, type Socket } from 'socket.io-client';
 
 const arg = (name: string, def: string) => {
@@ -85,6 +85,8 @@ interface Phone {
   s: Socket;
   state: PublicMatchState | null;
   matchId: string;
+  /** The phone's team jobs (D-035): a phone plays only what its screen shows. */
+  jobs: ActionKind[];
 }
 const phones: Phone[] = [];
 for (let i = 0; i < pilots; i++) {
@@ -94,7 +96,10 @@ for (let i = 0; i < pilots; i++) {
     body: '{}',
   });
   const s = connect('/pilot', cookieFrom(res, 'sw_pilot'));
-  const ph: Phone = { s, state: null, matchId: '' };
+  const ph: Phone = { s, state: null, matchId: '', jobs: ['ATTACK'] };
+  s.on('pilot:sessionStatus', (m: { jobs?: ActionKind[] }) => {
+    if (m.jobs?.length) ph.jobs = m.jobs;
+  });
   s.on('match:snapshot', (m: MatchSnapshotMsg) => {
     ph.state = m.state;
     ph.matchId = m.matchId;
@@ -116,7 +121,7 @@ await Promise.all(
       await sleep(everyMs + Math.random() * 300);
       const st = ph.state;
       if (!st) continue;
-      const kind = botChoose(st, Math.random(), 0.85);
+      const kind = botChoose(st, Math.random(), 0.85, ph.jobs);
       const t0 = performance.now();
       sent += 1;
       try {

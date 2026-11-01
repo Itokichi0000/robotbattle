@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import type { MatchEventMsg, OperatorCommandResult, PaymentIntentView } from '@swed/shared';
+import { boltDamage } from '@swed/game-engine';
+import { boltTargetAt } from '@swed/shared';
+import type {
+  ActionResult,
+  MatchEventMsg,
+  OperatorCommandResult,
+  PaymentIntentView,
+} from '@swed/shared';
 import type { Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collect, cookiePair, emitAck, eventually, TestServer } from './testHarness';
@@ -33,10 +40,10 @@ async function launch(op: (c: object) => Promise<OperatorCommandResult>) {
   srv.advance(500);
 }
 
-async function intent(cookie: string, action: 'ATTACK' | 'DEFEND' | 'REPAIR' = 'ATTACK') {
+async function intent(cookie: string) {
   const res = await srv.post(
     '/api/payments/intent',
-    { matchId: srv.runtime.state.matchId, action },
+    { matchId: srv.runtime.state.matchId },
     cookie,
   );
   return { status: res.status, body: (await res.json()) as PaymentIntentView & { error?: string } };
@@ -44,8 +51,8 @@ async function intent(cookie: string, action: 'ATTACK' | 'DEFEND' | 'REPAIR' = '
 
 const bossHp = () => srv.runtime.state.enemies[0]!.hp;
 
-describe('sandbox (VIRTUAL) Lightning actions', () => {
-  it('quote → intent → staff settles → the big action lands exactly once, owner notified', async () => {
+describe('sandbox (VIRTUAL) Lightning', () => {
+  it('quote → intent → staff settles → THUNDER MODE once, owner notified, owner throws the bolt', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
     const phone = await joined(cookie);
@@ -69,11 +76,15 @@ describe('sandbox (VIRTUAL) Lightning actions', () => {
       remaining: 3,
       inCombat: true,
     });
-    const effect = quote.effect as Record<string, number>;
-    expect(effect.ATTACK).toBeGreaterThanOrEqual(60);
+    expect(quote.effect).toMatchObject({
+      feverMs: 10_000,
+      feverMultiplier: 3,
+      boltHitMultiplier: 2,
+    });
+    expect((quote.effect as { bolt: number }).bolt).toBeGreaterThanOrEqual(30);
     expect(String(quote.recipient)).toMatch(/VIRTUAL/);
 
-    // Unknown actions are refused before anything is billed.
+    // Unknown fields are refused before anything is billed.
     const bad = await srv.post(
       '/api/payments/intent',
       { matchId: srv.runtime.state.matchId, action: 'NUKE' },
@@ -81,13 +92,12 @@ describe('sandbox (VIRTUAL) Lightning actions', () => {
     );
     expect(bad.status).toBe(400);
 
-    const first = await intent(cookie, 'ATTACK');
+    const first = await intent(cookie);
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({
       status: 'pending',
       mode: 'sandbox',
       amountSats: 21,
-      action: 'ATTACK',
     });
     expect(first.body.paymentRequest).toMatch(/^VIRTUAL-SANDBOX-21SATS-/);
     expect((await intent(cookie)).body.error).toBe('PULSE_PENDING');
@@ -98,44 +108,53 @@ describe('sandbox (VIRTUAL) Lightning actions', () => {
       (await srv.fetch(`/api/payments/intent/${first.body.intentId}`, { cookie: other })).status,
     ).toBe(404);
 
-    const hp0 = bossHp();
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(true);
-    expect(hp0 - bossHp()).toBe(effect.ATTACK);
+    expect(srv.runtime.state.feverUntil).toBeGreaterThan(srv.runtime.state.t);
     expect((await op({ command: 'SANDBOX_SETTLE', intentId: first.body.intentId })).ok).toBe(false);
-    expect(hp0 - bossHp()).toBe(effect.ATTACK);
-    await eventually(() => statuses.some((s) => s.status === 'settled' && s.applied === 'applied'));
-    const big = await eventually(() =>
-      events.find((e) => e.payload.type === 'action' && e.payload.paid),
-    );
-    expect(big.payload).toMatchObject({ kind: 'ATTACK', paid: true, virtual: true, count: 1 });
     expect(srv.runtime.state.stats.lightning).toBe(1);
+    await eventually(() => statuses.some((s) => s.status === 'settled' && s.applied === 'applied'));
+    const ev = await eventually(() => events.find((e) => e.payload.type === 'lightning'));
+    expect(ev.payload).toMatchObject({ virtual: true, bot: false, settleMs: null });
+    expect(JSON.stringify(ev.payload)).not.toMatch(/pilot/);
 
-    // Cooldown between one person's Lightning actions.
-    expect((await intent(cookie, 'DEFEND')).body.error).toBe('PULSE_COOLDOWN');
+    // Only the payer can throw the bolt; a tap on the weak point is worth double.
+    const bolt = srv.runtime.state.bolts[0]!;
+    expect(bolt.id).toBe(first.body.intentId);
+    const otherPhone = await srv.connect('/pilot', other);
+    const at = srv.runtime.state.t;
+    const aim = boltTargetAt(bolt.id, at - bolt.startedAt);
+    const req = { matchId: srv.runtime.state.matchId, bolt: { boltId: bolt.id, ...aim, at } };
+    expect(await emitAck<ActionResult>(otherPhone, 'pilot:bolt', req)).toMatchObject({
+      accepted: false,
+      reasonCode: 'NO_BOLT',
+    });
+    const hp0 = bossHp();
+    expect(await emitAck<ActionResult>(phone, 'pilot:bolt', req)).toMatchObject({ accepted: true });
+    expect(hp0 - bossHp()).toBe(boltDamage(srv.runtime.state) * 2);
+
+    // Cooldown between one person's Lightning payments.
+    expect((await intent(cookie)).body.error).toBe('PULSE_COOLDOWN');
     const view = (await (
       await srv.fetch(`/api/payments/intent/${first.body.intentId}`, { cookie })
     ).json()) as PaymentIntentView;
     expect(view).toMatchObject({ status: 'settled', applied: 'applied', paymentRequest: null });
   });
 
-  it('caps Lightning actions per person per round; 守る and 直す work the same way', async () => {
+  it('caps Lightning per person per round', async () => {
     srv = await new TestServer().start();
     const cookie = await srv.demoGuest();
     await joined(cookie);
     const op = await operator();
     await launch(op);
-    srv.runtime.state.mechHp = 20;
-    const kinds = ['DEFEND', 'REPAIR', 'ATTACK'] as const;
-    for (const k of kinds) {
-      const r = await intent(cookie, k);
+    for (let i = 0; i < 3; i++) {
+      const r = await intent(cookie);
       expect(r.status).toBe(200);
       await op({ command: 'SANDBOX_SETTLE', intentId: r.body.intentId });
       srv.built.db
         .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
         .run();
     }
-    expect(srv.runtime.state.stats.paid).toEqual({ ATTACK: 1, DEFEND: 1, REPAIR: 1 });
-    expect(srv.runtime.state.mechHp).toBeGreaterThan(20);
+    expect(srv.runtime.state.stats.lightning).toBe(3);
     expect((await intent(cookie)).body.error).toBe('PULSE_LIMIT');
   });
 
@@ -146,14 +165,14 @@ describe('sandbox (VIRTUAL) Lightning actions', () => {
     const op = await operator();
     await launch(op);
     expect((await op({ command: 'SET_AUTO_SETTLE_VIRTUAL', enabled: true })).ok).toBe(true);
-    const r = await intent(cookie, 'DEFEND');
+    const r = await intent(cookie);
     expect(r.status).toBe(200);
     srv.built.db
       .prepare("UPDATE payment_intents SET created_at = '2000-01-01T00:00:00.000Z'")
       .run();
     await srv.built.payments.poll();
-    expect(srv.runtime.state.stats.paid.DEFEND).toBe(1);
-    expect(srv.runtime.state.shield).toBeGreaterThan(0);
+    expect(srv.runtime.state.stats.lightning).toBe(1);
+    expect(srv.runtime.state.feverUntil).toBeGreaterThan(srv.runtime.state.t);
   });
 });
 
@@ -251,24 +270,24 @@ describe('live (LNbits) Lightning actions', () => {
     );
     const hash = [...ln.invoices.keys()][0]!;
 
-    const hp0 = bossHp();
     // A forged webhook (wrong token) is refused; a webhook for an unpaid invoice changes nothing.
     expect(
       (await srv.post('/api/payments/webhook/lnbits?token=nope', { payment_hash: hash })).status,
     ).toBe(403);
     const hook = `/api/payments/webhook/lnbits?token=test-webhook-secret-0123456789`;
     expect((await srv.post(hook, { payment_hash: hash })).status).toBe(200);
-    expect(bossHp()).toBe(hp0);
+    expect(srv.runtime.state.stats.lightning).toBe(0);
 
     ln.pay(hash);
-    // Duplicate, concurrent webhooks: the action lands once.
+    // Duplicate, concurrent webhooks: THUNDER MODE and the bolt land once.
     await Promise.all([
       srv.post(hook, { payment_hash: hash }),
       srv.post(hook, { payment_hash: hash }),
       srv.post(hook, { payment_hash: hash }),
     ]);
     await srv.built.payments.poll();
-    expect(hp0 - bossHp()).toBeGreaterThanOrEqual(60);
+    expect(srv.runtime.state.feverUntil).toBeGreaterThan(srv.runtime.state.t);
+    expect(srv.runtime.state.bolts).toHaveLength(1);
     expect(srv.runtime.state.stats.lightning).toBe(1);
     expect(srv.runtime.state.stats.virtual).toBe(0);
     await eventually(() => statuses.find((s) => s.status === 'settled' && s.applied === 'applied'));

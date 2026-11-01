@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { ACTION_KINDS, isCombatPhase } from '@swed/shared';
-import type { ActionKind, PaymentIntentView, PaymentsStatus, PulseRefusal } from '@swed/shared';
-import { paidEffect } from '@swed/game-engine';
+import { isCombatPhase } from '@swed/shared';
+import type {
+  LightningEffect,
+  PaymentIntentView,
+  PaymentsStatus,
+  PulseRefusal,
+} from '@swed/shared';
+import { boltDamage } from '@swed/game-engine';
 import type { Db } from '../db';
 import { audit, nowIso, tx } from '../db';
 import type { MatchRuntime } from '../runtime';
@@ -25,7 +30,8 @@ interface IntentRow {
   pilot_id: string;
   match_id: string;
   seat_id: string | null;
-  action: ActionKind | null;
+  /** 'LIGHTNING' since D-035 (older rows: the action of a D-033 big tap). */
+  action: string | null;
   amount_sats: number;
   mode: PaymentMode;
   provider: string;
@@ -101,7 +107,6 @@ export class PaymentService {
   private view(r: IntentRow): PaymentIntentView {
     return {
       intentId: r.id,
-      action: r.action ?? 'ATTACK',
       status: r.status,
       applied: r.applied,
       amountSats: r.amount_sats,
@@ -119,13 +124,16 @@ export class PaymentService {
     return { perPilot: p.perPilotPerMatch, cooldownMs: p.cooldownMs, maxPerMatch: p.maxPerMatch };
   }
 
-  /** Effect of one Lightning action right now, per action (the same for every payer). */
-  private effects(): Record<ActionKind, number> {
+  /** What one Lightning payment does right now (the same for every payer, D-035). */
+  private effects(): LightningEffect {
     const s = this.deps.runtime.state;
-    return Object.fromEntries(ACTION_KINDS.map((k) => [k, paidEffect(s, k)])) as Record<
-      ActionKind,
-      number
-    >;
+    const p = s.config.paid;
+    return {
+      feverMs: p.feverMs,
+      feverMultiplier: p.feverMultiplier,
+      bolt: boltDamage(s),
+      boltHitMultiplier: p.boltHitMultiplier,
+    };
   }
 
   /** Everything the phone needs to show before the pilot decides (amount, receiver, limits). */
@@ -153,7 +161,6 @@ export class PaymentService {
   async createIntent(
     pilot: PilotRow,
     matchId: string,
-    action: ActionKind,
   ): Promise<
     | { ok: true; intent: PaymentIntentView }
     | { ok: false; code: PulseRefusal; retryAfterMs?: number }
@@ -196,7 +203,7 @@ export class PaymentService {
       const inv = await this.deps.provider.createInvoice({
         intentId,
         amountSats: this.deps.amountSats,
-        memo: `SATS WARS Lightning ${action} (match #${s.matchNumber})`,
+        memo: `SATS WARS Lightning (match #${s.matchNumber})`,
         expiresInSeconds: INVOICE_TTL_SECONDS,
         webhookUrl: this.deps.webhookUrl,
       });
@@ -208,7 +215,7 @@ export class PaymentService {
         intentId,
         pilot.id,
         s.matchId,
-        action,
+        'LIGHTNING',
         this.deps.amountSats,
         this.mode,
         this.deps.provider.name,
@@ -221,7 +228,7 @@ export class PaymentService {
         db,
         `pilot:${pilot.public_name}`,
         'PULSE_INTENT',
-        `${intentId} ${action} ${this.mode} ${this.deps.amountSats}sats`,
+        `${intentId} LIGHTNING ${this.mode} ${this.deps.amountSats}sats`,
       );
       return { ok: true, intent: this.view(this.row(intentId)!) };
     } catch (err) {
@@ -257,13 +264,7 @@ export class PaymentService {
         // Invoice issued → confirmed here: the honest "Lightning speed" number for the screen
         // (includes the payer's own time in the wallet; never shown for VIRTUAL pulses).
         const settleMs = Math.max(0, Date.now() - Date.parse(r.created_at));
-        const out = rt.applyPaid(
-          r.id,
-          r.pilot_id,
-          r.action ?? 'ATTACK',
-          r.mode === 'sandbox',
-          settleMs,
-        );
+        const out = rt.applyPaid(r.id, r.pilot_id, r.mode === 'sandbox', settleMs);
         applied = out ? 'applied' : 'unapplied';
         if (!out) note = 'engine refused (duplicate or not in combat)';
       } else {
@@ -461,7 +462,6 @@ export class PaymentService {
         applied: r.applied,
         amountSats: r.amount_sats,
         mode: r.mode,
-        action: r.action ?? 'ATTACK',
         createdAt: r.created_at,
         currentMatch: r.match_id === s.matchId,
         note: r.note,

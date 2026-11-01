@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTION_KINDS,
+  boltDamageFor,
+  boltTargetAt,
   bearingToDirection,
   bossHpFor,
   SQUAD_IDS,
@@ -88,12 +89,32 @@ describe('config', () => {
     expect(PRESETS.SHORT.timings.battleMs).toBe(90_000);
   });
 
-  it('a Lightning action is the same size for everyone and bigger than a free tap', () => {
+  it('Lightning is a fixed 21 sats: THUNDER MODE multiplies play, the bolt dwarfs a tap', () => {
     for (const p of Object.values(PRESETS)) {
-      for (const k of ACTION_KINDS)
-        expect(p.paid.effect[k]).toBeGreaterThanOrEqual(p.free.effect[k] * 10);
       expect(p.paid.amountSats).toBe(21);
+      expect(p.paid.feverMultiplier).toBeGreaterThan(1);
+      expect(p.paid.feverMs).toBeGreaterThanOrEqual(5_000);
+      expect(boltDamageFor(p, 300)).toBeGreaterThanOrEqual(p.free.effect.ATTACK * 5);
+      expect(boltDamageFor(p, 4_000)).toBe(Math.round(4_000 * p.paid.boltBossShare));
+      // Every bolt a round allows, all on the weak point, still cannot finish the boss.
+      for (const n of [1, 2, 3, 5, 10, 40]) {
+        const hp = bossHpFor(p, n);
+        const bolts = Math.min(p.paid.maxPerMatch, p.paid.perPilotPerMatch * n);
+        expect(bolts * boltDamageFor(p, hp) * p.paid.boltHitMultiplier).toBeLessThan(hp);
+      }
     }
+  });
+
+  it('moves the weak point the same way for the phone and the server, inside the field', () => {
+    for (let ms = 0; ms < 8_000; ms += 250) {
+      const a = boltTargetAt('pi-abc', ms);
+      expect(a).toEqual(boltTargetAt('pi-abc', ms));
+      expect(a.x).toBeGreaterThan(0.1);
+      expect(a.x).toBeLessThan(0.9);
+      expect(a.y).toBeGreaterThan(0.15);
+      expect(a.y).toBeLessThan(0.7);
+    }
+    expect(boltTargetAt('pi-abc', 1_000)).not.toEqual(boltTargetAt('pi-xyz', 1_000));
   });
 
   it('announces squad strikes at least 4 s ahead', () => {

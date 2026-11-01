@@ -2,8 +2,8 @@ import { useStore, useTicker } from '@swed/client';
 import { squadStrike, mechClaw, nowLine, percent } from '@swed/game-engine';
 import {
   ACTION_KINDS,
-  ACTION_LABEL,
   SQUADS,
+  TEAM_LABEL,
   SQUAD_IDS,
   formatClock,
   isCombatPhase,
@@ -182,8 +182,11 @@ function ThreatCall({ s, mt }: { s: PublicMatchState; mt: number }) {
   );
 }
 
-/** The three buttons on every phone, with the one to press now lit and recent activity. */
-function ActionBar({
+/**
+ * The three teams (D-035): how many people are in each, what their phones are doing right now,
+ * and which team the hall needs most (lit). Every free action shows up here as live activity.
+ */
+function TeamBar({
   s,
   mt,
   activity,
@@ -193,8 +196,15 @@ function ActionBar({
   activity: Record<ActionKind, number>;
 }) {
   const line = nowLine(s, mt);
+  const fever = s.feverUntil > mt;
+  const mult = fever ? s.hints.feverMultiplier : 1;
+  const doing: Record<ActionKind, string> = {
+    ATTACK: '敵機を撃墜 → 母艦にダメージ',
+    DEFEND: 'ミサイルを弾く → シールド',
+    REPAIR: '火花を直す → 雷神を修理',
+  };
   return (
-    <div className="actbar">
+    <div className={`actbar teams${fever ? ' fever' : ''}`}>
       {ACTION_KINDS.map((kind) => {
         const Icon = ACTION_ICON[kind];
         const rec = line.action === kind;
@@ -207,30 +217,61 @@ function ActionBar({
           >
             <Icon size={44} />
             <div className="ab-name">
-              <b>{ACTION_LABEL[kind].ja}</b>
-              <span>{ACTION_LABEL[kind].en}</span>
+              <b>{TEAM_LABEL[kind].ja}</b>
+              <span>
+                {TEAM_LABEL[kind].en} · <span className="sw-num">{s.teams[kind]}</span>人
+              </span>
             </div>
             <div className="ab-what">
-              <span>
-                タップ（無料）{' '}
-                <b className="sw-num">
-                  {sign}
-                  {s.hints.free[kind]}
-                </b>
-              </span>
+              <span>{doing[kind]}</span>
               <span className="paid">
-                <IconBolt size={18} /> {s.hints.paidAmountSats} sats{' '}
+                1回{' '}
                 <b className="sw-num">
                   {sign}
-                  {s.hints.paid[kind]}
+                  {Math.round(s.hints.free[kind] * s.hints.teamScale[kind] * mult)}
                 </b>
+                {fever ? <em> 雷×{mult}</em> : null}
               </span>
             </div>
             <div className="ab-live sw-num">{activity[kind] > 0 ? `×${activity[kind]}` : ''}</div>
-            {rec ? <em className="ab-tag">いまこれ！</em> : null}
+            {rec ? <em className="ab-tag">いまこの班！</em> : null}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** THUNDER MODE on the big screen: a lit frame and a countdown everyone can read. */
+function FeverCall({ s, mt }: { s: PublicMatchState; mt: number }) {
+  if (s.feverUntil <= mt) return null;
+  return (
+    <>
+      <div className="fever-frame" aria-hidden />
+      <div className="fever-call" role="status">
+        <IconBolt size={30} />
+        <b>雷モード ×{s.hints.feverMultiplier}</b>
+        <span className="sw-num">あと {Math.ceil((s.feverUntil - mt) / 1000)} 秒</span>
+        <small>全員の攻撃・守り・修理が強くなる / THUNDER MODE</small>
+      </div>
+    </>
+  );
+}
+
+/** The group launch on the big screen: swipe up together, watch the energy fill. */
+function LaunchCall({ s }: { s: PublicMatchState }) {
+  const pct = s.players > 0 ? Math.round((s.launched / s.players) * 100) : 0;
+  return (
+    <div className="launch-call" role="status">
+      <b>全員でスマホを上にスワイプ！</b>
+      <span>SWIPE UP TO LAUNCH RAIJIN</span>
+      <div className="launch-meter">
+        <i style={{ width: `${pct}%` }} />
+      </div>
+      <span className="sw-num">
+        発進エネルギー {pct}%（{s.launched} / {s.players} 人）— 初期シールド +
+        {Math.round((s.hints.launchShield * s.launched) / Math.max(1, s.players))}
+      </span>
     </div>
   );
 }
@@ -276,20 +317,22 @@ function useMoment(): Moment | null {
     return store.onEvent(({ payload: e }) => {
       const show = (tone: Moment['tone'], big: string, sub: string, ms = 2_600) =>
         setM({ id: ++n, tone, big, sub, until: performance.now() + ms });
-      if (e.type === 'action' && e.paid) {
-        const what =
-          e.kind === 'ATTACK'
-            ? `母艦に ${e.value} ダメージ`
-            : e.kind === 'DEFEND'
-              ? `シールド +${e.value}`
-              : `雷神の装甲 +${e.value}`;
-        // Who paid is never shown (spec §7.4); what money moved always is.
+      if (e.type === 'lightning') {
+        // Who paid is never shown (spec §7.4); whether real money moved always is.
         const tag = e.bot
           ? 'DEMO（デモ・お金は動きません）'
           : e.virtual
             ? 'VIRTUAL（テスト・お金は動きません）'
-            : 'Lightning 着金';
-        show('bolt', `21 sats で 大きく${ACTION_LABEL[e.kind].ja}！`, `${what} — ${tag}`, 3_200);
+            : `Lightning 着金${e.settleMs !== null ? `（請求から ${(e.settleMs / 1000).toFixed(1)} 秒）` : ''}`;
+        show('bolt', '雷が呼ばれた！ 雷モード発動', `全員の行動が強くなる — ${tag}`, 3_200);
+      }
+      if (e.type === 'bolt_thrown') {
+        show(
+          'bolt',
+          e.hit ? `弱点に直撃！ −${e.damage}` : `雷撃 −${e.damage}`,
+          e.hit ? '雷が母艦の弱点を貫いた / WEAK POINT HIT' : '母艦に雷が落ちた / BOLT LANDED',
+          2_600,
+        );
       }
       if (e.type === 'strike_blocked') {
         show('ok', `${SQUADS[e.squadId].nameJa}を守った！`, 'シールドで攻撃を防いだ / SQUAD SAVED');
@@ -311,7 +354,7 @@ function useActivity(now: number): Record<ActionKind, number> {
   useEffect(
     () =>
       store.onEvent(({ payload: e }) => {
-        if (e.type !== 'action' || e.paid) return;
+        if (e.type !== 'action') return;
         const at = performance.now();
         setLog((l) => [...l.filter((x) => at - x.at < 5_000), { at, kind: e.kind, n: e.count }]);
       }),
@@ -392,11 +435,10 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
       {snap?.phase === 'DEPLOYMENT' ? (
         <>
           <div className="banner">RAIJIN-01 LAUNCH 出撃</div>
-          <div className="center-call" style={{ top: 860 }}>
-            <div className="sub">まもなく戦闘開始 — スマホの3つのボタンを用意 / GET READY</div>
-          </div>
+          <LaunchCall s={snap} />
         </>
       ) : null}
+      {snap?.phase === 'COUNTDOWN' ? <LaunchCall s={snap} /> : null}
       {snap && (combat || snap.phase === 'VICTORY' || snap.phase === 'DEFEAT') ? (
         <div className="hud-dim" style={{ opacity: finishing ? 0.12 : combat ? 1 : 0.25 }}>
           <TopBar s={snap} mt={mt} />
@@ -408,7 +450,8 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
               <NowCard s={snap} mt={mt} />
               <Radar s={snap} mt={mt} />
               <WorldMarkers s={snap} mt={mt} />
-              <ActionBar s={snap} mt={mt} activity={activity} />
+              <TeamBar s={snap} mt={mt} activity={activity} />
+              <FeverCall s={snap} mt={mt} />
               <JoinMini />
             </>
           ) : null}
@@ -436,8 +479,8 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
         <div className="act-intro" role="status">
           <span className="no">MISSION</span>
           <b>エイリアン母艦を地球に着く前に倒せ</b>
-          <span className="en">ATTACK · DEFEND · REPAIR</span>
-          <p>スマホの3つのボタン — 撃つ・守る・直す。光っているボタンを押そう</p>
+          <span className="en">GUNNERS · GUARDS · ENGINEERS</span>
+          <p>砲撃班は敵機を撃て、防衛班はミサイルを弾け、整備班は火花を直せ</p>
         </div>
       ) : null}
       {combat &&

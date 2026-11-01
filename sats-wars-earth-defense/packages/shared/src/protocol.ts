@@ -1,4 +1,4 @@
-import type { ActionResult, PilotActionInput } from './actions';
+import type { ActionResult, BoltThrowInput, PilotActionInput } from './actions';
 import type { ActionKind, PresetId } from './config';
 import type { MatchEvent, MatchEventType } from './events';
 import type { Phase } from './phases';
@@ -84,10 +84,18 @@ export const PULSE_REFUSAL_TEXT: Record<PulseRefusal, { ja: string; en: string }
   },
 };
 
+/** What one Lightning payment does (D-035), for the confirm sheet and the operator. */
+export interface LightningEffect {
+  /** THUNDER MODE for everyone: free actions × multiplier for this long. */
+  feverMs: number;
+  feverMultiplier: number;
+  /** The payer's bolt now, and the bonus for hitting the weak point. */
+  bolt: number;
+  boltHitMultiplier: number;
+}
+
 export interface PaymentIntentView {
   intentId: string;
-  /** The action this payment powers (撃つ / 守る / 直す). */
-  action: ActionKind;
   status: 'pending' | 'settled' | 'expired' | 'failed' | 'canceled';
   applied: 'applied' | 'unapplied' | null;
   amountSats: number;
@@ -105,8 +113,7 @@ export interface PaymentsStatus {
   mode: 'sandbox' | 'live';
   enabled: boolean;
   amountSats: number;
-  /** Effect of one Lightning action, per action. */
-  effect: Record<ActionKind, number>;
+  effect: LightningEffect;
   recipient: string;
   remaining: number;
   cooldownUntil: string | null;
@@ -119,6 +126,9 @@ export interface SessionStatusMsg {
   matchId: string;
   /** Counted in the current match (joins automatically while the phone is connected). */
   joined: boolean;
+  /** The pilot's team (D-035) and every job their phone may do now (teams with nobody are shared). */
+  team: ActionKind | null;
+  jobs: ActionKind[];
 }
 
 /* ---------------------------------------------------------------- display */
@@ -152,8 +162,21 @@ export interface PilotServerToClient {
   'pilot:notice': (msg: { code: 'SESSION_REPLACED' | 'KICKED' }) => void;
 }
 
+export interface PilotLaunchReq {
+  matchId: string;
+}
+
+export interface PilotBoltReq {
+  matchId: string;
+  bolt: BoltThrowInput;
+}
+
 export interface PilotClientToServer {
   'pilot:action': (req: PilotActionReq, ack: (res: ActionResult) => void) => void;
+  /** Group launch: one swipe up during the countdown / launch. */
+  'pilot:launch': (req: PilotLaunchReq, ack: (res: ActionResult) => void) => void;
+  /** The payer throws their Lightning bolt. */
+  'pilot:bolt': (req: PilotBoltReq, ack: (res: ActionResult) => void) => void;
 }
 
 /* --------------------------------------------------------------- operator */
@@ -210,7 +233,7 @@ export interface OperatorPaymentsView {
   autoSettleVirtual: boolean;
   recipient: string;
   amountSats: number;
-  effect: Record<ActionKind, number>;
+  effect: LightningEffect;
   perPilotPerMatch: number;
   cooldownSec: number;
   maxPerMatch: number;
@@ -225,7 +248,6 @@ export interface OperatorPaymentsView {
     applied: PaymentIntentView['applied'];
     amountSats: number;
     mode: AppMode;
-    action: ActionKind;
     createdAt: string;
     currentMatch: boolean;
     note: string | null;

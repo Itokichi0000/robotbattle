@@ -59,8 +59,8 @@ export function CameraDirector({
         const now = performance.now();
         if (reducedMotion) return;
         const free = now - lastOverride.current > 5_000;
-        // A Lightning attack gets a shoulder shot; free taps keep the wide view.
-        if (e.type === 'action' && e.paid && e.kind === 'ATTACK' && free) {
+        // A Lightning bolt gets a shoulder shot; free taps keep the wide view.
+        if (e.type === 'bolt_thrown' && free) {
           const left = Math.random() < 0.5;
           override.current = {
             shot: {

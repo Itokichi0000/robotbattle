@@ -3,8 +3,9 @@ import type { MatchSnapshotMsg } from '@swed/shared';
 import { BASE, OPERATOR_PASSWORD } from './playwright.config';
 
 /**
- * D-033 acceptance: two phones scan in (no seats), press the three buttons, and the big
- * screen and the server agree. Every assertion about outcomes reads the server's public state.
+ * D-035 acceptance: two phones scan in (no seats) and land in teams; each plays its team's
+ * screen (drones, missiles, sparks) and the big screen and the server agree. Every assertion
+ * about outcomes reads the server's public state.
  */
 
 // The browser is shared by every spec: close the phones a test opened, or they stay in the
@@ -23,15 +24,21 @@ async function phone(browser: Browser): Promise<Page> {
   const p = await ctx.newPage();
   await p.goto('/pilot/');
   await p.getByRole('button', { name: /DEMO GUEST/ }).click();
-  // Scanning is joining: straight into the crowd, no seat to pick.
+  // Scanning is joining: straight into a team, no seat to pick.
   await expect(p.getByText('参加しました')).toBeVisible();
-  await expect(p.getByText(/ボタンは3つだけ/)).toBeVisible();
+  await expect(p.locator('.my-team')).toBeVisible();
   return p;
 }
 
-/** The free button for an action (the big one on the left of each row). */
-const freeButton = (p: Page, name: '撃つ' | '守る' | '直す') =>
-  p.locator('.act-free').filter({ has: p.locator('.act-name', { hasText: name }) });
+/**
+ * Hits one target on the phone's field. Targets move every frame, so the test fires the
+ * pointerdown on the element itself rather than waiting for it to hold still.
+ */
+async function hit(p: Page, kind: 'drone' | 'missile' | 'spark', timeout = 30_000) {
+  const t = p.locator(`.arena .tgt.${kind}:not(.boom)`).first();
+  await t.waitFor({ timeout });
+  await t.dispatchEvent('pointerdown');
+}
 
 test('two phones, one mech: free taps change the server state, the big screen follows', async ({
   browser,
@@ -60,7 +67,7 @@ test('two phones, one mech: free taps change the server state, the big screen fo
   await expect(display.locator('.stage canvas')).toBeVisible({ timeout: 60_000 });
   await expect(display.getByText('SCAN TO JOIN')).toBeVisible();
   await expect(display.locator('img[src="/api/public/join.svg"]')).toBeVisible();
-  await expect(display.getByText(/ボタンは3つだけ/)).toBeVisible();
+  await expect(display.getByText(/3つの班で雷神を動かす/)).toBeVisible();
 
   const a = await phone(browser);
   const b = await phone(browser);
@@ -68,6 +75,10 @@ test('two phones, one mech: free taps change the server state, the big screen fo
   let m = await publicMatch(op);
   expect(m.phase).toBe('LOBBY');
   expect(m.state.humans).toBe(2);
+  // First in is a gunner, second a guard; the empty engineer job is shared.
+  expect(m.state.teams).toEqual({ ATTACK: 1, DEFEND: 1, REPAIR: 0 });
+  await expect(a.locator('.my-team')).toContainText('砲撃班');
+  await expect(b.locator('.my-team')).toContainText('防衛班');
   await expect(display.locator('.pilots-count')).toContainText('02');
   expect(JSON.stringify(m)).not.toMatch(/pilotId/);
 
@@ -76,28 +87,42 @@ test('two phones, one mech: free taps change the server state, the big screen fo
   await expect(display.locator('.topbar')).toBeVisible();
   await expect(display.locator('.bossbar')).toBeVisible();
 
-  // ATTACK: one free tap takes boss HP down on the server.
+  // GUNNER: shooting a drone on the phone takes the mothership's HP down on the server.
   const hp0 = (await publicMatch(op)).state.boss!.hp;
-  await freeButton(a, '撃つ').click();
+  await hit(a, 'drone');
   await expect
     .poll(async () => (await publicMatch(op)).state.boss!.hp, { timeout: 10_000 })
     .toBeLessThan(hp0);
-  await expect(a.locator('.mine')).toContainText('撃つ 1');
+  await expect(a.locator('.mine b')).toHaveText('1');
+  await expect(a.locator('.job-call')).toContainText('砲撃班');
 
-  // DEFEND and REPAIR reach the server too (counted per button for the whole crowd).
-  await freeButton(b, '守る').click();
-  await b.waitForTimeout(800); // the free cooldown
-  await freeButton(b, '直す').click();
+  // GUARD: when a strike is announced, missiles fall on the guard's phone; knocking one away
+  // fills the shield.
+  await expect(b.locator('.job-call')).toContainText('ミサイル', { timeout: 30_000 });
+  await hit(b, 'missile');
   await expect
-    .poll(async () => {
-      const f = (await publicMatch(op)).state.stats.free;
-      return f.DEFEND >= 1 && f.REPAIR >= 1;
-    })
-    .toBe(true);
-
-  // The phone always shows what to press now, and the same button is lit.
-  await expect(a.locator('.now-call')).toBeVisible();
-  await expect(a.locator('.act.rec')).toHaveCount(1);
+    .poll(async () => (await publicMatch(op)).state.stats.free.DEFEND, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
+  // ENGINEER's job is shared (nobody is an engineer): once RAIJIN is clawed, sparks appear on
+  // the phones. The guard keeps knocking missiles away meanwhile, or the squads fall first.
+  await expect
+    .poll(
+      async () => {
+        for (const [p, kinds] of [
+          [b, ['missile', 'spark']],
+          [a, ['spark']],
+        ] as const) {
+          for (const k of kinds) {
+            const t = p.locator(`.arena .tgt.${k}:not(.boom)`).first();
+            if (await t.count()) await t.dispatchEvent('pointerdown').catch(() => undefined);
+          }
+        }
+        return (await publicMatch(op)).state.stats.free.REPAIR;
+      },
+      { timeout: 90_000, intervals: [600] },
+    )
+    .toBeGreaterThanOrEqual(1);
+  await expect(display.locator('.actbar.teams')).toBeVisible();
 
   // Operator PAUSE reaches every phone; the match clock freezes.
   await op.getByRole('button', { name: /PAUSE/ }).click();
@@ -110,7 +135,7 @@ test('two phones, one mech: free taps change the server state, the big screen fo
 
   // A phone that reloads mid-fight is still in the crowd (held by the server).
   await a.reload();
-  await expect(freeButton(a, '撃つ')).toBeVisible({ timeout: 20_000 });
+  await expect(a.locator('.arena')).toBeVisible({ timeout: 20_000 });
   m = await publicMatch(op);
   expect(m.state.humans).toBe(2);
 });

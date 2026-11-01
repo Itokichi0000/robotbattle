@@ -8,6 +8,14 @@ export interface PilotActionInput {
   kind: ActionKind;
 }
 
+/** The payer's throw: where they tapped on the square aiming field, and when (match time). */
+export interface BoltThrowInput {
+  boltId: string;
+  x: number;
+  y: number;
+  at: number;
+}
+
 export const REASON_CODES = [
   'INVALID',
   'STALE_MATCH',
@@ -15,6 +23,9 @@ export const REASON_CODES = [
   'NOT_IN_COMBAT',
   'PAUSED',
   'COOLDOWN',
+  'WRONG_TEAM',
+  'NOT_LAUNCHING',
+  'NO_BOLT',
   'RATE_LIMITED',
   'DUPLICATE',
   'NETWORK',
@@ -29,6 +40,9 @@ export const REASON_TEXT: Record<ReasonCode, { ja: string; en: string }> = {
   NOT_IN_COMBAT: { ja: '戦闘中だけ押せます', en: 'Only during the battle' },
   PAUSED: { ja: '一時停止中です', en: 'Paused' },
   COOLDOWN: { ja: '少し待って', en: 'Wait a moment' },
+  WRONG_TEAM: { ja: 'それは別の班の仕事です', en: "That is another team's job" },
+  NOT_LAUNCHING: { ja: '発進のときだけスワイプできます', en: 'Only during the launch' },
+  NO_BOLT: { ja: '投げられる雷がありません', en: 'No bolt to throw' },
   RATE_LIMITED: { ja: '押しすぎです。少し待って', en: 'Too fast. Wait a moment' },
   DUPLICATE: { ja: '受付済み', en: 'Already received' },
   NETWORK: { ja: '通信待ち。もう一度押してください', en: 'No answer. Tap again' },

@@ -328,24 +328,29 @@ export function Raijin() {
         // perform it on the one machine: guns fire, shoulders shield, the frame repairs.
         if (e.type === 'action') {
           if (e.kind === 'ATTACK') {
-            const sides: GunnerSeatId[] = e.paid
+            const sides: GunnerSeatId[] = e.fever
               ? ['GUNNER_L', 'GUNNER_R']
               : [Math.random() < 0.5 ? 'GUNNER_L' : 'GUNNER_R'];
             for (const g of sides) {
               kick.current[g] = 1;
-              pulse.current[g] = e.paid ? 1 : 0.6;
+              pulse.current[g] = e.fever ? 1 : 0.6;
             }
           } else if (e.kind === 'DEFEND') {
-            pulse.current.SHIELD_L = e.paid ? 1 : 0.6;
-            pulse.current.SHIELD_R = e.paid ? 1 : 0.6;
+            pulse.current.SHIELD_L = e.fever ? 1 : 0.6;
+            pulse.current.SHIELD_R = e.fever ? 1 : 0.6;
           } else {
-            pulse.current.ENGINEER_LEGS = e.paid ? 1 : 0.6;
-            pulse.current.ENGINEER_CORE = e.paid ? 1 : 0.6;
+            pulse.current.ENGINEER_LEGS = e.fever ? 1 : 0.6;
+            pulse.current.ENGINEER_CORE = e.fever ? 1 : 0.6;
           }
-          if (e.paid) {
-            pulse.current.POWER_CORE = 1;
-            pulse.current.POWER_ROUTER = 1;
-          }
+        }
+        if (e.type === 'lightning' || e.type === 'bolt_thrown') {
+          pulse.current.POWER_CORE = 1;
+          pulse.current.POWER_ROUTER = 1;
+          if (e.type === 'bolt_thrown')
+            for (const g of ['GUNNER_L', 'GUNNER_R'] as const) {
+              kick.current[g] = 1;
+              pulse.current[g] = 1;
+            }
         }
         if (e.type === 'player_joined') {
           const id = SEAT_IDS[Math.floor(Math.random() * SEAT_IDS.length)];

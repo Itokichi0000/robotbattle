@@ -16,7 +16,8 @@ export interface ActionCounts {
 
 export interface PlayerStats {
   free: ActionCounts;
-  paid: ActionCounts;
+  /** Lightning payments of this pilot that were applied. */
+  lightning: number;
   damage: number;
 }
 
@@ -30,6 +31,8 @@ export interface PlayerState {
   /** Match clock when the player dropped; still counted for `playerHoldMs`. */
   disconnectedAt: number | null;
   joinedAt: number;
+  /** The player's team (D-035): the action their phone screen is built around. */
+  role: ActionKind;
   /** Next free action is accepted from this match time. */
   freeReadyAt: number;
   stats: PlayerStats;
@@ -83,12 +86,31 @@ export interface SquadState {
   lost: boolean;
 }
 
+/**
+ * A Lightning payer's bolt (D-035): granted when the payment is confirmed, thrown by the payer
+ * on their phone (or for them when the window runs out). `pilotId` null = demo bot.
+ */
+export interface BoltState {
+  id: string;
+  pilotId: string | null;
+  startedAt: number;
+  expiresAt: number;
+  virtual: boolean;
+  bot: boolean;
+}
+
 export interface MatchStats {
   free: ActionCounts;
-  paid: ActionCounts;
-  /** Lightning (or VIRTUAL) actions applied, and how many were VIRTUAL. */
+  /** Lightning (or VIRTUAL) payments applied, and how many were VIRTUAL. */
   lightning: number;
   virtual: number;
+  /** Bolts thrown, and how many hit the weak point. */
+  bolts: number;
+  boltHits: number;
+  /** Free actions made during THUNDER MODE. */
+  feverActions: number;
+  /** Players who swiped up for the group launch. */
+  launched: number;
   damageToBoss: number;
   strikesBlocked: number;
   strikesHit: number;
@@ -134,7 +156,7 @@ export interface MatchState {
   autoStartAt: number | null;
   autoStartEnabled: boolean;
   /** Free taps since the last flush, sent to screens as one event per action (crowd-proof). */
-  pendingFree: Record<ActionKind, { n: number; value: number }>;
+  pendingFree: Record<ActionKind, { n: number; value: number; fever: number }>;
   lastFlushAt: number;
   players: Record<string, PlayerState>;
   /** Players counted when the battle began; sizes the boss and its attacks. */
@@ -146,6 +168,11 @@ export interface MatchState {
   squads: Record<SquadId, SquadState>;
   nextStrikeAt: number;
   nextClawAt: number;
+  /** Pilots who swiped up during the countdown/launch (D-035). */
+  launched: string[];
+  /** THUNDER MODE runs until this match time (0 = never). */
+  feverUntil: number;
+  bolts: BoltState[];
   /** Lightning actions already applied, by payment intent id (never twice). */
   paidApplied: string[];
   stats: MatchStats;
@@ -193,12 +220,27 @@ export interface PublicMatchState {
   enemies: PublicEnemy[];
   threats: ThreatState[];
   squads: Record<SquadId, SquadState>;
+  /** People per team right now (players counted, bots included). */
+  teams: Record<ActionKind, number>;
+  /** Group launch: how many of the players have swiped up. */
+  launched: number;
+  feverUntil: number;
+  /** Bolts waiting to be thrown (ids are payment intent ids; never who paid). */
+  bolts: Array<{ id: string; startedAt: number; expiresAt: number }>;
   stats: MatchStats;
   result: MatchResult | null;
   /** The numbers phones and the big screen need to explain the game. */
   hints: {
     free: Record<ActionKind, number>;
-    paid: Record<ActionKind, number>;
+    /** Short-handed teams' taps count for more (×1–×2); multiply `free` by it. */
+    teamScale: Record<ActionKind, number>;
+    feverMs: number;
+    feverMultiplier: number;
+    /** The payer's bolt now (before the weak-point bonus) and the bonus. */
+    bolt: number;
+    boltHitMultiplier: number;
+    boltRadius: number;
+    launchShield: number;
     freeCooldownMs: number;
     /** Shield lost per second; a strike needs this much headroom until impact. */
     shieldDecayPerSec: number;

@@ -3,12 +3,14 @@
  * freeze it per match (configHash). Engine code never hard-codes a number that belongs to
  * balance.
  *
- * D-033: the whole game is three actions anyone can do from a phone.
- *   撃つ ATTACK  → damages NULL CORE
- *   守る DEFEND  → fills RAIJIN's shield, which blocks the telegraphed strike on a squad
- *   直す REPAIR  → restores RAIJIN's armour after the boss hits it
- * Each action is free (a small effect, once per `free.cooldownMs`) or costs a fixed
- * 21 sats (a big effect, capped per person). Money never changes how big one action is.
+ * D-033/D-035: three actions, one per team. Every phone belongs to a team and plays that
+ * team's screen; each hit on the phone sends one free action.
+ *   撃つ ATTACK  砲撃班 → damages NULL CORE (everyone may also shoot when their own job is done)
+ *   守る DEFEND  防衛班 → fills RAIJIN's shield, which blocks the telegraphed strike on a squad
+ *   直す REPAIR  整備班 → restores RAIJIN's armour after the mothership hits it
+ * Lightning (a fixed 21 sats, capped per person) calls down the thunder: every phone in the
+ * hall gets THUNDER MODE (free actions ×N for a few seconds) and the payer throws one bolt at
+ * the mothership's weak point. Money never changes how big one action is.
  */
 
 export const ENEMY_KINDS = ['DRONE', 'STRIKER', 'NULL_CORE'] as const;
@@ -21,9 +23,34 @@ export const ACTION_KINDS = ['ATTACK', 'DEFEND', 'REPAIR'] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_LABEL: Record<ActionKind, { ja: string; en: string; verbJa: string }> = {
-  ATTACK: { ja: '撃つ', en: 'ATTACK', verbJa: 'ボスを撃つ' },
+  ATTACK: { ja: '撃つ', en: 'ATTACK', verbJa: '母艦を撃つ' },
   DEFEND: { ja: '守る', en: 'DEFEND', verbJa: '部隊を守る' },
   REPAIR: { ja: '直す', en: 'REPAIR', verbJa: '雷神を直す' },
+};
+
+/** The team that owns each action (D-035). A phone's team decides its screen. */
+export const TEAM_LABEL: Record<
+  ActionKind,
+  { ja: string; en: string; jobJa: string; jobEn: string }
+> = {
+  ATTACK: {
+    ja: '砲撃班',
+    en: 'GUNNERS',
+    jobJa: '飛んでくる敵機をタップで撃ち落とす',
+    jobEn: 'Tap the alien drones to shoot them down',
+  },
+  DEFEND: {
+    ja: '防衛班',
+    en: 'GUARDS',
+    jobJa: '部隊を狙うミサイルをタップで弾く',
+    jobEn: 'Tap the missiles to knock them away',
+  },
+  REPAIR: {
+    ja: '整備班',
+    en: 'ENGINEERS',
+    jobJa: '雷神の火花をタップして直す',
+    jobEn: 'Tap the sparks to fix RAIJIN',
+  },
 };
 
 export type ActionEffects = Record<ActionKind, number>;
@@ -73,12 +100,21 @@ export interface GameConfig {
   };
   shield: { max: number; decayPerSec: number };
   free: { cooldownMs: number; effect: ActionEffects };
+  /** The group launch (D-035): the share of players who swiped up becomes starting shield. */
+  launch: { shieldAtFull: number };
   paid: {
     amountSats: number;
-    /** ATTACK here is the floor; the real hit is max(floor, attackBossShare × boss max HP). */
-    effect: ActionEffects;
-    /** A Lightning attack takes this share of NULL CORE's max HP, so it reads in any crowd. */
-    attackBossShare: number;
+    /** THUNDER MODE: every free action is worth `feverMultiplier` × for `feverMs`. */
+    feverMs: number;
+    feverMultiplier: number;
+    /** The payer's bolt: max(boltMin, boltBossShare × boss max HP), × boltHitMultiplier on the weak point. */
+    boltMin: number;
+    boltBossShare: number;
+    boltHitMultiplier: number;
+    /** The payer has this long to throw; then it is thrown for them (a plain hit). */
+    boltWindowMs: number;
+    /** Weak point radius on the phone's square aiming field (0..1 units). */
+    boltRadius: number;
     perPilotPerMatch: number;
     cooldownMs: number;
     maxPerMatch: number;
@@ -99,7 +135,9 @@ const STANDARD: GameConfig = {
     lobbyAutoStartMs: 30_000,
     playerHoldMs: 45_000,
   },
-  boss: { hpBase: 0, hpPerPlayer: 300, hpExponent: 0.95 },
+  // D-035: a base so one person alone needs help (a friend or one Lightning), while a crowd
+  // of demo bots still wins most rounds.
+  boss: { hpBase: 200, hpPerPlayer: 300, hpExponent: 0.95 },
   mech: {
     max: 100,
     hitEveryMs: 11_000,
@@ -113,19 +151,28 @@ const STANDARD: GameConfig = {
     firstAtMs: 6_000,
     everyMs: 15_000,
     warnMs: 8_000,
-    needBase: 16,
-    needPerPlayer: 6,
-    needMax: 70,
+    needBase: 22,
+    needPerPlayer: 7,
+    needMax: 80,
     lostForDefeat: 3,
   },
   shield: { max: 100, decayPerSec: 1.5 },
-  free: { cooldownMs: 700, effect: { ATTACK: 6, DEFEND: 4, REPAIR: 3 } },
+  // About a third of the crowd guards and a third repairs (D-035), so their taps count for more.
+  free: { cooldownMs: 700, effect: { ATTACK: 6, DEFEND: 8, REPAIR: 4 } },
+  launch: { shieldAtFull: 30 },
   paid: {
     amountSats: 21,
-    // One Lightning action is a moment the whole hall sees: 5 % of the boss, most of a
-    // strike's shield, half of RAIJIN's armour. Capped so money alone can never win.
-    effect: { ATTACK: 60, DEFEND: 60, REPAIR: 50 },
-    attackBossShare: 0.05,
+    // One Lightning payment is a moment the whole hall plays: 10 s of THUNDER MODE for
+    // everyone, and the payer's own bolt (2.5 % of the boss, 5 % on the weak point). THUNDER
+    // MODE only multiplies what people do, and the bolts are capped so that even every bolt
+    // of a round hitting the weak point stays under the boss's HP: money alone never wins.
+    feverMs: 10_000,
+    feverMultiplier: 3,
+    boltMin: 30,
+    boltBossShare: 0.025,
+    boltHitMultiplier: 2,
+    boltWindowMs: 8_000,
+    boltRadius: 0.14,
     perPilotPerMatch: 3,
     cooldownMs: 15_000,
     maxPerMatch: 15,
@@ -203,7 +250,29 @@ export function mechHitFor(c: GameConfig, players: number): number {
   return Math.round(c.mech.hitDamage * scale);
 }
 
-/** Size of one Lightning attack against a boss of `bossMaxHp`. */
-export function paidAttackFor(c: GameConfig, bossMaxHp: number): number {
-  return Math.max(c.paid.effect.ATTACK, Math.round(bossMaxHp * c.paid.attackBossShare));
+/** Size of one Lightning bolt against a boss of `bossMaxHp` (before the weak-point bonus). */
+export function boltDamageFor(c: GameConfig, bossMaxHp: number): number {
+  return Math.max(c.paid.boltMin, Math.round(bossMaxHp * c.paid.boltBossShare));
+}
+
+/**
+ * Where the mothership's weak point is on the payer's aiming field, `ms` after the bolt was
+ * granted. A pure function of the bolt id and time, so the phone draws it and the server
+ * judges the throw with the same numbers (raw input in, result decided by the server).
+ * Coordinates are 0..1 on a square field, y down.
+ */
+export function boltTargetAt(boltId: string, ms: number): { x: number; y: number } {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < boltId.length; i++) {
+    h ^= boltId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const a = ((h & 0xff) / 255) * Math.PI * 2;
+  const b = (((h >>> 8) & 0xff) / 255) * Math.PI * 2;
+  const sx = 0.0011 + ((h >>> 16) & 0x3f) / 0x3f / 2500;
+  const sy = 0.0017 + ((h >>> 22) & 0x3f) / 0x3f / 2200;
+  return {
+    x: 0.5 + 0.32 * Math.sin(a + ms * sx),
+    y: 0.42 + 0.2 * Math.sin(b + ms * sy),
+  };
 }

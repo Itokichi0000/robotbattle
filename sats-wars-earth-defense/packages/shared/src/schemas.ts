@@ -78,6 +78,16 @@ export const callsignReqSchema = z
   .object({ callsign: z.string().max(40).nullable(), showOnScreen: z.boolean() })
   .strict();
 
-export const pulseIntentReqSchema = z.object({ matchId: id, action: actionKindSchema }).strict();
+export const pulseIntentReqSchema = z.object({ matchId: id }).strict();
+
+export const pilotLaunchReqSchema = z.object({ matchId: id }).strict();
+
+const unit = z.number().finite().min(-0.5).max(1.5);
+export const pilotBoltReqSchema = z
+  .object({
+    matchId: id,
+    bolt: z.object({ boltId: id, x: unit, y: unit, at: z.number().finite().min(0) }).strict(),
+  })
+  .strict();
 
 export const operatorLoginSchema = z.object({ password: z.string().min(1).max(256) }).strict();

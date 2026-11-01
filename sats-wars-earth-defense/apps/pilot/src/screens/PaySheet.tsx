@@ -4,13 +4,14 @@ import type { PublicMatchState, PulseRefusal } from '@swed/shared';
 import { IconBolt } from '@swed/ui-tokens';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { closePay, paymentsStore, refreshIntent, requestPaid } from '../net';
-import { ACTION_VAR, actionName, effectText, useL } from '../ui';
+import { useL } from '../ui';
 
 /**
- * Lightning action (spec §8, §9.7, D-033): 21 sats makes the chosen action big. It is never
- * one tap: the sheet states the effect, the amount, the receiver, whether the money is real
- * or VIRTUAL, and that a payment may not be refundable — before any invoice exists. The
- * payment QR looks different from the sign-in QR on purpose.
+ * Lightning (spec §8, §9.7, D-035): 21 sats calls down the thunder — THUNDER MODE for the
+ * whole hall and a bolt for the payer to throw. It is never one tap: the sheet states the
+ * effect, the amount, the receiver, whether the money is real or VIRTUAL, and that a payment
+ * may not be refundable — before any invoice exists. The payment QR looks different from the
+ * sign-in QR on purpose.
  */
 export function PaySheet({ s }: { s: PublicMatchState }) {
   const { L } = useL();
@@ -20,21 +21,27 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
   const [copied, setCopied] = useState(false);
   useTicker(1_000);
 
+  // Confirmed and applied: close by itself so the payer's bolt screen comes up in time.
+  useEffect(() => {
+    if (p.intent?.status !== 'settled' || p.intent.applied !== 'applied') return;
+    const id = setTimeout(closePay, 1_600);
+    return () => clearTimeout(id);
+  }, [p.intent?.status, p.intent?.applied]);
+
   useEffect(() => {
     if (p.intent?.status !== 'pending') return;
     const id = setInterval(() => void refreshIntent(), 3_000);
     return () => clearInterval(id);
   }, [p.intent?.status, p.intent?.intentId]);
 
-  const kind = p.intent?.action ?? p.action;
-  if (!kind) return null;
+  if (!p.open) return null;
   const q = p.quote;
   const live = q?.mode === 'live';
-  const big = q?.effect[kind] ?? s.hints.paid[kind];
-  const free = s.hints.free[kind];
-  const times = Math.max(1, Math.round(big / Math.max(1, free)));
+  const mult = q?.effect.feverMultiplier ?? s.hints.feverMultiplier;
+  const secs = Math.round((q?.effect.feverMs ?? s.hints.feverMs) / 1000);
+  const bolt = q?.effect.bolt ?? s.hints.bolt;
+  const hitMult = q?.effect.boltHitMultiplier ?? s.hints.boltHitMultiplier;
   const err = p.error ? PULSE_REFUSAL_TEXT[p.error as PulseRefusal] : null;
-  const name = actionName(kind, L);
 
   let body: React.ReactNode;
   if (p.intent) {
@@ -81,8 +88,8 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
             <p className="virtual">
               VIRTUAL —{' '}
               {L(
-                'テスト用の架空の請求書です（お金は動きません）。運営が確定すると大きな一撃が届きます。',
-                'A test invoice, no real money. When staff confirm it, the big action lands.',
+                'テスト用の架空の請求書です（お金は動きません）。運営が確定すると雷が落ちます。',
+                'A test invoice, no real money. When staff confirm it, the thunder comes.',
               )}
             </p>
           )}
@@ -97,9 +104,14 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
         i.applied === 'applied' ? (
           <div className="pay-ok">
             <IconBolt size={36} />
-            <b>{L(`着金！ 大きく${name}`, `Landed! Big ${name}`)}</b>
-            <span>{effectText(kind, big, L)}</span>
-            <small>{L('大画面を見て！', 'Look at the big screen!')}</small>
+            <b>{L('着金！ 雷モード発動', 'Landed! THUNDER MODE')}</b>
+            <span>
+              {L(
+                `全員の攻撃・守り・修理が ${mult}倍（${secs}秒）`,
+                `Everyone's actions ×${mult} for ${secs}s`,
+              )}
+            </span>
+            <small>{L('次の画面で雷を落とそう！', 'Next: throw your bolt!')}</small>
           </div>
         ) : (
           <p className="err">
@@ -122,14 +134,36 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
   } else {
     body = (
       <>
-        <p className="pay-what">
-          <b>{effectText(kind, big, L)}</b>
-          <span>
-            {L(
-              `無料タップの約 ${times} 回分を一撃で。全員同じ大きさで、多く払っても強くなりません。`,
-              `About ${times} free taps in one go. Same size for everyone; paying more never makes it bigger.`,
-            )}
-          </span>
+        <ol className="pay-what">
+          <li>
+            <b>
+              {L(
+                `会場全員が雷モード ${mult}倍（${secs}秒）`,
+                `THUNDER MODE ×${mult} for everyone (${secs}s)`,
+              )}
+            </b>
+            <span>
+              {L(
+                'みんなのスマホが光り、撃つ・守る・直すが全部強くなる',
+                "Every phone lights up; everyone's taps get stronger",
+              )}
+            </span>
+          </li>
+          <li>
+            <b>{L('あなたが雷を落とす', 'You throw the bolt')}</b>
+            <span>
+              {L(
+                `母艦の弱点をタップ：${bolt} ダメージ（命中で ${hitMult}倍）`,
+                `Tap the weak point: ${bolt} damage (×${hitMult} on a hit)`,
+              )}
+            </span>
+          </li>
+        </ol>
+        <p className="note">
+          {L(
+            '金額は固定。多く払っても強くならず、誰が払ったかは表示されません。',
+            'Fixed amount. Paying more never makes it bigger; nobody is shown who paid.',
+          )}
         </p>
         <dl className="pay-terms">
           <div>
@@ -192,7 +226,7 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
                 ? L('現在停止中', 'Currently off')
                 : !q.inCombat
                   ? L('戦闘中だけ送れます', 'Only during the battle')
-                  : L(`大きく${name}`, `Big ${name}`)}
+                  : L('雷を呼ぶ', 'Call the thunder')}
             </small>
           </span>
         </button>
@@ -205,13 +239,13 @@ export function PaySheet({ s }: { s: PublicMatchState }) {
       <div
         className={`sheet sw-frame${live ? ' live' : ''}`}
         role="dialog"
-        aria-label={L(`21 sats で大きく${name}`, `Big ${name} for 21 sats`)}
-        style={{ ['--acc' as string]: ACTION_VAR[kind] }}
+        aria-label={L('21 sats で雷を呼ぶ', 'Call the thunder for 21 sats')}
+        style={{ ['--acc' as string]: 'var(--sw-action)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sheet-head">
           <IconBolt size={18} />
-          <b>{L(`Lightning で大きく${name}`, `Big ${name} with Lightning`)}</b>
+          <b>{L('Lightning で雷を呼ぶ', 'Call the thunder with Lightning')}</b>
           <button className="ph-lang" onClick={closePay} aria-label={L('閉じる', 'Close')}>
             ×
           </button>

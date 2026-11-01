@@ -278,7 +278,7 @@ describe('sockets', () => {
     const batch = await eventually(() =>
       displayEvents.find((e) => e.payload.type === 'action' && e.payload.kind === 'DEFEND'),
     );
-    expect(batch.payload).toMatchObject({ paid: false, count: 1 });
+    expect(batch.payload).toMatchObject({ fever: false, count: 1 });
     await eventually(() => (displaySnaps.at(-1)?.state.shield ?? 0) > 0);
 
     // A squad strike is announced well ahead on every screen.

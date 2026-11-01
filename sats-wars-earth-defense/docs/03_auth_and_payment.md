@@ -1,6 +1,6 @@
 # 03 — Auth and payment / 認証と決済
 
-**現状（2026-10-30）**：LNURL-auth（LUD-04）によるパイロット認証と、21 sats の大きい行動（sandbox の VIRTUAL 決済 +
+**現状（2026-10-30）**：LNURL-auth（LUD-04）によるパイロット認証と、21 sats の雷（sandbox の VIRTUAL 決済 +
 LNbits による実決済アダプター）を実装済み。**実決済はオーナーの明示承認があるまで有効化しない**（LNbits のキーも公開ドメインも
 未設定なので、このリポジトリの既定構成では実際のお金は一切動かない）。実ウォレット・実決済での試験は未実施（後述）。
 
@@ -39,31 +39,34 @@ LNbits による実決済アダプター）を実装済み。**実決済はオ�
 **テスト用ウォレット**：`apps/server/src/testWallet.ts`（LUD-04 と同じ署名をする最小ウォレット。資金を持たず、ログイン署名だけ）。
 リハーサルでは `pnpm --filter @swed/server lnurl-wallet <LNURL...> [合言葉]` で承認できる。E2E と capture スクリプトもこれを使う。
 
-## 21 sats の大きい行動（Lightning 決済、D-033）
+## 21 sats の雷（Lightning 決済、D-035）
 
-実装：`apps/server/src/payments/{provider,sandbox,lnbits,service}.ts`、`routes/payments.ts`、`apps/pilot/src/screens/PaySheet.tsx`、
-運営画面の「21 sats の大きい一撃」パネル。一次仕様（参考）：https://github.com/lnurl/luds/blob/luds/06.md
+実装：`apps/server/src/payments/{provider,sandbox,lnbits,service}.ts`、`routes/payments.ts`、`apps/pilot/src/screens/PaySheet.tsx`・
+`BoltOverlay.tsx`、運営画面の「21 sats の雷」パネル。一次仕様（参考）：https://github.com/lnurl/luds/blob/luds/06.md
 
-- 意味：スマホの3ボタン（撃つ・守る・直す）のそれぞれの横に **21 sats** ボタンがあり、**同じ行動の大きい版**になる
-  （撃つ=max(60, ボス HP の 5%)・守る=シールド +60・直す=装甲 +50。GameConfig `paid`）。固定額で、多く払っても大きくならない。
-  1人1試合3回・15秒に1回・1試合全体15回・未払いの請求は1人1件まで。戦闘中だけ作れる。
-  支払いなしでも勝てる（バランス試験：無料だけで2人以上 18/20、4人以上 20/20。E2E の1試合通しは支払いゼロ）。
-  1人で無料だけだと勝てず、21 sats を1回使うと 14/20 勝てる＝お金は少人数の後押し。上限があるのでお金だけでは勝てない。
-  課金額ランキング・賞金・抽選は存在しない。**誰が払ったか・金額はどこにも表示しない**。
-- 導線：21 sats ボタン → シート。請求書を作る前に **効果（無料タップの約 N 回分）・金額・受取先・種類（実際の支払い／VIRTUAL）・
+- 意味：スマホの「雷を呼ぶ 21 sats」。着金すると ① **会場全員が10秒間の雷モード**（全員の無料行動×3。重ねても10秒に戻るだけで延長は
+  しない）② **払った人が母艦の弱点を狙って雷を落とす**（max(30, ボス HP の 2.5%)、弱点に当たれば2倍）。GameConfig `paid`。
+  固定額で、多く払っても大きくならない。1人1試合3回・15秒に1回・1試合全体15回・未払いの請求は1人1件まで。戦闘中だけ作れる。
+  上限ぶん全部の雷が弱点に当たってもボス HP に届かない（テストで固定）＝お金だけでは勝てない。雷モードは「みんなの操作」を強くする
+  だけなので、操作しなければ何も起きない。支払いなしでも勝てる（シミュレーション：無料だけで2人 19/20・4人 20/20。E2E の1試合通しは
+  支払いゼロ）。課金額ランキング・賞金・抽選は存在しない。**誰が払ったか・金額はどこにも表示しない**（払った本人のスマホに雷の照準が
+  出るだけ）。
+- 導線：「雷を呼ぶ」→ シート。請求書を作る前に **効果（全員の雷モード／あなたの雷）・金額・受取先・種類（実際の支払い／VIRTUAL）・
   この作戦の残り回数・払わなくても遊べること（live では返金できない場合があることも）** を表示 → 明示ボタン →
-  `POST /api/payments/intent { matchId, action }` → BOLT11（live）または VIRTUAL 表示（sandbox）。live の支払い QR は琥珀の枠で、
+  `POST /api/payments/intent { matchId }` → BOLT11（live）または VIRTUAL 表示（sandbox）。live の支払い QR は琥珀の枠で、
   無料の認証 QR と見た目を分ける。勝手にウォレットは開かない。
 - 確定：サーバーが **バックエンドへ再照会して settled を確認**（Webhook はきっかけ、3 秒ごとのポーリングでも拾う）→
-  DB の状態遷移（`pending → settled`、`payment_hash` UNIQUE）を条件に1回だけ → エンジンに `PAID_ACTION`（`intentId` で冪等）→
-  `action { paid: true }` を全員に配信（大画面：その行動の大きな演出と「Lightning 着金」、実決済なら「請求から着金まで X.X 秒」。
-  VIRTUAL・DEMO は秒数なしでその旨を表示）。同時・重複 Webhook でも1回（テストで固定）。
+  DB の状態遷移（`pending → settled`、`payment_hash` UNIQUE）を条件に1回だけ → エンジンに `LIGHTNING`（`intentId` で冪等）→
+  `lightning` を全員に配信（大画面：雷が雷神に落ち、「雷が呼ばれた！ 雷モード発動」＋ Lightning 着金・実決済なら「請求から X.X 秒」。
+  VIRTUAL・DEMO はその旨を表示）。同時・重複 Webhook でも1回（テストで固定）。払った人のシートは自動で閉じ、雷の照準が出る。
+- 雷の当たり判定はサーバー：スマホが送るのはタップした位置と時刻だけ（`pilot:bolt`）。弱点の動きは共有の純関数で、スマホの描画と
+  サーバーの判定が同じ数字を使う。
 - 試合終了後に settled になった支払い：次ラウンドへ繰り越さず `applied='unapplied'` として記録・監査ログ・運営画面に表示し、
   運営が個別に対応する（仕様 §8.4）。スマホにも「今回は反映されませんでした。運営が対応します」と出す。
 - pending / settled / expired（期限 180 秒）を表示。バックエンド障害は `BACKEND_UNAVAILABLE` で断るだけで、試合は止まらない。
 - 自分の intent しか見られない（`GET /api/payments/intent/:id` はパイロット本人のみ）。preimage・キーはブラウザに渡さない。
 - sandbox のデモでは、運営画面の「VIRTUAL を自動確定」を ON にすると約1.5秒で確定する（既定 OFF、お金は動かない）。
-  DEMO BOTS はときどき VIRTUAL の大きい行動（DEMO 表示・請求書なし）を見せる。
+  DEMO BOTS はときどき VIRTUAL の雷（DEMO 表示・請求書なし、雷は自動で投げる）を見せる。
 
 ### アダプター（仕様 §8.4 `PaymentProvider`）
 
@@ -83,7 +86,7 @@ Webhook：`POST /api/payments/webhook/lnbits?token=<LNBITS_WEBHOOK_SECRET>`（�
 2. サーバー環境変数：`APP_MODE=live` `PUBLIC_BASE_URL=https://…` `LNBITS_URL=https://…` `LNBITS_INVOICE_KEY=<invoice/read key>`
    `PAYMENT_RECIPIENT_LABEL=<支払う人に見せる受取先名>`（任意で `PULSE_AMOUNT_SATS` `LNBITS_WEBHOOK_SECRET`）。
    どれかが欠けるとサーバーは起動を拒否する。本番（`NODE_ENV=production`）では LNbits も https 必須。
-3. 運営画面「21 sats の大きい一撃」→ **RUN CHECKS**：LNbits に invoice key で到達できるか、公開 Webhook URL が外から答えるかを検査。
+3. 運営画面「21 sats の雷」→ **RUN CHECKS**：LNbits に invoice key で到達できるか、公開 Webhook URL が外から答えるかを検査。
 4. 両方 PASS（10 分以内）なら、確認欄に `LIVE` と入力 → **LIVE ON**（受取先と金額の確認ダイアログあり）。監査ログに残る。
 5. 停止はいつでも **LIVE OFF** の1クリック。停止中もゲームは DEMO として最後まで遊べる。
 

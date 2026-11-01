@@ -1708,3 +1708,104 @@
 .marker.planet.earth {
   color: #8cc4ff;
 }
+
+/* D-035: teams, the group launch, THUNDER MODE. */
+.actbar.teams .ab-what .paid em {
+  font-style: normal;
+  color: var(--sw-action);
+  margin-left: 6px;
+}
+.actbar.teams.fever .ab {
+  box-shadow: 0 0 18px rgba(242, 173, 77, 0.35);
+}
+.launch-call {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  width: 820px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 28px;
+  background: rgba(5, 11, 19, 0.85);
+  border: 1px solid var(--sw-action);
+  text-align: center;
+}
+.launch-call b {
+  font-size: 44px;
+  color: var(--sw-action);
+  letter-spacing: 0.08em;
+}
+.launch-call > span {
+  font-size: 20px;
+  letter-spacing: 0.14em;
+  color: var(--sw-text);
+}
+.launch-call .launch-meter {
+  width: 100%;
+  height: 16px;
+  background: rgba(68, 96, 112, 0.4);
+}
+.launch-call .launch-meter i {
+  display: block;
+  height: 100%;
+  background: var(--sw-action);
+  transition: width 300ms var(--sw-ease);
+}
+.fever-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 4px rgba(242, 173, 77, 0.85),
+    inset 0 0 120px rgba(242, 173, 77, 0.35);
+  animation: fever-breathe 1.2s ease-in-out infinite alternate;
+}
+@keyframes fever-breathe {
+  from {
+    opacity: 0.65;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fever-call {
+  position: absolute;
+  left: 28px;
+  top: 360px;
+  width: 440px;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(242, 173, 77, 0.16);
+  border-left: 5px solid var(--sw-action);
+}
+.fever-call svg {
+  color: var(--sw-action);
+  grid-row: span 3;
+}
+.fever-call b {
+  font-size: 34px;
+  color: var(--sw-action);
+}
+.fever-call span {
+  font-size: 22px;
+}
+.fever-call small {
+  font-size: 14px;
+  color: var(--sw-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fever-frame {
+    animation: none;
+  }
+}
+.mission.how ol.three li b small {
+  font-size: 0.6em;
+  color: var(--sw-muted);
+  margin-left: 4px;
+}

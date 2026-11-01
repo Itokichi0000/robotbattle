@@ -24,30 +24,37 @@ export function Lobby({ s, mt }: { s: PublicMatchState | undefined; mt: number }
         <div className="slogan-ja">エイリアンが地球に来る。みんなで雷神を動かして迎え撃て。</div>
       </div>
       <div className="mission how sw-frame">
-        <div className="kick">HOW TO PLAY 遊び方 — ボタンは3つだけ</div>
+        <div className="kick">HOW TO PLAY 遊び方 — 3つの班で雷神を動かす</div>
         <ol className="three">
           <li style={{ ['--acc' as string]: 'var(--sw-action)' }}>
             <IconCrosshair size={34} />
-            <b>撃つ</b>
-            <span>エイリアン母艦の HP を削る</span>
+            <b>
+              砲撃班<small className="sw-num"> {s?.teams.ATTACK ?? 0}人</small>
+            </b>
+            <span>スマホの敵機を撃ち落として母艦を削る</span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-ally)' }}>
             <IconShield size={34} />
-            <b>守る</b>
-            <span>狙われた仲間の部隊をシールドで守る</span>
+            <b>
+              防衛班<small className="sw-num"> {s?.teams.DEFEND ?? 0}人</small>
+            </b>
+            <span>ミサイルを弾いて仲間の部隊を守る</span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-repair)' }}>
             <IconWrench size={34} />
-            <b>直す</b>
-            <span>殴られた雷神を直す</span>
+            <b>
+              整備班<small className="sw-num"> {s?.teams.REPAIR ?? 0}人</small>
+            </b>
+            <span>火花をタップして雷神を直す</span>
           </li>
         </ol>
         <div className="sats">
           <IconBolt size={24} />
           <span>
-            <b>タップは無料（小）</b>。<b>{sats} sats</b>
-            を送ると同じ行動の大きい版（任意・1人1作戦 {s?.hints.paidPerPilot ?? 3} 回まで）。
-            払わなくても一緒に戦えます。
+            <b>遊ぶのは無料</b>。<b>{sats} sats</b> で「雷を呼ぶ」と、会場全員が
+            <b>{s?.hints.feverMultiplier ?? 3}倍の雷モード</b>
+            ＋送った人が母艦に雷を落とす（任意・1人1作戦 {s?.hints.paidPerPilot ?? 3}{' '}
+            回まで）。出撃は全員でスマホを上にスワイプ！
           </span>
         </div>
       </div>

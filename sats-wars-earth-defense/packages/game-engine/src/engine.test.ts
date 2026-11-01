@@ -1,7 +1,18 @@
-import { bossHpFor, PRESETS, routeProgress, SQUADS, zoneAt } from '@swed/shared';
+import { boltTargetAt, bossHpFor, PRESETS, routeProgress, SQUADS, zoneAt } from '@swed/shared';
 import type { GameConfig, MatchState } from '@swed/shared';
 import { describe, expect, it } from 'vitest';
-import { advanceTo, createMatch, isRoundOver, playerCount, reduce } from './engine';
+import {
+  advanceTo,
+  boltDamage,
+  boltHits,
+  createMatch,
+  isRoundOver,
+  jobsOf,
+  playerCount,
+  reduce,
+  teamCounts,
+  teamScale,
+} from './engine';
 import type { EngineCommand } from './engine';
 import { recommendAction } from './hints';
 import { toPublicState } from './public';
@@ -170,69 +181,166 @@ describe('free actions', () => {
   });
 });
 
-describe('Lightning actions', () => {
-  it('apply once per payment intent, with the big effect', () => {
-    let s = battle(1);
-    const hp = s.enemies[0]!.hp;
-    const pay = {
-      type: 'PAID_ACTION' as const,
-      t: s.t,
-      intentId: 'pi_1',
-      pilotId: 'p0',
-      kind: 'ATTACK' as const,
-      virtual: true,
-      settleMs: null,
-    };
-    let r = run(s, pay);
-    expect(r.outcome).toEqual({ kind: 'control', ok: true });
-    const big = hp - r.state.enemies[0]!.hp;
-    expect(big).toBeGreaterThanOrEqual(T.paid.effect.ATTACK);
-    expect(big).toBeGreaterThan(T.free.effect.ATTACK * 5);
-    r = run(r.state, { ...pay, t: r.state.t + 1 });
-    expect(r.outcome).toEqual({ kind: 'control', ok: false });
-    expect(r.state.stats.lightning).toBe(1);
-    s = r.state;
-    const ev = run(s, { ...pay, intentId: 'pi_2', kind: 'DEFEND', t: s.t }).events.find(
-      (e) => e.type === 'action',
-    );
-    expect(ev).toMatchObject({ paid: true, virtual: true, count: 1, value: T.paid.effect.DEFEND });
+describe('teams (D-035)', () => {
+  it('puts newcomers in the smallest team, in the order 撃つ → 守る → 直す', () => {
+    const s = battle(7);
+    const roles = Object.values(s.players).map((p) => p.role);
+    expect(roles).toEqual(['ATTACK', 'DEFEND', 'REPAIR', 'ATTACK', 'DEFEND', 'REPAIR', 'ATTACK']);
+    expect(teamCounts(s)).toEqual({ ATTACK: 3, DEFEND: 2, REPAIR: 2 });
   });
 
-  it('are refused once the battle is over (the server records them unapplied)', () => {
-    const s = createMatch({ matchId: 'm', seed: 1, config: T, autoStart: false });
-    const r = run(s, {
-      type: 'PAID_ACTION',
-      t: 0,
-      intentId: 'pi_x',
-      pilotId: null,
-      kind: 'ATTACK',
+  it('shares the job of a team nobody is in, so one or two people can play everything', () => {
+    let s = battle(1);
+    expect(jobsOf(s, 'p0')).toEqual(['ATTACK', 'DEFEND', 'REPAIR']);
+    s = battle(2);
+    expect(jobsOf(s, 'p0')).toEqual(['ATTACK', 'REPAIR']);
+    expect(jobsOf(s, 'p1')).toEqual(['DEFEND', 'REPAIR']);
+    s = battle(3);
+    expect(jobsOf(s, 'p2')).toEqual(['REPAIR']);
+  });
+
+  it('a short-handed team counts for more (×1 to ×2), shooting never scales', () => {
+    expect(teamScale(battle(1), 'DEFEND')).toBe(1);
+    expect(teamScale(battle(3), 'DEFEND')).toBe(1);
+    const four = battle(4);
+    expect(teamScale(four, 'DEFEND')).toBeCloseTo(4 / 3);
+    expect(teamScale(four, 'ATTACK')).toBe(1);
+    const r = tap(four, four.t, 'DEFEND', 'p1');
+    expect(r.state.shield).toBeCloseTo(T.free.effect.DEFEND * (4 / 3), 5);
+  });
+
+  it("refuses another team's job, but anyone may shoot", () => {
+    const s = battle(3);
+    s.mechHp = 50;
+    expect(tap(s, s.t, 'REPAIR', 'p0').outcome).toMatchObject({
+      result: { accepted: false, reasonCode: 'WRONG_TEAM' },
+    });
+    const r = tap(s, s.t, 'ATTACK', 'p2');
+    expect(r.outcome).toMatchObject({ result: { accepted: true } });
+    expect(tap(r.state, r.state.t, 'REPAIR', 'p2').outcome).toMatchObject({
+      result: { reasonCode: 'COOLDOWN' },
+    });
+  });
+});
+
+describe('group launch (D-035)', () => {
+  it('turns the share of players who swiped up into starting shield', () => {
+    let s = createMatch({ matchId: 'm', seed: 3, config: T, autoStart: false });
+    for (let i = 0; i < 4; i++)
+      s = run(s, { type: 'PLAYER_JOIN', t: 0, pilotId: `p${i}`, displayName: `P${i}` }).state;
+    expect(run(s, { type: 'LAUNCH_PUSH', t: 0, pilotId: 'p0' }).outcome).toMatchObject({
+      result: { accepted: false, reasonCode: 'NOT_LAUNCHING' },
+    });
+    s = run(s, { type: 'START', t: 0 }).state;
+    let r = run(s, { type: 'LAUNCH_PUSH', t: 10, pilotId: 'p0' });
+    expect(r.events.find((e) => e.type === 'launch_push')).toMatchObject({
+      launched: 1,
+      players: 4,
+    });
+    r = run(r.state, { type: 'LAUNCH_PUSH', t: 20, pilotId: 'p0' });
+    expect(r.events).toHaveLength(0); // once per player
+    s = run(r.state, { type: 'LAUNCH_PUSH', t: 30, pilotId: 'p1' }).state;
+    s = run(s, { type: 'SKIP_DEPLOY', t: 40 }).state;
+    expect(s.shield).toBe(Math.round(T.launch.shieldAtFull / 2));
+    expect(s.stats.launched).toBe(2);
+  });
+});
+
+describe('Lightning (D-035)', () => {
+  const pay = (s: MatchState, intentId = 'pi_1', pilotId: string | null = 'p0') =>
+    run(s, { type: 'LIGHTNING', t: s.t, intentId, pilotId, virtual: true, settleMs: null });
+
+  it('applies once per payment: THUNDER MODE for everyone and one bolt for the payer', () => {
+    const s = battle(2);
+    let r = pay(s);
+    expect(r.outcome).toEqual({ kind: 'control', ok: true });
+    expect(r.state.feverUntil).toBe(s.t + T.paid.feverMs);
+    expect(r.state.bolts).toHaveLength(1);
+    expect(r.events.find((e) => e.type === 'lightning')).toMatchObject({
+      virtual: true,
+      bot: false,
+    });
+    r = run(r.state, {
+      type: 'LIGHTNING',
+      t: r.state.t + 1,
+      intentId: 'pi_1',
+      pilotId: 'p0',
       virtual: true,
       settleMs: null,
     });
     expect(r.outcome).toEqual({ kind: 'control', ok: false });
+    expect(r.state.stats.lightning).toBe(1);
   });
 
-  it('a 21 sats attack is a visible share of the boss in any crowd', () => {
+  it('THUNDER MODE multiplies every free action, for everyone, and then ends', () => {
+    let s = pay(battle(2)).state;
+    const hp = s.enemies[0]!.hp;
+    const r = tap(s, s.t, 'ATTACK', 'p1');
+    expect(hp - r.state.enemies[0]!.hp).toBe(T.free.effect.ATTACK * T.paid.feverMultiplier);
+    const later = advanceTo(r.state, r.state.t + 300);
+    expect(later.events.find((e) => e.type === 'action')).toMatchObject({ fever: true });
+    s = advanceTo(later.state, s.t + T.paid.feverMs + 100).state;
+    const hp2 = s.enemies[0]!.hp;
+    s = tap(s, s.t, 'ATTACK', 'p1').state;
+    expect(hp2 - s.enemies[0]!.hp).toBe(T.free.effect.ATTACK);
+  });
+
+  it('a bolt on the weak point is worth double; the server judges the tap', () => {
+    const s = pay(battle(2)).state;
+    const bolt = s.bolts[0]!;
+    const hp = s.enemies[0]!.hp;
+    const at = s.t + 900;
+    const aim = boltTargetAt(bolt.id, at - bolt.startedAt);
+    const hit = run(s, { type: 'BOLT_THROW', t: at, pilotId: 'p0', boltId: bolt.id, ...aim, at });
+    expect(hit.events.find((e) => e.type === 'bolt_thrown')).toMatchObject({
+      hit: true,
+      auto: false,
+    });
+    expect(hp - hit.state.enemies[0]!.hp).toBe(boltDamage(s) * T.paid.boltHitMultiplier);
+    expect(hit.state.bolts).toHaveLength(0);
+    const miss = run(s, {
+      type: 'BOLT_THROW',
+      t: at,
+      pilotId: 'p0',
+      boltId: bolt.id,
+      x: 0,
+      y: 0,
+      at,
+    });
+    expect(miss.events.find((e) => e.type === 'bolt_thrown')).toMatchObject({ hit: false });
+    expect(hp - miss.state.enemies[0]!.hp).toBe(boltDamage(s));
+    // Only the payer can throw it, and a claimed time far from the server's is not trusted.
+    expect(
+      run(s, { type: 'BOLT_THROW', t: at, pilotId: 'p1', boltId: bolt.id, ...aim, at }).outcome,
+    ).toMatchObject({ result: { accepted: false, reasonCode: 'NO_BOLT' } });
+    const lie = boltTargetAt(bolt.id, 100);
+    expect(boltHits(T, bolt, lie.x, lie.y, bolt.startedAt + 100, bolt.startedAt + 6_000)).toBe(
+      boltHits(T, bolt, lie.x, lie.y, bolt.startedAt + 6_000, bolt.startedAt + 6_000),
+    );
+  });
+
+  it('throws an unthrown bolt for the payer when time runs out; bots throw their own', () => {
+    let s = pay(battle(2)).state;
+    let r = advanceTo(s, s.t + T.paid.boltWindowMs + 100);
+    expect(r.events.find((e) => e.type === 'bolt_thrown')).toMatchObject({
+      hit: false,
+      auto: true,
+    });
+    s = pay(battle(2), 'demo-1', null).state;
+    r = advanceTo(s, s.t + 1_600);
+    expect(r.events.find((e) => e.type === 'bolt_thrown')).toMatchObject({ auto: true });
+  });
+
+  it('is refused once the battle is over (the server records it unapplied)', () => {
+    const s = createMatch({ matchId: 'm', seed: 1, config: T, autoStart: false });
+    expect(pay(s, 'pi_x', null).outcome).toEqual({ kind: 'control', ok: false });
+  });
+
+  it('a bolt is a visible share of the boss in any crowd', () => {
     for (const n of [1, 10, 60]) {
       const s = battle(n);
-      const hp = s.enemies[0]!.hp;
-      const r = run(s, {
-        type: 'PAID_ACTION',
-        t: s.t,
-        intentId: `pi${n}`,
-        pilotId: 'p0',
-        kind: 'ATTACK',
-        virtual: true,
-        settleMs: null,
-      });
-      expect((hp - r.state.enemies[0]!.hp) / s.enemies[0]!.maxHp).toBeGreaterThanOrEqual(0.049);
+      expect(boltDamage(s) / s.enemies[0]!.maxHp).toBeGreaterThanOrEqual(0.024);
     }
-  });
-
-  it('the match cap means money alone can never finish the boss', () => {
-    const s = battle(40, cfg());
-    const share = Math.max(T.paid.attackBossShare, T.paid.effect.ATTACK / s.enemies[0]!.maxHp);
-    expect(share * T.paid.maxPerMatch).toBeLessThan(1);
   });
 });
 

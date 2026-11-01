@@ -48,7 +48,7 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: RouteContext): 
       if (!pilot) return reply.code(401).send({ error: 'NOT_AUTHENTICATED' });
       const body = pulseIntentReqSchema.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: 'INVALID' });
-      const r = await payments.createIntent(pilot, body.data.matchId, body.data.action);
+      const r = await payments.createIntent(pilot, body.data.matchId);
       if (!r.ok)
         return reply.code(409).send({ error: r.code, retryAfterMs: r.retryAfterMs ?? null });
       return withQr(r.intent);

@@ -11,11 +11,11 @@ import { signedCallback } from '../../apps/server/src/testWallet';
 import { BASE, OPERATOR_PASSWORD } from './playwright.config';
 
 /**
- * D-033 acceptance on the production build:
+ * D-035 acceptance on the production build:
  *  - a pilot signs in with an LNURL-auth wallet (the test wallet signs like LUD-04 wallets)
- *    and is in the crowd at once; the same wallet on a second phone takes over;
- *  - the 21 sats button opens a confirm sheet; a VIRTUAL intent settled by staff is applied
- *    once as the big version of that action;
+ *    and is in a team at once; the same wallet on a second phone takes over;
+ *  - "call the thunder" (21 sats) opens a confirm sheet; a VIRTUAL intent settled by staff
+ *    starts THUNDER MODE once and the payer throws the bolt on their phone;
  *  - one phone plus labelled demo bots play a whole round to the result.
  * Outcomes are always read from the server's public state.
  */
@@ -72,7 +72,7 @@ async function walletApproves(p: Page, seed: string): Promise<void> {
   expect(await res.json()).toEqual({ status: 'OK' });
 }
 
-test('LNURL-auth pilot, one wallet one phone, a VIRTUAL 21 sats action applied once', async ({
+test('LNURL-auth pilot, one wallet one phone, VIRTUAL thunder applied once and the bolt thrown', async ({
   browser,
 }) => {
   const { page: op } = await operator(browser);
@@ -84,6 +84,7 @@ test('LNURL-auth pilot, one wallet one phone, a VIRTUAL 21 sats action applied o
   await expect(a.getByText(/パイロット認証（無料）/)).toBeVisible();
   await walletApproves(a, seed);
   await expect(a.getByText('参加しました')).toBeVisible({ timeout: 20_000 });
+  await expect(a.locator('.my-team')).toBeVisible();
   await expect(a.locator('.joined b')).toHaveText(/^PILOT-[0-9A-Z]+$/);
 
   // A forged login (someone else's key on this k1) is refused by the server.
@@ -95,33 +96,38 @@ test('LNURL-auth pilot, one wallet one phone, a VIRTUAL 21 sats action applied o
   await op.getByRole('button', { name: /START/ }).click();
   await expect.poll(async () => (await publicMatch(op)).phase, { timeout: 20_000 }).toBe('BATTLE');
 
-  // The 21 sats button opens a sheet first: never a payment on one tap.
-  const hp0 = (await publicMatch(op)).state.boss!.hp;
-  await a.getByRole('button', { name: /21 sats で大きく撃つ/ }).click();
-  const sheet = a.getByRole('dialog', { name: /21 sats で大きく撃つ/ });
+  // The thunder button opens a sheet first: never a payment on one tap.
+  await a.getByRole('button', { name: /21 sats で雷を呼ぶ/ }).click();
+  const sheet = a.getByRole('dialog', { name: /21 sats で雷を呼ぶ/ });
   await expect(sheet.getByText(/VIRTUAL（架空・無料のテスト）/)).toBeVisible();
   await expect(sheet.getByText(/払わなくても無料タップで一緒に戦えます/)).toBeVisible();
-  expect((await publicMatch(op)).state.stats.paid.ATTACK).toBe(0);
+  await expect(sheet.getByText(/会場全員が雷モード/)).toBeVisible();
+  expect((await publicMatch(op)).state.stats.lightning).toBe(0);
   await sheet.getByRole('button', { name: /sats を送る（VIRTUAL/ }).click();
   await expect(sheet.getByText(/テスト用の架空の請求書/)).toBeVisible();
 
-  // Staff settle it in the console; the server applies the big attack exactly once.
+  // Staff settle it in the console; the server applies THUNDER MODE exactly once.
   const settle = op.locator('.payments').getByRole('button', { name: 'SETTLE' });
   await expect(settle).toBeVisible({ timeout: 10_000 });
   await settle.click();
   await expect(sheet.getByText(/着金！/)).toBeVisible({ timeout: 15_000 });
   const after = await publicMatch(op);
+  expect(after.state.stats.lightning).toBe(1);
   expect(after.state.stats.virtual).toBe(1);
-  expect(after.state.stats.paid.ATTACK).toBe(1);
-  expect(after.state.boss!.hp).toBeLessThanOrEqual(hp0 - after.state.hints.paid.ATTACK);
+  expect(after.state.feverUntil).toBeGreaterThan(after.state.t);
   await expect(op.locator('.payments').getByRole('button', { name: 'SETTLE' })).toHaveCount(0);
-  await a.getByRole('button', { name: '閉じる' }).click();
+
+  // The sheet closes by itself and the payer throws the bolt at the moving weak point.
+  await expect(a.getByText('雷を落とせ！')).toBeVisible({ timeout: 10_000 });
+  await a.locator('.bolt-core').click({ force: true });
+  await expect(a.getByText(/弱点に直撃！|雷撃命中/)).toBeVisible({ timeout: 10_000 });
+  await expect.poll(async () => (await publicMatch(op)).state.stats.bolts).toBe(1);
   await expect(a.locator('.mine')).toContainText('あと 2 回');
 
   // The same wallet signs in on another phone: that phone takes over, this one steps down.
   const b = await newPhone(browser);
   await walletApproves(b, seed);
-  await expect(b.locator('.act-free').first()).toBeVisible({ timeout: 20_000 });
+  await expect(b.locator('.arena')).toBeVisible({ timeout: 20_000 });
   await expect(a.getByText(/別の端末からログインしたため/)).toBeVisible({ timeout: 20_000 });
   const m = await publicMatch(op);
   expect(m.state.humans).toBe(1);
@@ -153,14 +159,15 @@ test('one phone and labelled demo bots play a whole round to the result', async 
   await expect.poll(async () => (await publicMatch(op)).phase, { timeout: 30_000 }).toBe('BATTLE');
   await expect(display.locator('.bossbar')).toBeVisible();
 
-  // The person presses whatever is lit until the round ends; the bots do the same.
+  await expect(display.locator('.actbar.teams')).toBeVisible();
+
+  // The person hits whatever their team's screen shows until the round ends; the bots play
+  // their own teams.
   await expect
     .poll(
       async () => {
-        await p
-          .locator('.act.rec .act-free')
-          .click({ timeout: 1_000 })
-          .catch(() => undefined);
+        const t = p.locator('.arena .tgt:not(.boom)').first();
+        if (await t.count()) await t.dispatchEvent('pointerdown').catch(() => undefined);
         return (await publicMatch(op)).phase;
       },
       { timeout: 200_000, intervals: [750] },

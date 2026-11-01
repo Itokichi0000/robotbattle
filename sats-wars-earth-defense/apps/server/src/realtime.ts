@@ -21,6 +21,8 @@ import {
   displayStatsSchema,
   operatorCommandSchema,
   pilotActionReqSchema,
+  pilotBoltReqSchema,
+  pilotLaunchReqSchema,
 } from '@swed/shared/schemas';
 import { Server, type Namespace, type Socket } from 'socket.io';
 import type { Db } from './db';
@@ -143,7 +145,27 @@ export class Realtime {
     this.display.emit('match:snapshot', msg);
     this.pilot.emit('match:snapshot', msg);
     this.operator.emit('match:snapshot', msg);
+    this.pushJobs();
   };
+
+  /** Last team/jobs sent to each pilot, so a phone hears only when its screen must change. */
+  private sentJobs = new Map<string, string>();
+
+  /**
+   * Teams shift as people come and go (a team nobody is in is shared, D-035). Each phone is
+   * told its own team and jobs when they change; nobody else learns them.
+   */
+  private pushJobs(): void {
+    for (const pilotId of this.pilotSockets.keys()) {
+      const j = this.runtime.jobsFor(pilotId);
+      const key = `${this.runtime.state.matchId}|${j.team}|${j.jobs.join(',')}`;
+      if (this.sentJobs.get(pilotId) === key) continue;
+      this.sentJobs.set(pilotId, key);
+      const pilot = pilotById(this.opts.db, pilotId);
+      if (pilot)
+        this.pilot.to(`pilot:${pilotId}`).emit('pilot:sessionStatus', this.sessionStatus(pilot));
+    }
+  }
 
   /** A new match opened: every connected phone is already in it; tell them. */
   onMatchReplaced(): void {
@@ -188,6 +210,7 @@ export class Realtime {
       },
       matchId: this.runtime.state.matchId,
       joined: this.runtime.isJoined(pilot.id),
+      ...this.runtime.jobsFor(pilot.id),
     };
   }
 
@@ -263,11 +286,32 @@ export class Realtime {
         ack(this.runtime.pilotAction(pilot, req.data));
       });
 
+      socket.on('pilot:launch', (raw, ack) => {
+        if (typeof ack !== 'function') return;
+        const req = pilotLaunchReqSchema.safeParse(raw);
+        if (!req.success)
+          return ack({ clientActionId: 'launch', accepted: false, reasonCode: 'INVALID' });
+        if (!bucket.take())
+          return ack({ clientActionId: 'launch', accepted: false, reasonCode: 'RATE_LIMITED' });
+        ack(this.runtime.pilotLaunch(pilot, req.data));
+      });
+
+      socket.on('pilot:bolt', (raw, ack) => {
+        if (typeof ack !== 'function') return;
+        const req = pilotBoltReqSchema.safeParse(raw);
+        if (!req.success)
+          return ack({ clientActionId: 'bolt', accepted: false, reasonCode: 'INVALID' });
+        if (!bucket.take())
+          return ack({ clientActionId: 'bolt', accepted: false, reasonCode: 'RATE_LIMITED' });
+        ack(this.runtime.pilotBolt(pilot, req.data));
+      });
+
       socket.on('disconnect', () => {
         const s = this.pilotSockets.get(pilot.id);
         s?.delete(socket.id);
         if (s && s.size === 0) {
           this.pilotSockets.delete(pilot.id);
+          this.sentJobs.delete(pilot.id);
           this.runtime.disconnect(pilot.id);
         }
       });

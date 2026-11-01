@@ -35,7 +35,8 @@ export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
   anim.route = s ? routeProgress(s, s.hints.battleMs, mt) : 0;
   anim.zone = zoneAt(anim.route);
   anim.blackoutTarget = s && s.phase === 'BATTLE' && s.mechHp <= s.mechMax * 0.2 ? 0.6 : 0;
-  anim.gaugeFull = performance.now() < anim.surgeUntil;
+  // The reactor breathes while THUNDER MODE runs (and briefly after each strike of thunder).
+  anim.gaugeFull = performance.now() < anim.surgeUntil || (s ? s.feverUntil > mt : false);
   anim.alarm = 0;
   anim.hatch = 0;
   anim.liftY = 0;
@@ -71,6 +72,8 @@ export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
         anim.liftY = Math.pow(1 - d, 2) * 42;
         anim.thrust = d < 1 ? 1 : 0.25;
       }
+      // The group launch: the more phones swiped up, the harder the thrusters burn (D-035).
+      anim.thrust *= 0.55 + 0.45 * (s.players > 0 ? s.launched / s.players : 0);
       break;
     }
     case 'RESULTS':

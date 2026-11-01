@@ -18,19 +18,26 @@ export type MatchEventBody =
   | {
       type: 'action';
       kind: ActionKind;
-      /** Lightning (21 sats) action: the big version. */
-      paid: boolean;
+      /** HP dealt, shield added, or armour restored (summed over `count` free actions). */
+      value: number;
+      /** Free actions are sent to screens in batches. */
+      count: number;
+      /** Made during THUNDER MODE (worth ×feverMultiplier). */
+      fever: boolean;
+    }
+  | { type: 'launch_push'; launched: number; players: number }
+  | {
+      type: 'lightning';
+      boltId: string;
       /** Sandbox / demo: no real money moved. */
       virtual: boolean;
       /** Demo bot (labelled on screen). */
       bot: boolean;
-      /** HP dealt, shield added, or armour restored (summed over `count` free taps). */
-      value: number;
-      /** Free taps are sent to screens in batches; a Lightning action is always 1. */
-      count: number;
-      /** Invoice issued → confirmed by the server (ms). Null for free and VIRTUAL actions. */
+      /** Invoice issued → confirmed by the server (ms). Null for VIRTUAL and bots. */
       settleMs: number | null;
+      feverUntil: number;
     }
+  | { type: 'bolt_thrown'; boltId: string; hit: boolean; damage: number; auto: boolean }
   | {
       type: 'threat_warning';
       threatId: string;

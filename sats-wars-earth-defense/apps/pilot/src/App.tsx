@@ -3,15 +3,17 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { CAPTURE } from './capture';
 import { loadSession, paymentsStore, sessionStore, store } from './net';
 import { Battle } from './screens/Battle';
+import { BoltOverlay } from './screens/BoltOverlay';
 import { Debrief } from './screens/Debrief';
 import { Join } from './screens/Join';
+import { Launch } from './screens/Launch';
 import { Lobby } from './screens/Lobby';
 import { PaySheet } from './screens/PaySheet';
 import { LangCtx, PilotHeader, useL } from './ui';
 
 /**
- * Phone flow (D-033): scan → sign in (free) → you are in the crowd → three buttons → result.
- * No seats to pick. Every screen is derived from server state.
+ * Phone flow (D-035): scan → sign in (free) → you are in a team → swipe up to launch together
+ * → your team's screen → result. No seats to pick. Every screen is derived from server state.
  */
 function Router() {
   const session = useSyncExternalStore(sessionStore.subscribe, sessionStore.get, sessionStore.get);
@@ -41,8 +43,10 @@ function Router() {
   let body;
   if (s.phase === 'VICTORY' || s.phase === 'DEFEAT' || s.phase === 'RESULTS') {
     body = <Debrief s={s} />;
-  } else if (s.phase === 'BATTLE' || s.phase === 'DEPLOYMENT') {
+  } else if (s.phase === 'BATTLE') {
     body = <Battle s={s} mt={mt} />;
+  } else if (s.phase === 'COUNTDOWN' || s.phase === 'DEPLOYMENT') {
+    body = <Launch s={s} mt={mt} />;
   } else {
     body = <Lobby s={s} mt={mt} name={name} />;
   }
@@ -50,7 +54,8 @@ function Router() {
     <>
       {header}
       {body}
-      {pay.action ? <PaySheet s={s} /> : null}
+      {pay.open ? <PaySheet s={s} /> : null}
+      {s.phase === 'BATTLE' && !pay.open ? <BoltOverlay s={s} /> : null}
       {s.paused && !CAPTURE ? (
         <div className="overlay">
           {L('作戦一時停止中 — 運営の再開を待っています', 'Paused — waiting for the operator')}
