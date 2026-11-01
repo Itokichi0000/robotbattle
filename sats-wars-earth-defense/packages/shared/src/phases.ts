@@ -21,7 +21,7 @@ export const PHASE_LABEL: Record<Phase, { ja: string; en: string }> = {
   LOBBY: { ja: '参加受付中', en: 'JOIN NOW' },
   COUNTDOWN: { ja: '出撃準備', en: 'LAUNCH SEQUENCE' },
   DEPLOYMENT: { ja: '出撃', en: 'DEPLOYMENT' },
-  BATTLE: { ja: 'NULL CORE 迎撃', en: 'DEFEND JAPAN' },
+  BATTLE: { ja: '母艦迎撃', en: 'DEFEND EARTH' },
   VICTORY: { ja: '撃退成功', en: 'VICTORY' },
   DEFEAT: { ja: '防衛失敗', en: 'DEFEAT' },
   RESULTS: { ja: '作戦記録', en: 'DEBRIEF' },

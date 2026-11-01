@@ -1,4 +1,4 @@
-import { bearingToDirection, CITIES } from '@swed/shared';
+import { bearingToDirection, SQUADS } from '@swed/shared';
 import type { ActionKind, PublicEnemy, PublicMatchState, ThreatState } from '@swed/shared';
 import { enemyBearingAt } from './orbit';
 
@@ -17,9 +17,9 @@ export function shieldShort(s: HintState, strike: ThreatState, mt = s.t): boolea
   return s.shield - s.hints.shieldDecayPerSec * secs < strike.damage + 2;
 }
 
-/** The announced city strike, if any (one at a time). */
-export function cityStrike(s: Pick<PublicMatchState, 'threats'>): ThreatState | null {
-  return s.threats.find((th) => th.target.type === 'CITY') ?? null;
+/** The announced squad strike, if any (one at a time). */
+export function squadStrike(s: Pick<PublicMatchState, 'threats'>): ThreatState | null {
+  return s.threats.find((th) => th.target.type === 'SQUAD') ?? null;
 }
 
 /** The next claw at RAIJIN, if announced. */
@@ -29,12 +29,12 @@ export function mechClaw(s: Pick<PublicMatchState, 'threats'>): ThreatState | nu
 
 /**
  * The one button that helps most right now:
- *   a city strike is coming and the shield is short → 守る
+ *   a squad strike is coming and the shield is short → 守る
  *   RAIJIN is at half armour or a claw would bring it close to zero → 直す
  *   otherwise → 撃つ
  */
 export function recommendAction(s: HintState, mt = s.t): ActionKind {
-  const strike = cityStrike(s);
+  const strike = squadStrike(s);
   if (strike && shieldShort(s, strike, mt)) return 'DEFEND';
   const claw = mechClaw(s);
   if (s.mechHp <= s.mechMax * 0.5) return 'REPAIR';
@@ -52,14 +52,14 @@ export interface NowLine {
 /** What the hall should do this second, in words a passer-by understands. */
 export function nowLine(s: HintState, mt: number): NowLine {
   const action = recommendAction(s, mt);
-  const strike = cityStrike(s);
-  if (action === 'DEFEND' && strike && strike.target.type === 'CITY') {
-    const city = CITIES[strike.target.cityId];
+  const strike = squadStrike(s);
+  if (action === 'DEFEND' && strike && strike.target.type === 'SQUAD') {
+    const squad = SQUADS[strike.target.squadId];
     const secs = Math.max(0, (strike.impactAt - mt) / 1000).toFixed(0);
     return {
       action,
-      ja: `${city.nameJa}に攻撃まで ${secs}秒 → 「守る」でシールドを ${strike.damage} まで`,
-      en: `${city.nameEn} hit in ${secs}s → DEFEND: shield to ${strike.damage}`,
+      ja: `${squad.nameJa}に攻撃まで ${secs}秒 → 「守る」でシールドを ${strike.damage} まで`,
+      en: `${squad.nameEn} hit in ${secs}s → DEFEND: shield to ${strike.damage}`,
     };
   }
   if (action === 'REPAIR') {
@@ -71,8 +71,8 @@ export function nowLine(s: HintState, mt: number): NowLine {
   }
   return {
     action,
-    ja: 'ボスを「撃つ」！ HP をゼロに',
-    en: 'ATTACK the boss! Bring its HP to zero',
+    ja: '母艦を「撃つ」！ 地球に着く前に倒せ',
+    en: 'ATTACK the mothership before it reaches Earth',
   };
 }
 

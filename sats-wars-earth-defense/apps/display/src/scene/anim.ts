@@ -1,4 +1,5 @@
-import type { PublicMatchState } from '@swed/shared';
+import { routeProgress, zoneAt } from '@swed/shared';
+import type { PublicMatchState, ZoneId } from '@swed/shared';
 import type { SceneMode } from './CameraDirector';
 
 /**
@@ -23,11 +24,16 @@ export const anim = {
   /** A Lightning action just landed: the reactor surges for a moment. */
   gaugeFull: false,
   surgeUntil: 0,
+  /** How far the mothership has flown from Mars to Earth, 0..1 (D-034), and its area. */
+  route: 0,
+  zone: 'MARS' as ZoneId,
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export function updateAnim(s: PublicMatchState | undefined, mt: number): void {
+  anim.route = s ? routeProgress(s, s.hints.battleMs, mt) : 0;
+  anim.zone = zoneAt(anim.route);
   anim.blackoutTarget = s && s.phase === 'BATTLE' && s.mechHp <= s.mechMax * 0.2 ? 0.6 : 0;
   anim.gaugeFull = performance.now() < anim.surgeUntil;
   anim.alarm = 0;

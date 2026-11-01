@@ -1,13 +1,13 @@
-import { CITY_IDS, formatClock } from '@swed/shared';
+import { SQUAD_IDS, formatClock } from '@swed/shared';
 import type { MatchResult, PublicMatchState } from '@swed/shared';
 import { useSyncExternalStore } from 'react';
 import { joinInfo } from '../net';
 
 export const REASON_LABEL: Record<MatchResult['reason'], { ja: string; en: string }> = {
-  BOSS_DESTROYED: { ja: 'NULL CORE 撃破', en: 'NULL CORE destroyed' },
+  BOSS_DESTROYED: { ja: 'エイリアン母艦 NULL CORE 撃破', en: 'Mothership destroyed' },
   MECH_DESTROYED: { ja: '雷神が倒れた（直すが足りなかった）', en: 'RAIJIN fell' },
-  CITIES_LOST: { ja: '都市を守りきれなかった', en: 'Too many cities fell' },
-  TIME_UP: { ja: '時間切れ（撃つが足りなかった）', en: 'Time ran out' },
+  SQUADS_LOST: { ja: '部隊を守りきれなかった', en: 'Too many squads fell' },
+  TIME_UP: { ja: '母艦が地球に到達（撃つが足りなかった）', en: 'The mothership reached Earth' },
   ABORTED: { ja: '作戦中止（運営）', en: 'Stopped by operator' },
 };
 
@@ -16,12 +16,12 @@ export function Results({ s, mt }: { s: PublicMatchState; mt: number }) {
   const join = useSyncExternalStore(joinInfo.subscribe, joinInfo.get, joinInfo.get);
   const r = s.result;
   const win = r?.outcome === 'VICTORY';
-  const defended = CITY_IDS.filter((id) => !s.cities[id].lost).length;
+  const defended = SQUAD_IDS.filter((id) => !s.squads[id].lost).length;
   const left = s.phaseEndsAt !== null ? s.phaseEndsAt - mt : 0;
   const f = s.stats.free;
   const p = s.stats.paid;
   const stats: Array<[string, string, string?]> = [
-    ['守った都市 CITIES HELD', `${defended} / ${CITY_IDS.length}`],
+    ['残った部隊 SQUADS', `${defended} / ${SQUAD_IDS.length}`],
     ['参加 PLAYERS', String(s.stats.peakPlayers)],
     ['撃つ ATTACK', String(f.ATTACK + p.ATTACK), `ダメージ ${s.stats.damageToBoss}`],
     ['守る DEFEND', String(f.DEFEND + p.DEFEND), `防いだ攻撃 ${s.stats.strikesBlocked}`],

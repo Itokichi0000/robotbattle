@@ -13,7 +13,7 @@ import { fxBus } from './fxBus';
  * phase changes only. Shot changes are rate-limited so the hall does not get seasick.
  *   hangarHero      low front 3/4 looking up at RAIJIN (scale)
  *   launch          follows the lift through the roof
- *   heroWide        behind-right over RAIJIN's shoulder: mech left, swarm and Japan right
+ *   heroWide        behind-right over RAIJIN's shoulder: mech left, mothership and route hologram right
  *   shoulderCombat  short push toward the firing arm
  *   bossReveal      pulls wide and tilts up when NULL CORE arrives
  *   finisher        RAIJIN OVERDRIVE: low behind the mech, chest core to boss in one line

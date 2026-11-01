@@ -13,7 +13,7 @@ import { CameraDirector, type SceneMode } from './CameraDirector';
 import { Enemies } from './Enemies';
 import { Fx } from './Fx';
 import { Hangar, HangarLights } from './Hangar';
-import { JapanHolo } from './JapanHolo';
+import { RouteHolo } from './RouteHolo';
 import { Raijin } from './Raijin';
 
 /**
@@ -48,7 +48,7 @@ function Fog({ mode }: { mode: SceneMode }) {
     scene.fog =
       mode === 'hangar' || mode === 'launch'
         ? new THREE.FogExp2('#0b131a', 0.016)
-        : new THREE.FogExp2('#071420', 0.0028);
+        : new THREE.FogExp2('#04080f', 0.0022);
     scene.background = new THREE.Color('#03070c');
   }, [mode, scene]);
   return null;
@@ -178,7 +178,7 @@ export function World({
           <>
             <BattlefieldLights shadows={shadows} />
             <Battlefield />
-            <JapanHolo />
+            <RouteHolo />
             <Enemies />
           </>
         )}

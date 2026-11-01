@@ -1,7 +1,10 @@
 import {
   ACTION_KINDS,
   bossHpFor,
-  CITY_IDS,
+  SQUAD_IDS,
+  SQUADS,
+  routeProgress,
+  zoneAt,
   configHash,
   DIRECTIONS,
   mechHitFor,
@@ -11,7 +14,7 @@ import {
 import type {
   ActionKind,
   ActionResult,
-  CityId,
+  SquadId,
   DefeatReason,
   GameConfig,
   MatchEvent,
@@ -31,7 +34,7 @@ import { randomBetween, randomPick } from './rng';
  * 50 ms steps. Everything random comes from the mulberry32 state inside the match.
  *
  *   撃つ ATTACK  damages NULL CORE
- *   守る DEFEND  fills the shield, which blocks the announced strike on a city
+ *   守る DEFEND  fills the shield, which blocks the announced strike on a squad
  *   直す REPAIR  restores RAIJIN's armour after a claw
  * Free taps are small; a Lightning (21 sats) action is the same action ×20.
  */
@@ -107,9 +110,9 @@ function emptyStats(): MatchStats {
 
 export function createMatch(input: CreateMatchInput): MatchState {
   const c = input.config;
-  const cities = Object.fromEntries(
-    CITY_IDS.map((id) => [id, { id, hp: 100, lost: false }]),
-  ) as MatchState['cities'];
+  const squads = Object.fromEntries(
+    SQUAD_IDS.map((id) => [id, { id, hp: 100, lost: false }]),
+  ) as MatchState['squads'];
   return {
     matchId: input.matchId,
     matchNumber: input.matchNumber ?? 1,
@@ -141,7 +144,7 @@ export function createMatch(input: CreateMatchInput): MatchState {
     shield: 0,
     enemies: [],
     threats: [],
-    cities,
+    squads,
     nextStrikeAt: 0,
     nextClawAt: 0,
     paidApplied: [],
@@ -275,12 +278,12 @@ function defeat(ctx: Ctx, at: number, reason: DefeatReason): void {
 
 /* ------------------------------------------------------------------ battle */
 
-function aliveCities(s: MatchState): CityId[] {
-  return CITY_IDS.filter((id) => !s.cities[id].lost);
+function aliveSquads(s: MatchState): SquadId[] {
+  return SQUAD_IDS.filter((id) => !s.squads[id].lost);
 }
 
-function lostCities(s: MatchState): number {
-  return CITY_IDS.length - aliveCities(s).length;
+function lostSquads(s: MatchState): number {
+  return SQUAD_IDS.length - aliveSquads(s).length;
 }
 
 function announce(ctx: Ctx, at: number): void {
@@ -290,17 +293,21 @@ function announce(ctx: Ctx, at: number): void {
   if (!boss) return;
   const players = playerCount(s, at);
   if (at >= s.nextStrikeAt) {
-    // One city strike at a time, so the hall always knows which city to save.
-    const pending = s.threats.some((th) => th.target.type === 'CITY');
-    const alive = aliveCities(s);
+    // One squad strike at a time, so the hall always knows which squad to save. The mothership
+    // attacks the squads of the area it is flying through (Mars → Moon → Earth, D-034); once
+    // those are gone it fires at whoever is left.
+    const pending = s.threats.some((th) => th.target.type === 'SQUAD');
+    const alive = aliveSquads(s);
     if (!pending && alive.length > 0) {
-      const cityId = randomPick(s, alive);
+      const zone = zoneAt(routeProgress(s, c.timings.battleMs, at));
+      const near = alive.filter((id) => SQUADS[id].zone === zone);
+      const squadId = randomPick(s, near.length > 0 ? near : alive);
       const th: ThreatState = {
         id: newId(s, 'th'),
         sourceId: boss.id,
         kind: 'CORE_LANCE',
         dir: randomPick(s, DIRECTIONS),
-        target: { type: 'CITY', cityId },
+        target: { type: 'SQUAD', squadId },
         warnAt: at,
         impactAt: at + c.strikes.warnMs,
         damage: strikeNeedFor(c, players),
@@ -310,8 +317,8 @@ function announce(ctx: Ctx, at: number): void {
         type: 'threat_warning',
         threatId: th.id,
         sourceId: boss.id,
-        target: 'CITY',
-        cityId,
+        target: 'SQUAD',
+        squadId,
         dir: th.dir,
         impactAt: th.impactAt,
         amount: th.damage,
@@ -336,7 +343,7 @@ function announce(ctx: Ctx, at: number): void {
       threatId: th.id,
       sourceId: boss.id,
       target: 'MECH',
-      cityId: null,
+      squadId: null,
       dir: th.dir,
       impactAt: th.impactAt,
       amount: th.damage,
@@ -352,25 +359,25 @@ function resolveImpacts(ctx: Ctx, now: number): void {
   s.threats = s.threats.filter((th) => th.impactAt > now);
   for (const th of due) {
     if (s.result) return;
-    if (th.target.type === 'CITY') {
-      const cityId = th.target.cityId;
+    if (th.target.type === 'SQUAD') {
+      const squadId = th.target.squadId;
       if (s.shield >= th.damage) {
         s.shield -= th.damage;
         s.stats.strikesBlocked += 1;
         emit(ctx, th.impactAt, {
           type: 'strike_blocked',
           threatId: th.id,
-          cityId,
+          squadId,
           dir: th.dir,
           need: th.damage,
         });
       } else {
         s.shield = 0;
-        s.cities[cityId] = { id: cityId, hp: 0, lost: true };
+        s.squads[squadId] = { id: squadId, hp: 0, lost: true };
         s.stats.strikesHit += 1;
-        emit(ctx, th.impactAt, { type: 'strike_hit', threatId: th.id, cityId, dir: th.dir });
-        if (lostCities(s) >= s.config.strikes.lostForDefeat) {
-          defeat(ctx, th.impactAt, 'CITIES_LOST');
+        emit(ctx, th.impactAt, { type: 'strike_hit', threatId: th.id, squadId, dir: th.dir });
+        if (lostSquads(s) >= s.config.strikes.lostForDefeat) {
+          defeat(ctx, th.impactAt, 'SQUADS_LOST');
           return;
         }
       }

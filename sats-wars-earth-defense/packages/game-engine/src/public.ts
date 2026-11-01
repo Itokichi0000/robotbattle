@@ -1,4 +1,4 @@
-import { CITY_IDS } from '@swed/shared';
+import { SQUAD_IDS } from '@swed/shared';
 import type { MatchState, PublicMatchState } from '@swed/shared';
 import { bossOf, countedPlayers, paidEffect } from './engine';
 
@@ -31,9 +31,9 @@ export function toPublicState(s: MatchState): PublicMatchState {
     boss: boss ? { id: boss.id, hp: Math.round(boss.hp), maxHp: boss.maxHp } : null,
     enemies: s.enemies.map((e) => ({ ...e, orbit: { ...e.orbit } })),
     threats: s.threats.map((th) => ({ ...th, target: { ...th.target } })),
-    cities: Object.fromEntries(
-      CITY_IDS.map((id) => [id, { ...s.cities[id] }]),
-    ) as PublicMatchState['cities'],
+    squads: Object.fromEntries(
+      SQUAD_IDS.map((id) => [id, { ...s.squads[id] }]),
+    ) as PublicMatchState['squads'],
     stats: structuredClone(s.stats),
     result: s.result,
     hints: {
@@ -47,7 +47,7 @@ export function toPublicState(s: MatchState): PublicMatchState {
       shieldDecayPerSec: c.shield.decayPerSec,
       paidAmountSats: c.paid.amountSats,
       paidPerPilot: c.paid.perPilotPerMatch,
-      citiesLostForDefeat: c.strikes.lostForDefeat,
+      squadsLostForDefeat: c.strikes.lostForDefeat,
       battleMs: c.timings.battleMs,
     },
   };

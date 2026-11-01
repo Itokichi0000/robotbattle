@@ -214,11 +214,11 @@ export function Join({ session }: { session: PilotSessionState }) {
           SATS WARS
           <span>EARTH DEFENSE</span>
         </h1>
-        <p className="tag">ONE MECH. EIGHT PILOTS. DEFEND JAPAN.</p>
+        <p className="tag">ONE MECH. EVERYONE PILOTS. DEFEND EARTH.</p>
         <p className="lead">
           {L(
-            '巨大ロボ RAIJIN-01 に仲間と乗り込み、侵略体 NULL SWARM から日本を守る協力ゲーム。あなたは機体の一部を担当します。',
-            'Board the giant RAIJIN-01 with other pilots and defend Japan from the NULL SWARM. You run one part of the machine.',
+            'エイリアンの母艦が地球に向かってくる。巨大ロボ RAIJIN-01 をみんなで動かし、火星から地球までの仲間の部隊と一緒に迎え撃つ協力ゲーム。ボタンは3つだけ。',
+            'An alien mothership is heading for Earth. Everyone drives the giant RAIJIN-01 together, alongside squads from Mars to Earth. Just three buttons.',
           )}
         </p>
       </section>

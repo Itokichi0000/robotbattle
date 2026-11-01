@@ -3,8 +3,11 @@ import {
   ACTION_KINDS,
   bearingToDirection,
   bossHpFor,
-  CITY_IDS,
-  CITY_POINTS,
+  SQUAD_IDS,
+  mothershipPoint,
+  routeProgress,
+  SQUADS,
+  zoneAt,
   configHash,
   ENGINEER_COVERAGE,
   formatClock,
@@ -52,13 +55,25 @@ describe('seats', () => {
   });
 });
 
-describe('japan', () => {
-  it('keeps cities roughly where they are (north to south)', () => {
-    const y = (id: (typeof CITY_IDS)[number]) => CITY_POINTS[id].y;
-    expect(y('SAPPORO')).toBeGreaterThan(y('SENDAI'));
-    expect(y('SENDAI')).toBeGreaterThan(y('TOKYO'));
-    expect(y('TOKYO')).toBeGreaterThan(y('FUKUOKA'));
-    expect(CITY_POINTS.FUKUOKA.x).toBeLessThan(CITY_POINTS.OSAKA.x);
+describe('space route (D-034)', () => {
+  it('has two squads in each area, Mars first and Earth last', () => {
+    const zones = SQUAD_IDS.map((id) => SQUADS[id].zone);
+    expect(zones).toEqual(['MARS', 'MARS', 'MOON', 'MOON', 'EARTH', 'EARTH']);
+    const xs = SQUAD_IDS.map((id) => SQUADS[id].at.x);
+    expect([...xs].sort((a, b) => a - b)).toEqual(xs);
+  });
+  it('flies the mothership from Mars to Earth over the battle, in thirds', () => {
+    const at = (t: number, phase = 'BATTLE') =>
+      routeProgress({ phase, t, phaseStartedAt: 1_000 }, 120_000);
+    expect(at(1_000)).toBe(0);
+    expect(at(61_000)).toBeCloseTo(0.5);
+    expect(at(500_000)).toBe(1);
+    expect(at(0, 'LOBBY')).toBe(0);
+    expect(at(0, 'RESULTS')).toBe(1);
+    expect(zoneAt(0.1)).toBe('MARS');
+    expect(zoneAt(0.5)).toBe('MOON');
+    expect(zoneAt(0.9)).toBe('EARTH');
+    expect(mothershipPoint(0).x).toBeLessThan(mothershipPoint(1).x);
   });
 });
 
@@ -81,7 +96,7 @@ describe('config', () => {
     }
   });
 
-  it('announces city strikes at least 4 s ahead', () => {
+  it('announces squad strikes at least 4 s ahead', () => {
     for (const p of Object.values(PRESETS)) {
       expect(p.strikes.warnMs).toBeGreaterThanOrEqual(4_000);
       expect(p.mech.hitWarnMs).toBeGreaterThanOrEqual(2_000);

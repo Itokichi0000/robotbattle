@@ -1,10 +1,10 @@
 # SATS WARS: EARTH DEFENSE
 
-**ONE MECH. EVERYONE PILOTS. DEFEND JAPAN.** — みんなで雷神を動かして、日本を守れ。
+**ONE MECH. EVERYONE PILOTS. DEFEND EARTH.** — エイリアンが地球に来る。みんなで雷神を動かして迎え撃て。
 
 ビットコイン関連カンファレンス向けの参加型3Dブラウザゲーム。会場の大画面に巨大メカ **RAIJIN-01（雷神）** と侵略体
 **NULL CORE** の戦闘がリアルタイム3Dで映り、QR を読んだ来場者全員がスマホの3つのボタン（撃つ・守る・直す）で
-一緒に雷神を動かし、日本の都市を守ります。タップは無料、**21 sats** を送ると同じ行動の大きい版になります（D-033）。仕様の正本は [`CLAUDE.md`](CLAUDE.md)（オーナー提供 BUILD DIRECTIVE v1.0）。
+一緒に雷神を動かして、地球へ向かうエイリアン母艦を迎え撃ちます。戦場は火星 → 月 → 地球と移り、各宙域の仲間の部隊を守りながら、母艦が地球に着く前に倒します（D-034）。タップは無料、**21 sats** を送ると同じ行動の大きい版になります（D-033）。仕様の正本は [`CLAUDE.md`](CLAUDE.md)（オーナー提供 BUILD DIRECTIVE v1.0）。
 
 > 現在の到達点：**群衆レイド（D-033）＋ Phase 3/4 の認証・決済＋自動 QA**。3ボタンの群衆プレイ・LNURL-auth 認証・21 sats の大きい行動
 > （sandbox の VIRTUAL 決済と、承認後にだけ有効にできる LNbits 実決済アダプター）まで動きます。**3D の本番アート（Phase 5）は未着手**で、
@@ -73,11 +73,11 @@ OPERATOR_PASSWORD=change-me-rehearsal pnpm dev
    **これで参加完了**（席選びなし・人数上限なし）。最初の1人から約30秒で自動出撃。運営の「出撃する」で即開始も可。途中参加もOK。
 2. スマホのボタンは3つ。タップは**無料**で小さい効果（1人 0.7 秒に1回）：
 
-| ボタン | 効果（無料タップ）                                               | 21 sats（大きい版）    | 足りないと        |
-| ------ | ---------------------------------------------------------------- | ---------------------- | ----------------- |
-| 撃つ   | ボスの HP を削る                                                 | max(60, ボス HP の 5%) | 時間切れで負け    |
-| 守る   | シールドを貯める（予告された都市への攻撃を、必要値に届けば防ぐ） | シールド +60           | 3都市落ちたら負け |
-| 直す   | 雷神の装甲を戻す（ボスの爪で減る）                               | 装甲 +50               | 装甲 0 で負け     |
+| ボタン | 効果（無料タップ）                                               | 21 sats（大きい版）    | 足りないと          |
+| ------ | ---------------------------------------------------------------- | ---------------------- | ------------------- |
+| 撃つ   | ボスの HP を削る                                                 | max(60, ボス HP の 5%) | 時間切れで負け      |
+| 守る   | シールドを貯める（予告された部隊への攻撃を、必要値に届けば防ぐ） | シールド +60           | 3部隊やられたら負け |
+| 直す   | 雷神の装甲を戻す（ボスの爪で減る）                               | 装甲 +50               | 装甲 0 で負け       |
 
 3. 各ボタン横の **21 sats** は任意。押すと確認画面（金額・受取先・VIRTUAL/実決済の別）→ 承認後に請求書。着金をサーバーが確認してから一度だけ効く。
    固定額・1人1試合3回・15秒に1回・1試合全体15回まで。誰がいくら払ったかは表示しない。払わなくても勝てる（2人以上の無料プレイで勝てる設計）。
@@ -96,7 +96,7 @@ pnpm start        # 本番起動（apps/server/dist + apps/*/dist を配信）
 pnpm e2e          # Playwright：本番ビルドで 3ボタン / LNURL-auth + VIRTUAL 21 sats / BOT と1試合通し（先に pnpm build）
 ```
 
-- 画面キャプチャ：`OPERATOR_PASSWORD=... pnpm --filter @swed/server exec tsx ../../tools/perf/capture-d033.ts http://localhost:4400 docs/qa/d033`
+- 画面キャプチャ：`OPERATOR_PASSWORD=... pnpm --filter @swed/server exec tsx ../../tools/perf/capture-crowd.ts http://localhost:4400 docs/qa/crowd`
 - 負荷試験：`OPERATOR_PASSWORD=... pnpm --filter @swed/server loadtest -- --url http://localhost:4400 --pilots 30 --displays 3 --seconds 90`
 - テスト用 LNURL-auth ウォレット（リハーサル用。資金を持たずログイン署名だけ）：`pnpm --filter @swed/server lnurl-wallet 'LNURL1...' [合言葉]`
 
@@ -105,10 +105,10 @@ pnpm e2e          # Playwright：本番ビルドで 3ボタン / LNURL-auth + VI
 ```
 apps/server      Fastify 5 + Socket.IO 4。権威サーバー（20Hz シミュレーション、10Hz スナップショット）、SQLite、セッション、
                  LNURL-auth（LUD-04）、21 sats の大きい行動（sandbox / LNbits）、運営、DEMO BOTS
-apps/display     大画面：React + React Three Fiber。仮 RAIJIN・敵・格納庫・東京湾・日本ホログラム・VFX・カメラ・HUD（ref 05）
+apps/display     大画面：React + React Three Fiber。仮 RAIJIN・エイリアン母艦・格納庫・宇宙（宙域ごとに火星/月/地球）・航路ホログラム・VFX・カメラ・HUD（ref 05）
 apps/pilot       スマホ：React。認証 → 参加 → 3ボタン（無料タップ＋21 sats の確認シート）→ 結果
 apps/operator    運営：React。進行・自動出撃・DEMO BOTS・参加人数とボタン別の回数・21 sats（SETTLE / LIVE 化）・画質/音量・接続/FPS・監査ログ
-packages/shared       3行動・フェーズ・都市/日本地図・GameConfig/プリセット・状態/イベント/Socket 契約・Zod（サーバー専用）
+packages/shared       3行動・フェーズ・宙域と部隊（火星→月→地球）・GameConfig/プリセット・状態/イベント/Socket 契約・Zod（サーバー専用）
 packages/game-engine  決定的ルール（純粋関数 reduce / advanceTo）、ヒント、BOT、ヘッドレス対戦
 packages/client       クライアント共通ストア（スナップショット + イベント）、React フック
 packages/ui-tokens    色・フォント・アイコン（SVG）・フレーム

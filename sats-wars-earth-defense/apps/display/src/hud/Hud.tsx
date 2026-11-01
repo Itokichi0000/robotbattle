@@ -1,16 +1,20 @@
 import { useStore, useTicker } from '@swed/client';
-import { cityStrike, mechClaw, nowLine, percent } from '@swed/game-engine';
+import { squadStrike, mechClaw, nowLine, percent } from '@swed/game-engine';
 import {
   ACTION_KINDS,
   ACTION_LABEL,
-  CITIES,
-  CITY_IDS,
+  SQUADS,
+  SQUAD_IDS,
   formatClock,
   isCombatPhase,
+  routeProgress,
+  ZONE_IDS,
+  ZONES,
+  zoneAt,
 } from '@swed/shared';
-import type { ActionKind, PublicMatchState } from '@swed/shared';
+import type { ActionKind, PublicMatchState, ZoneId } from '@swed/shared';
 import { IconBolt, IconCrosshair, IconShield, IconWarning, IconWrench } from '@swed/ui-tokens';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CAPTURE } from '../capture';
 import { joinInfo, store } from '../net';
 import { finisher } from '../scene/cameraBus';
@@ -20,9 +24,10 @@ import { Results, REASON_LABEL } from './Results';
 import { WorldMarkers } from './WorldMarkers';
 
 /**
- * Big-screen HUD (D-033). A passer-by needs four things: the boss HP to bring to zero, the
- * city under attack (and the shield it needs), RAIJIN's armour, and the three buttons on
- * everyone's phone — with the one to press now lit. Lightning actions get a hall-wide moment.
+ * Big-screen HUD (D-033, setting D-034). A passer-by needs four things: the mothership's HP
+ * to bring to zero before it reaches Earth, the squad under attack (and the shield it needs),
+ * RAIJIN's armour, and the three buttons on everyone's phone — with the one to press now lit.
+ * Lightning actions get a hall-wide moment.
  */
 
 export const ACTION_ICON: Record<ActionKind, typeof IconCrosshair> = {
@@ -39,9 +44,9 @@ export const ACTION_VAR: Record<ActionKind, string> = {
 
 function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
   const remaining = s.phaseEndsAt !== null ? s.phaseEndsAt - mt : 0;
-  const defended = CITY_IDS.filter((id) => !s.cities[id].lost).length;
-  const lost = CITY_IDS.length - defended;
-  const left = s.hints.citiesLostForDefeat - lost;
+  const defended = SQUAD_IDS.filter((id) => !s.squads[id].lost).length;
+  const lost = SQUAD_IDS.length - defended;
+  const left = s.hints.squadsLostForDefeat - lost;
   return (
     <div className="topbar">
       <div className="brand">
@@ -50,10 +55,10 @@ function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
       </div>
       <div className="wave">
         <span className="k">MISSION</span>
-        <span className="v">NULL CORE を倒せ</span>
+        <span className="v">エイリアン母艦を倒せ</span>
       </div>
       <div className="time">
-        <span className="k">残り TIME</span>
+        <span className="k">地球到達まで TO EARTH</span>
         <span className="v sw-num">{formatClock(remaining)}</span>
       </div>
       <div>
@@ -64,39 +69,53 @@ function TopBar({ s, mt }: { s: PublicMatchState; mt: number }) {
         </span>
       </div>
       <div>
-        <span className="k">守った都市 CITIES</span>
+        <span className="k">残った部隊 SQUADS</span>
         <span className="v sw-num" style={{ color: lost >= 2 ? 'var(--sw-danger)' : undefined }}>
           {defended}
-          <small style={{ fontSize: 20, color: 'var(--sw-muted)' }}> / {CITY_IDS.length}</small>
+          <small style={{ fontSize: 20, color: 'var(--sw-muted)' }}> / {SQUAD_IDS.length}</small>
         </span>
       </div>
       <div className="context">
         <span className="k">負け条件 LOSE IF</span>
-        <span className="v">{left > 0 ? `あと${left}都市で負け` : '—'}</span>
+        <span className="v">{left > 0 ? `あと${left}部隊やられたら負け` : '—'}</span>
       </div>
     </div>
   );
 }
 
-function BossBar({ s }: { s: PublicMatchState }) {
+function BossBar({ s, mt }: { s: PublicMatchState; mt: number }) {
   if (!s.boss) return null;
   const hp = percent(s.boss.hp, s.boss.maxHp);
+  const p = routeProgress(s, s.hints.battleMs, mt);
+  const zone = zoneAt(p);
   return (
     <div className="bossbar big">
       <div className="name">
-        NULL CORE <span className="sw-num">{hp}%</span>
+        エイリアン母艦 NULL CORE <span className="sw-num">{hp}%</span>
       </div>
       <div className="bar">
         <i style={{ width: `${hp}%` }} />
       </div>
-      <div className="goal">「撃つ」で HP をゼロに / ATTACK to bring it to zero</div>
+      {/* Where the mothership is on its way to Earth: the time limit, drawn as a journey. */}
+      <div className="route" aria-label={`現在地 ${ZONES[zone].nameJa}`}>
+        {ZONE_IDS.map((z) => (
+          <span key={z} className={`seg ${z.toLowerCase()}${z === zone ? ' on' : ''}`}>
+            {ZONES[z].nameJa}
+          </span>
+        ))}
+        <i className="flown" style={{ width: `${p * 100}%` }} />
+        <b className="ship" style={{ left: `${p * 100}%` }} />
+      </div>
+      <div className="goal">
+        地球に着く前に「撃つ」で HP をゼロに / DESTROY IT BEFORE IT REACHES EARTH
+      </div>
     </div>
   );
 }
 
 /** RAIJIN's armour and the shared shield, left side, big enough to read from the back. */
 function MechPanel({ s, mt }: { s: PublicMatchState; mt: number }) {
-  const strike = cityStrike(s);
+  const strike = squadStrike(s);
   const claw = mechClaw(s);
   const armour = percent(s.mechHp, s.mechMax);
   const need = strike ? strike.damage : null;
@@ -111,7 +130,7 @@ function MechPanel({ s, mt }: { s: PublicMatchState; mt: number }) {
         </div>
         <span className="hint">
           {claw
-            ? `ボスの攻撃まで ${Math.max(0, (claw.impactAt - mt) / 1000).toFixed(0)}秒（−${claw.damage}）→「直す」で回復`
+            ? `母艦の攻撃まで ${Math.max(0, (claw.impactAt - mt) / 1000).toFixed(0)}秒（−${claw.damage}）→「直す」で回復`
             : '殴られたら「直す」で回復'}
         </span>
       </div>
@@ -131,7 +150,7 @@ function MechPanel({ s, mt }: { s: PublicMatchState; mt: number }) {
           {need !== null
             ? enough
               ? '足りている！ 着弾まで保とう'
-              : `「守る」で ${need} まで貯めると都市を守れる`
+              : `「守る」で ${need} まで貯めると部隊を守れる`
             : '攻撃予告が出たら「守る」'}
         </span>
       </div>
@@ -139,11 +158,11 @@ function MechPanel({ s, mt }: { s: PublicMatchState; mt: number }) {
   );
 }
 
-/** The announced city strike: which city, how long, how much shield. */
+/** The announced squad strike: which squad, how long, how much shield. */
 function ThreatCall({ s, mt }: { s: PublicMatchState; mt: number }) {
-  const strike = cityStrike(s);
-  if (!strike || strike.target.type !== 'CITY') return null;
-  const city = CITIES[strike.target.cityId];
+  const strike = squadStrike(s);
+  if (!strike || strike.target.type !== 'SQUAD') return null;
+  const squad = SQUADS[strike.target.squadId];
   const secs = Math.max(0, (strike.impactAt - mt) / 1000);
   const enough = s.shield >= strike.damage;
   return (
@@ -151,7 +170,7 @@ function ThreatCall({ s, mt }: { s: PublicMatchState; mt: number }) {
       <IconWarning size={40} />
       <div>
         <b>
-          {city.nameJa}に攻撃 <span className="sw-num">{secs.toFixed(1)}</span>秒
+          {squad.nameJa}に攻撃 <span className="sw-num">{secs.toFixed(1)}</span>秒
         </b>
         <span>
           {enough
@@ -260,7 +279,7 @@ function useMoment(): Moment | null {
       if (e.type === 'action' && e.paid) {
         const what =
           e.kind === 'ATTACK'
-            ? `ボスに ${e.value} ダメージ`
+            ? `母艦に ${e.value} ダメージ`
             : e.kind === 'DEFEND'
               ? `シールド +${e.value}`
               : `雷神の装甲 +${e.value}`;
@@ -273,10 +292,10 @@ function useMoment(): Moment | null {
         show('bolt', `21 sats で 大きく${ACTION_LABEL[e.kind].ja}！`, `${what} — ${tag}`, 3_200);
       }
       if (e.type === 'strike_blocked') {
-        show('ok', `${CITIES[e.cityId].nameJa}を守った！`, 'シールドで攻撃を防いだ / CITY SAVED');
+        show('ok', `${SQUADS[e.squadId].nameJa}を守った！`, 'シールドで攻撃を防いだ / SQUAD SAVED');
       }
       if (e.type === 'strike_hit') {
-        show('danger', `${CITIES[e.cityId].nameJa} 陥落`, 'シールドが足りなかった / CITY LOST');
+        show('danger', `${SQUADS[e.squadId].nameJa} 壊滅`, 'シールドが足りなかった / SQUAD LOST');
       }
       if (e.type === 'mech_hit') {
         show('danger', `雷神 被弾 −${e.damage}`, '「直す」で装甲を回復 / REPAIR RAIJIN', 1_800);
@@ -305,6 +324,29 @@ function useActivity(now: number): Record<ActionKind, number> {
   }, [log, now]);
 }
 
+/**
+ * The mothership crossing into the next area (Mars → Moon → Earth): a short call, worked out
+ * from the battle clock every display shares, so all screens call it at the same moment.
+ */
+function useZoneCall(
+  s: PublicMatchState | undefined,
+  mt: number,
+): { zone: ZoneId; until: number } | null {
+  const last = useRef<ZoneId | null>(null);
+  const [call, setCall] = useState<{ zone: ZoneId; until: number } | null>(null);
+  const zone = s && s.phase === 'BATTLE' ? zoneAt(routeProgress(s, s.hints.battleMs, mt)) : null;
+  useEffect(() => {
+    if (zone === null) {
+      last.current = null;
+      return;
+    }
+    if (last.current !== null && last.current !== zone)
+      setCall({ zone, until: performance.now() + 3_200 });
+    last.current = zone;
+  }, [zone]);
+  return call;
+}
+
 /** A few seconds when the battle begins: the whole game in one line. */
 function useBattleIntro(): number {
   const [until, setUntil] = useState(0);
@@ -326,6 +368,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
   const introUntil = useBattleIntro();
   const snap = st.snap?.state;
   const mt = store.matchTime(now);
+  const zoneCall = useZoneCall(snap, mt);
   const combat = snap ? isCombatPhase(snap.phase) : false;
   const countdown =
     snap?.phase === 'COUNTDOWN' && snap.phaseEndsAt !== null
@@ -359,7 +402,7 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
           <TopBar s={snap} mt={mt} />
           {combat ? (
             <>
-              <BossBar s={snap} />
+              <BossBar s={snap} mt={mt} />
               <ThreatCall s={snap} mt={mt} />
               <MechPanel s={snap} mt={mt} />
               <NowCard s={snap} mt={mt} />
@@ -392,9 +435,27 @@ export function Hud({ audioReady }: { audioReady: boolean }) {
       {combat && now < introUntil ? (
         <div className="act-intro" role="status">
           <span className="no">MISSION</span>
-          <b>NULL CORE を倒せ</b>
+          <b>エイリアン母艦を地球に着く前に倒せ</b>
           <span className="en">ATTACK · DEFEND · REPAIR</span>
           <p>スマホの3つのボタン — 撃つ・守る・直す。光っているボタンを押そう</p>
+        </div>
+      ) : null}
+      {combat &&
+      !finishing &&
+      zoneCall &&
+      now < zoneCall.until &&
+      !(moment && now < moment.until) ? (
+        <div
+          className={`moment zone ${zoneCall.zone.toLowerCase()}`}
+          role="status"
+          key={zoneCall.until}
+        >
+          <b>{ZONES[zoneCall.zone].nameJa}に突入</b>
+          <span>
+            {zoneCall.zone === 'EARTH'
+              ? '地球が目の前！ 最後のチャンス / ENTERING EARTH ORBIT — LAST CHANCE'
+              : `母艦が地球に近づいている — 急げ！ / ENTERING ${ZONES[zoneCall.zone].nameEn}`}
+          </span>
         </div>
       ) : null}
       {combat && !finishing && moment && now < moment.until ? (

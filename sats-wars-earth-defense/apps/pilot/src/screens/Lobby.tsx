@@ -45,21 +45,21 @@ export function Lobby({ s, mt, name }: { s: PublicMatchState; mt: number; name: 
             <IconCrosshair size={22} />
             <span>
               <b>{L('撃つ', 'ATTACK')}</b>
-              {L('ボスの HP を削る', 'Takes the boss HP down')}
+              {L('エイリアン母艦の HP を削る', 'Takes the mothership HP down')}
             </span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-ally)' }}>
             <IconShield size={22} />
             <span>
               <b>{L('守る', 'DEFEND')}</b>
-              {L('攻撃予告の都市をシールドで守る', 'Shields the city under attack')}
+              {L('狙われた仲間の部隊をシールドで守る', 'Shields the squad under attack')}
             </span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-repair)' }}>
             <IconWrench size={22} />
             <span>
               <b>{L('直す', 'REPAIR')}</b>
-              {L('ボスに殴られた雷神を直す', 'Fixes RAIJIN after a hit')}
+              {L('母艦に殴られた雷神を直す', 'Fixes RAIJIN after a hit')}
             </span>
           </li>
         </ol>

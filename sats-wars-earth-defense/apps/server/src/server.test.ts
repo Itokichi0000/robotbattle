@@ -281,10 +281,12 @@ describe('sockets', () => {
     expect(batch.payload).toMatchObject({ paid: false, count: 1 });
     await eventually(() => (displaySnaps.at(-1)?.state.shield ?? 0) > 0);
 
-    // A city strike is announced well ahead on every screen.
+    // A squad strike is announced well ahead on every screen.
     advance(built.runtime.state.config.strikes.firstAtMs);
     const warn = await eventually(() =>
-      displayEvents.find((e) => e.payload.type === 'threat_warning' && e.payload.target === 'CITY'),
+      displayEvents.find(
+        (e) => e.payload.type === 'threat_warning' && e.payload.target === 'SQUAD',
+      ),
     );
     const w = warn.payload as Extract<MatchEventMsg['payload'], { type: 'threat_warning' }>;
     expect(w.impactAt - warn.serverTime).toBeGreaterThanOrEqual(4_000);

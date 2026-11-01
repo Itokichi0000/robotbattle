@@ -1,11 +1,11 @@
-import { CITIES, CITY_IDS, DIRECTION_LABEL } from '@swed/shared';
-import type { CityId, PublicMatchState } from '@swed/shared';
+import { DIRECTION_LABEL, SQUADS, SQUAD_IDS, ZONE_IDS, ZONES } from '@swed/shared';
+import type { SquadId, PublicMatchState } from '@swed/shared';
 import { useEffect, useRef } from 'react';
 import { screen } from '../scene/anchors';
 
 /**
- * Labels pinned to world positions (spec §4.4, §9.1): city names
- * on the hologram, red countdowns on threatened cities. Positions update every animation
+ * Labels pinned to world positions (spec §4.4, §9.1): planet and squad names on the route
+ * hologram, red countdowns on threatened squads. Positions update every animation
  * frame from the 3D projector; text updates with the 10 Hz HUD tick.
  */
 export function WorldMarkers({ s, mt }: { s: PublicMatchState; mt: number }) {
@@ -32,28 +32,36 @@ export function WorldMarkers({ s, mt }: { s: PublicMatchState; mt: number }) {
     else refs.current.delete(anchor);
   };
 
-  const threatened = new Map<CityId, number>();
-  const threatDir = new Map<CityId, string>();
+  const threatened = new Map<SquadId, number>();
+  const threatDir = new Map<SquadId, string>();
   for (const th of s.threats) {
-    if (th.target.type !== 'CITY') continue;
-    const prev = threatened.get(th.target.cityId);
+    if (th.target.type !== 'SQUAD') continue;
+    const prev = threatened.get(th.target.squadId);
     if (prev === undefined || th.impactAt < prev) {
-      threatened.set(th.target.cityId, th.impactAt);
-      threatDir.set(th.target.cityId, DIRECTION_LABEL[th.dir].en);
+      threatened.set(th.target.squadId, th.impactAt);
+      threatDir.set(th.target.squadId, DIRECTION_LABEL[th.dir].en);
     }
   }
   return (
     <>
-      {CITY_IDS.map((id) => {
-        const c = s.cities[id];
+      {ZONE_IDS.map((z) => (
+        <div key={z} ref={bind(`planet:${z}`)} className={`marker planet ${z.toLowerCase()}`}>
+          <span className="nm">{ZONES[z].planetJa}</span>
+        </div>
+      ))}
+      {SQUAD_IDS.map((id) => {
+        const c = s.squads[id];
         const at = threatened.get(id);
         const cls = c.lost ? 'lost' : at !== undefined ? 'threat' : '';
+        // Six names on a small hologram overlap; a squad is named only while it is the target
+        // (the threat call says the same) or once it is lost (struck through).
+        if (!cls) return <div key={id} ref={bind(`squad:${id}`)} className="marker squad" />;
         return (
-          <div key={id} ref={bind(`city:${id}`)} className={`marker city ${cls}`}>
+          <div key={id} ref={bind(`squad:${id}`)} className={`marker squad ${cls}`}>
             <span className="nm">
-              {CITIES[id].nameJa}
+              {SQUADS[id].nameJa}
               {at !== undefined && !c.lost
-                ? ` ${CITIES[id].nameEn} ${Math.max(0, (at - mt) / 1000).toFixed(1)}s ${threatDir.get(id)}`
+                ? ` ${SQUADS[id].nameEn} ${Math.max(0, (at - mt) / 1000).toFixed(1)}s ${threatDir.get(id)}`
                 : ''}
             </span>
           </div>

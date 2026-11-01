@@ -47,7 +47,7 @@ export function effectText(
   value: number,
   L: (ja: string, en: string) => string,
 ): string {
-  if (kind === 'ATTACK') return L(`ボスに ${value} ダメージ`, `${value} damage to the boss`);
+  if (kind === 'ATTACK') return L(`母艦に ${value} ダメージ`, `${value} damage to the mothership`);
   if (kind === 'DEFEND') return L(`シールド +${value}`, `Shield +${value}`);
   return L(`雷神の装甲 +${value}`, `RAIJIN armour +${value}`);
 }

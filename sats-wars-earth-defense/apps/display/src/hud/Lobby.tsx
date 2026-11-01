@@ -20,8 +20,8 @@ export function Lobby({ s, mt }: { s: PublicMatchState | undefined; mt: number }
         <h1>
           SATS WARS<span>// EARTH DEFENSE</span>
         </h1>
-        <div className="slogan">ONE MECH. EVERYONE PILOTS. DEFEND JAPAN.</div>
-        <div className="slogan-ja">みんなで雷神を動かして、日本を守れ。</div>
+        <div className="slogan">ONE MECH. EVERYONE PILOTS. DEFEND EARTH.</div>
+        <div className="slogan-ja">エイリアンが地球に来る。みんなで雷神を動かして迎え撃て。</div>
       </div>
       <div className="mission how sw-frame">
         <div className="kick">HOW TO PLAY 遊び方 — ボタンは3つだけ</div>
@@ -29,12 +29,12 @@ export function Lobby({ s, mt }: { s: PublicMatchState | undefined; mt: number }
           <li style={{ ['--acc' as string]: 'var(--sw-action)' }}>
             <IconCrosshair size={34} />
             <b>撃つ</b>
-            <span>ボスの HP を削る</span>
+            <span>エイリアン母艦の HP を削る</span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-ally)' }}>
             <IconShield size={34} />
             <b>守る</b>
-            <span>攻撃予告の都市をシールドで守る</span>
+            <span>狙われた仲間の部隊をシールドで守る</span>
           </li>
           <li style={{ ['--acc' as string]: 'var(--sw-repair)' }}>
             <IconWrench size={34} />

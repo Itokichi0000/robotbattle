@@ -1,6 +1,14 @@
 import { useStore, useTicker } from '@swed/client';
 import { percent } from '@swed/game-engine';
-import { ACTION_LABEL, CITY_IDS, formatClock, PHASE_LABEL } from '@swed/shared';
+import {
+  ACTION_LABEL,
+  formatClock,
+  PHASE_LABEL,
+  routeProgress,
+  SQUAD_IDS,
+  ZONES,
+  zoneAt,
+} from '@swed/shared';
 import type {
   OperatorCommand,
   OperatorPaymentsView,
@@ -106,9 +114,10 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
   const p = s.phase;
   const crowd = s.bots ? `人 ${s.humans}人 ＋ BOT ${s.bots}` : `${s.humans}人`;
   const left = s.phaseEndsAt !== null ? formatClock(s.phaseEndsAt - mt) : '--:--';
-  const cities = CITY_IDS.filter((id) => !s.cities[id].lost).length;
+  const squads = SQUAD_IDS.filter((id) => !s.squads[id].lost).length;
   const boss = s.boss ? percent(s.boss.hp, s.boss.maxHp) : 100;
-  const fight = `残り ${left} ・ ボス ${boss}% ・ 都市 ${cities}/${CITY_IDS.length} ・ 雷神 ${percent(s.mechHp, s.mechMax)}% ・ 参加 ${crowd}`;
+  const zone = ZONES[zoneAt(routeProgress(s, s.hints.battleMs, mt))].nameJa;
+  const fight = `地球到達まで ${left}（${zone}）・ 母艦 ${boss}% ・ 部隊 ${squads}/${SQUAD_IDS.length} ・ 雷神 ${percent(s.mechHp, s.mechMax)}% ・ 参加 ${crowd}`;
   const end: Act = {
     label: '作戦を中止 END',
     note: 'この回を敗北扱いで終わらせ、結果画面へ',
@@ -167,9 +176,9 @@ function plan(s: PublicMatchState, mt: number): { title: string; detail: string;
           end,
         ],
       };
-    const strike = s.threats.find((th) => th.target.type === 'CITY');
+    const strike = s.threats.find((th) => th.target.type === 'SQUAD');
     return {
-      title: strike ? '戦闘中 — 都市に攻撃予告！（みんなで「守る」）' : '戦闘中',
+      title: strike ? '戦闘中 — 部隊に攻撃予告！（みんなで「守る」）' : '戦闘中',
       detail: fight,
       acts: [
         {
@@ -234,7 +243,7 @@ function NowPanel({
           </li>
         ))}
       </ol>
-      <div className={`state${s.threats.some((t) => t.target.type === 'CITY') ? ' crisis' : ''}`}>
+      <div className={`state${s.threats.some((t) => t.target.type === 'SQUAD') ? ' crisis' : ''}`}>
         <b>{now.title}</b>
         <p>{now.detail}</p>
       </div>
@@ -372,7 +381,7 @@ function Advanced({ s, onResult }: { s: PublicMatchState; onResult: (m: string) 
           </b>
         </div>
         <div>
-          <span>ボス HP</span>
+          <span>母艦 HP</span>
           <b className="sw-num">{s.boss ? `${s.boss.hp} / ${s.boss.maxHp}` : '—'}</b>
         </div>
       </div>
@@ -400,7 +409,7 @@ function Crowd({ s }: { s: PublicMatchState }) {
       </h2>
       <p className="explain">
         QR を読んだ人は全員参加（席・人数の上限なし）。スマホを閉じても約45秒は人数に数えます。
-        ボスの強さは出撃時の人数で決まり、途中参加があると少し強くなります。
+        母艦の強さは出撃時の人数で決まり、途中参加があると少し強くなります。
       </p>
       <table>
         <thead>

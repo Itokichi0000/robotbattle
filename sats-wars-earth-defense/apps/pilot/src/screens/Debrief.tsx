@@ -1,4 +1,4 @@
-import { CITY_IDS } from '@swed/shared';
+import { SQUAD_IDS } from '@swed/shared';
 import type { PublicMatchState } from '@swed/shared';
 import { useL } from '../ui';
 
@@ -6,30 +6,33 @@ import { useL } from '../ui';
 export function Debrief({ s }: { s: PublicMatchState }) {
   const { L } = useL();
   const win = s.result?.outcome === 'VICTORY';
-  const held = CITY_IDS.filter((id) => !s.cities[id].lost).length;
+  const held = SQUAD_IDS.filter((id) => !s.squads[id].lost).length;
   const taps = s.stats.free.ATTACK + s.stats.free.DEFEND + s.stats.free.REPAIR;
   const reason =
-    s.result?.reason === 'CITIES_LOST'
-      ? L('都市を守りきれなかった', 'Too many cities fell')
+    s.result?.reason === 'SQUADS_LOST'
+      ? L('部隊を守りきれなかった', 'Too many squads fell')
       : s.result?.reason === 'MECH_DESTROYED'
         ? L('雷神が倒れた（直すが足りなかった）', 'RAIJIN fell (not enough repairs)')
         : s.result?.reason === 'TIME_UP'
-          ? L('時間切れ（撃つが足りなかった）', 'Out of time (not enough attacks)')
+          ? L(
+              '母艦が地球に到達（撃つが足りなかった）',
+              'The mothership reached Earth (not enough attacks)',
+            )
           : '';
   return (
     <main className="screen debrief">
       <div className={`verdict ${win ? 'win' : 'lose'}`}>{win ? 'VICTORY' : 'DEFEAT'}</div>
       <p className="sub">
-        {win ? L('撃退成功！日本を守り抜いた', 'Japan holds!') : L('防衛失敗…', 'Japan fell…')}
+        {win ? L('撃退成功！地球を守り抜いた', 'Earth is safe!') : L('防衛失敗…', 'Earth fell…')}
         {reason ? <small>{reason}</small> : null}
       </p>
       <section className="sw-frame card">
         <h3>{L('みんなの戦果', 'The crowd')}</h3>
         <dl>
           <div>
-            <dt>{L('守った都市', 'Cities held')}</dt>
+            <dt>{L('残った部隊', 'Squads left')}</dt>
             <dd className="sw-num">
-              {held} / {CITY_IDS.length}
+              {held} / {SQUAD_IDS.length}
             </dd>
           </div>
           <div>

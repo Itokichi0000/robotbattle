@@ -5,7 +5,7 @@
  *
  * D-033: the whole game is three actions anyone can do from a phone.
  *   撃つ ATTACK  → damages NULL CORE
- *   守る DEFEND  → fills RAIJIN's shield, which blocks the telegraphed strike on a city
+ *   守る DEFEND  → fills RAIJIN's shield, which blocks the telegraphed strike on a squad
  *   直す REPAIR  → restores RAIJIN's armour after the boss hits it
  * Each action is free (a small effect, once per `free.cooldownMs`) or costs a fixed
  * 21 sats (a big effect, capped per person). Money never changes how big one action is.
@@ -22,7 +22,7 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
 
 export const ACTION_LABEL: Record<ActionKind, { ja: string; en: string; verbJa: string }> = {
   ATTACK: { ja: '撃つ', en: 'ATTACK', verbJa: 'ボスを撃つ' },
-  DEFEND: { ja: '守る', en: 'DEFEND', verbJa: '都市を守る' },
+  DEFEND: { ja: '守る', en: 'DEFEND', verbJa: '部隊を守る' },
   REPAIR: { ja: '直す', en: 'REPAIR', verbJa: '雷神を直す' },
 };
 
@@ -60,7 +60,7 @@ export interface GameConfig {
     hitMaxScale: number;
   };
   strikes: {
-    /** A city strike is announced `warnMs` before impact; the first at `firstAtMs`. */
+    /** A squad strike is announced `warnMs` before impact; the first at `firstAtMs`. */
     firstAtMs: number;
     everyMs: number;
     warnMs: number;
@@ -68,7 +68,7 @@ export interface GameConfig {
     needBase: number;
     needPerPlayer: number;
     needMax: number;
-    /** Losing this many cities ends the match. */
+    /** Losing this many squads ends the match. */
     lostForDefeat: number;
   };
   shield: { max: number; decayPerSec: number };

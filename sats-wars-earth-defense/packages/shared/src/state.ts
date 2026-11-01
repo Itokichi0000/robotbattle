@@ -1,5 +1,5 @@
 import type { ActionKind, EnemyKind, GameConfig, PresetId } from './config';
-import type { CityId } from './japan';
+import type { SquadId } from './space';
 import type { Phase } from './phases';
 import type { Direction, MechPartId } from './seats';
 
@@ -57,12 +57,12 @@ export interface EnemyState {
   weakUntil: number;
 }
 
-export type ThreatTarget = { type: 'CITY'; cityId: CityId } | { type: 'MECH'; part: MechPartId };
+export type ThreatTarget = { type: 'SQUAD'; squadId: SquadId } | { type: 'MECH'; part: MechPartId };
 
 export type ThreatKind = 'BEAM' | 'DIVE' | 'CORE_LANCE';
 
 /**
- * Something NULL CORE has announced. CITY strikes are blocked by the shield (守る); MECH
+ * Something NULL CORE has announced. SQUAD strikes are blocked by the shield (守る); MECH
  * claws always land and are fixed afterwards (直す).
  */
 export interface ThreatState {
@@ -73,12 +73,12 @@ export interface ThreatState {
   target: ThreatTarget;
   warnAt: number;
   impactAt: number;
-  /** CITY: shield needed to block. MECH: armour damage. */
+  /** SQUAD: shield needed to block. MECH: armour damage. */
   damage: number;
 }
 
-export interface CityState {
-  id: CityId;
+export interface SquadState {
+  id: SquadId;
   hp: number;
   lost: boolean;
 }
@@ -99,7 +99,7 @@ export interface MatchStats {
 }
 
 export type MatchOutcome = 'VICTORY' | 'DEFEAT';
-export type DefeatReason = 'MECH_DESTROYED' | 'CITIES_LOST' | 'TIME_UP' | 'ABORTED';
+export type DefeatReason = 'MECH_DESTROYED' | 'SQUADS_LOST' | 'TIME_UP' | 'ABORTED';
 
 export interface MatchResult {
   outcome: MatchOutcome;
@@ -143,7 +143,7 @@ export interface MatchState {
   shield: number;
   enemies: EnemyState[];
   threats: ThreatState[];
-  cities: Record<CityId, CityState>;
+  squads: Record<SquadId, SquadState>;
   nextStrikeAt: number;
   nextClawAt: number;
   /** Lightning actions already applied, by payment intent id (never twice). */
@@ -192,7 +192,7 @@ export interface PublicMatchState {
   boss: { id: string; hp: number; maxHp: number } | null;
   enemies: PublicEnemy[];
   threats: ThreatState[];
-  cities: Record<CityId, CityState>;
+  squads: Record<SquadId, SquadState>;
   stats: MatchStats;
   result: MatchResult | null;
   /** The numbers phones and the big screen need to explain the game. */
@@ -204,7 +204,7 @@ export interface PublicMatchState {
     shieldDecayPerSec: number;
     paidAmountSats: number;
     paidPerPilot: number;
-    citiesLostForDefeat: number;
+    squadsLostForDefeat: number;
     battleMs: number;
   };
 }

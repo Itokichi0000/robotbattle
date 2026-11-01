@@ -626,7 +626,7 @@ export function Fx({ reduceFlash }: { reduceFlash: boolean }) {
       tg.orb.visible = true;
     });
     // The shared shield: brighter as the crowd charges it, facing the announced strike.
-    const strike = snap?.threats.find((th) => th.target.type === 'CITY');
+    const strike = snap?.threats.find((th) => th.target.type === 'SQUAD');
     const shieldK = snap ? Math.min(1, snap.shield / Math.max(1, snap.shieldMax)) : 0;
     for (const seat of ['SHIELD_L', 'SHIELD_R'] as const) {
       const sh = pools.shields[seat];

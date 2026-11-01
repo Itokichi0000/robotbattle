@@ -2,7 +2,7 @@ export * from './actions';
 export * from './config';
 export * from './events';
 export * from './i18n';
-export * from './japan';
+export * from './space';
 export * from './phases';
 export * from './protocol';
 export * from './seats';

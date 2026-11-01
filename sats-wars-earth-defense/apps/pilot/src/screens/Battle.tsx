@@ -1,6 +1,6 @@
 import { useTicker } from '@swed/client';
-import { cityStrike, nowLine } from '@swed/game-engine';
-import { ACTION_KINDS, CITIES, isCombatPhase } from '@swed/shared';
+import { squadStrike, nowLine } from '@swed/game-engine';
+import { ACTION_KINDS, isCombatPhase, routeProgress, SQUADS, ZONES, zoneAt } from '@swed/shared';
 import type { ActionKind, PublicMatchState } from '@swed/shared';
 import { IconBolt, IconWarning } from '@swed/ui-tokens';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -32,7 +32,7 @@ export function Battle({ s, mt }: { s: PublicMatchState; mt: number }) {
   const now = useTicker(100);
   const live = isCombatPhase(s.phase) && !s.paused;
   const line = nowLine(s, mt);
-  const strike = cityStrike(s);
+  const strike = squadStrike(s);
   const boss = s.boss;
   const cooling = now < readyAt;
   const coolPct = cooling ? Math.min(100, ((readyAt - now) / s.hints.freeCooldownMs) * 100) : 0;
@@ -70,7 +70,10 @@ export function Battle({ s, mt }: { s: PublicMatchState; mt: number }) {
       <section className="status">
         {boss ? (
           <Bar
-            label="NULL CORE"
+            label={L(
+              `母艦 NULL CORE — ${ZONES[zoneAt(routeProgress(s, s.hints.battleMs, mt))].nameJa}`,
+              `MOTHERSHIP — ${ZONES[zoneAt(routeProgress(s, s.hints.battleMs, mt))].nameEn}`,
+            )}
             value={boss.hp}
             max={boss.maxHp}
             tone="danger"
@@ -179,11 +182,11 @@ export function Battle({ s, mt }: { s: PublicMatchState; mt: number }) {
           <IconBolt size={14} /> {L(`あと ${paidLeft} 回`, `${paidLeft} left`)}
         </span>
       </footer>
-      {strike && strike.target.type === 'CITY' && live ? (
+      {strike && strike.target.type === 'SQUAD' && live ? (
         <p className="fine">
           {L(
-            `${CITIES[strike.target.cityId].nameJa}を守るには、着弾までにシールド ${strike.damage}`,
-            `To save ${CITIES[strike.target.cityId].nameEn}: shield ${strike.damage} by impact`,
+            `${SQUADS[strike.target.squadId].nameJa}を守るには、着弾までにシールド ${strike.damage}`,
+            `To save ${SQUADS[strike.target.squadId].nameEn}: shield ${strike.damage} by impact`,
           )}
         </p>
       ) : null}

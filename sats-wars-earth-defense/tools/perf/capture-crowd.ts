@@ -1,17 +1,18 @@
-// Plays one D-033 crowd round against a running sandbox server and captures screenshots for
+// Plays one crowd round (D-033, space setting D-034) against a running sandbox server and captures screenshots for
 // docs/05_qa_results.md: the big-screen lobby / battle / Lightning moment / result, a phone in
 // the lobby, on the three buttons and on the 21 sats sheet, and the operator panel.
 //
-//   OPERATOR_PASSWORD=... pnpm exec tsx tools/perf/capture-d033.ts [baseUrl] [outDir]
+//   OPERATOR_PASSWORD=... pnpm exec tsx tools/perf/capture-crowd.ts [baseUrl] [outDir]
 //
 // Software WebGL (CI containers) runs a few FPS: captures check composition and state, not FPS.
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, devices, type Page } from '@playwright/test';
+import { routeProgress } from '../../packages/shared/src/index';
 import type { PublicMatchState } from '../../packages/shared/src/index';
 
 const base = process.argv[2] ?? 'http://localhost:4400';
-const out = path.resolve(process.argv[3] ?? 'docs/qa/d033');
+const out = path.resolve(process.argv[3] ?? 'docs/qa/crowd');
 const password = process.env.OPERATOR_PASSWORD;
 if (!password) {
   console.error('Set OPERATOR_PASSWORD to the server operator password.');
@@ -111,8 +112,8 @@ if ((await state()).phase === 'LOBBY') await opButton(/START/).click();
 await until('battle', (s) => s.phase === 'BATTLE', 60_000);
 await sleep(3_000);
 
-// Wait for a city warning so the threat call is on screen.
-await until('city threat', (s) => s.threats.some((t) => t.target.type === 'CITY'), 40_000);
+// Wait for a squad warning so the threat call is on screen.
+await until('squad threat', (s) => s.threats.some((t) => t.target.type === 'SQUAD'), 40_000);
 await sleep(1_500);
 await bigShot('02_display_battle_threat.png');
 
@@ -149,18 +150,19 @@ await phone
   .catch(() => undefined);
 await op.screenshot({ path: path.join(out, '31_operator_battle.png'), fullPage: true });
 
-// Keep pressing the lit button until the round ends.
-const end = Date.now() + 200_000;
-while (Date.now() < end) {
-  const s = await state();
+// The bots carry on alone from here, so the fight lasts long enough to fly past the Moon
+// toward Earth (D-034). One shot as the mothership enters each later area, if the round is
+// still on by then.
+const progress = (s: PublicMatchState) => routeProgress(s, s.hints.battleMs);
+for (const [name, from] of [
+  ['05_display_moon_sector.png', 0.34],
+  ['06_display_earth_orbit.png', 0.675],
+] as const) {
+  const s = await until(name, (x) => x.phase !== 'BATTLE' || progress(x) >= from, 200_000);
   if (s.phase !== 'BATTLE') break;
-  await phone
-    .locator('.act.rec .act-free')
-    .click({ timeout: 2_000 })
-    .catch(() => undefined);
-  await sleep(750);
+  await bigShot(name);
 }
-const fin = await until('results', (s) => s.phase === 'RESULTS', 60_000);
+const fin = await until('results', (s) => s.phase === 'RESULTS', 200_000);
 log('result', fin.result?.outcome, fin.result?.reason, 'boss', fin.boss?.hp, '/', fin.boss?.maxHp);
 await sleep(2_000);
 await bigShot('04_display_results.png');

@@ -1,5 +1,5 @@
 import type { ActionKind } from './config';
-import type { CityId } from './japan';
+import type { SquadId } from './space';
 import type { Phase } from './phases';
 import type { Direction } from './seats';
 import type { MatchOutcome, MatchResult } from './state';
@@ -35,15 +35,15 @@ export type MatchEventBody =
       type: 'threat_warning';
       threatId: string;
       sourceId: string;
-      target: 'CITY' | 'MECH';
-      cityId: CityId | null;
+      target: 'SQUAD' | 'MECH';
+      squadId: SquadId | null;
       dir: Direction;
       impactAt: number;
-      /** CITY: shield needed. MECH: armour damage. */
+      /** SQUAD: shield needed. MECH: armour damage. */
       amount: number;
     }
-  | { type: 'strike_blocked'; threatId: string; cityId: CityId; dir: Direction; need: number }
-  | { type: 'strike_hit'; threatId: string; cityId: CityId; dir: Direction }
+  | { type: 'strike_blocked'; threatId: string; squadId: SquadId; dir: Direction; need: number }
+  | { type: 'strike_hit'; threatId: string; squadId: SquadId; dir: Direction }
   | { type: 'mech_hit'; threatId: string; damage: number; hp: number }
   | { type: 'boss_destroyed'; enemyId: string }
   | { type: 'match_result'; outcome: MatchOutcome; result: MatchResult };

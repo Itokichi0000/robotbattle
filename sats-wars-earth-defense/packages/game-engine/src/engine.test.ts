@@ -1,4 +1,4 @@
-import { bossHpFor, PRESETS } from '@swed/shared';
+import { bossHpFor, PRESETS, routeProgress, SQUADS, zoneAt } from '@swed/shared';
 import type { GameConfig, MatchState } from '@swed/shared';
 import { describe, expect, it } from 'vitest';
 import { advanceTo, createMatch, isRoundOver, playerCount, reduce } from './engine';
@@ -237,19 +237,46 @@ describe('Lightning actions', () => {
 });
 
 describe('strikes and claws', () => {
-  it('announces a city strike ahead and blocks it with enough shield', () => {
+  it('announces a squad strike ahead and blocks it with enough shield', () => {
     let s = battle(1);
     const t0 = s.t;
     s = advanceTo(s, t0 + T.strikes.firstAtMs + 50).state;
-    const th = s.threats.find((x) => x.target.type === 'CITY')!;
+    const th = s.threats.find((x) => x.target.type === 'SQUAD')!;
     expect(th.impactAt - th.warnAt).toBe(T.strikes.warnMs);
     s.shield = 100;
     const r = advanceTo(s, th.impactAt + 50);
     expect(r.events.some((e) => e.type === 'strike_blocked')).toBe(true);
-    expect(Object.values(r.state.cities).every((c) => !c.lost)).toBe(true);
+    expect(Object.values(r.state.squads).every((c) => !c.lost)).toBe(true);
   });
 
-  it('loses the city without shield, and the match after enough cities', () => {
+  it('attacks the squads of the area the mothership is flying through (Mars → Moon → Earth)', () => {
+    let s = battle(
+      1,
+      cfg((c) => (c.mech.hitFirstAtMs = 999_999)),
+    );
+    const t0 = s.t;
+    const zoneOf = (id: string) => SQUADS[id as keyof typeof SQUADS].zone;
+    const seen: Array<[string, string]> = [];
+    for (let t = t0; t < t0 + T.timings.battleMs - 1_000; t += 500) {
+      s.shield = 100; // keep every squad alive so each area's choice is visible
+      s = advanceTo(s, t).state;
+      const th = s.threats.find((x) => x.target.type === 'SQUAD');
+      if (th && th.target.type === 'SQUAD' && !seen.some(([id]) => id === th.id)) {
+        const zone = zoneAt(routeProgress(s, T.timings.battleMs, th.warnAt));
+        seen.push([th.id, `${zone}:${zoneOf(th.target.squadId)}`]);
+      }
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(6);
+    for (const [, pair] of seen) {
+      const [zone, target] = pair.split(':');
+      expect(target).toBe(zone);
+    }
+    expect(new Set(seen.map(([, p]) => p.split(':')[0]))).toEqual(
+      new Set(['MARS', 'MOON', 'EARTH']),
+    );
+  });
+
+  it('loses the squad without shield, and the match after enough squads', () => {
     let s = battle(
       1,
       cfg((c) => {
@@ -258,8 +285,8 @@ describe('strikes and claws', () => {
       }),
     );
     s = advanceTo(s, s.t + 200_000).state;
-    expect(s.result).toMatchObject({ outcome: 'DEFEAT', reason: 'CITIES_LOST' });
-    expect(Object.values(s.cities).filter((c) => c.lost)).toHaveLength(T.strikes.lostForDefeat);
+    expect(s.result).toMatchObject({ outcome: 'DEFEAT', reason: 'SQUADS_LOST' });
+    expect(Object.values(s.squads).filter((c) => c.lost)).toHaveLength(T.strikes.lostForDefeat);
   });
 
   it('claws hurt RAIJIN; no repairs → MECH_DESTROYED', () => {
@@ -316,7 +343,7 @@ describe('victory and round flow', () => {
         s = advanceTo(s, t).state;
         s = tap(s, t, recommendAction(toPublicState(s)), `p${((t - t0) / 500) % 3}`).state;
       }
-      return JSON.stringify({ e: s.enemies, th: s.threats, c: s.cities, m: s.mechHp });
+      return JSON.stringify({ e: s.enemies, th: s.threats, c: s.squads, m: s.mechHp });
     };
     key = 0;
     const a = play();
